@@ -1,35 +1,33 @@
-# Use Node.js 18 slim image
-FROM node:18-slim
-
-# Install Chrome and dependencies
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
-    && sh -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/*
+# Use official Puppeteer image (has Chrome pre-installed)
+FROM ghcr.io/puppeteer/puppeteer:21.6.1
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files first for better Docker layer caching
+# Copy package files first for better caching
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies as root (puppeteer base image runs as root by default)
+RUN npm ci --only=production --no-audit --no-fund
 
-# Copy source code
-COPY . .
+# Copy application code
+COPY server.js ./
 
-# Set environment variables
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# Create non-root user for security (but run npm as root first)
+RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
+    && mkdir -p /home/pptruser/Downloads \
+    && chown -R pptruser:pptruser /app \
+    && chown -R pptruser:pptruser /home/pptruser
 
-# Expose port 8080 (required by Cloud Run)
+# Switch to non-root user
+USER pptruser
+
+# Expose port
 EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD node -e "require('http' ).get('http://localhost:8080/health', (res ) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
 
 # Start the application
 CMD ["node", "server.js"]
