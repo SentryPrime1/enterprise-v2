@@ -1,29 +1,45 @@
-# Use official Puppeteer image (has Chrome pre-installed)
-FROM ghcr.io/puppeteer/puppeteer:21.6.1
+# Use official Node.js image as base
+FROM node:18-slim
 
-# Switch to root to install dependencies
-USER root
+# Install Chrome dependencies and Chrome itself
+RUN apt-get update && apt-get install -y \
+    wget \
+        gnupg \
+            ca-certificates \
+                procps \
+                    libxss1 \
+                        && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
+                            && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+                                && apt-get update \
+                                    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
+                                        --no-install-recommends \
+                                            && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
-WORKDIR /app
+                                            # Create pptruser for running Puppeteer
+                                            RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
+                                                && mkdir -p /home/pptruser/Downloads \
+                                                    && chown -R pptruser:pptruser /home/pptruser
 
-# Copy package files first for better caching
-COPY package*.json ./
+                                                    # Set working directory
+                                                    WORKDIR /app
 
-# Install dependencies as root (avoids permission issues)
-RUN npm ci --only=production --no-audit --no-fund
+                                                    # Copy package files first for better caching
+                                                    COPY package*.json ./
 
-# Copy application code
-COPY server.js ./
+                                                    # Install dependencies as root (avoids permission issues)
+                                                    RUN npm ci --only=production --no-audit --no-fund
 
-# Change ownership of /app to pptruser
-RUN chown -R pptruser:pptruser /app
+                                                    # Copy application code
+                                                    COPY server.js ./
 
-# Switch back to pptruser for security
-USER pptruser
+                                                    # Change ownership of /app to pptruser
+                                                    RUN chown -R pptruser:pptruser /app
 
-# Expose port
-EXPOSE 8080
+                                                    # Switch to pptruser for security
+                                                    USER pptruser
 
-# Start the application
-CMD ["node", "server.js"]
+                                                    # Expose port
+                                                    EXPOSE 8080
+
+                                                    # Start the application
+                                                    CMD ["node", "server.js"]
