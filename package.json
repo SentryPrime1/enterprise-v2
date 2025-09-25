@@ -1,7 +1,7 @@
 {
   "name": "sentryprime-enterprise",
-  "version": "1.0.0",
-  "description": "Enterprise accessibility scanner using Puppeteer and axe-core",
+  "version": "2.0.0",
+  "description": "SentryPrime Enterprise Accessibility Scanner with Professional Dashboard",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -14,7 +14,14 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["accessibility", "scanner", "puppeteer", "axe-core"],
-  "author": "SentryPrime",
+  "keywords": [
+    "accessibility",
+    "scanner",
+    "axe-core",
+    "puppeteer",
+    "enterprise",
+    "dashboard"
+  ],
+  "author": "SentryPrime Team",
   "license": "MIT"
 }
