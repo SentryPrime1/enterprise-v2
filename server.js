@@ -23,13 +23,16 @@ app.get('/', (req, res) => {
         .header { text-align: center; margin-bottom: 40px; }
         .scan-form { background: #f5f5f5; padding: 30px; border-radius: 8px; }
         input[type="url"] { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
-        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; }
+        input[type="number"] { width: 100px; padding: 8px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
         button:hover { background: #0056b3; }
         button:disabled { background: #6c757d; cursor: not-allowed; }
+        .scan-options { margin: 15px 0; padding: 15px; background: #e9ecef; border-radius: 4px; }
         .results { margin-top: 30px; padding: 20px; background: white; border-radius: 8px; }
         .loading { color: #007bff; }
         .error { color: #dc3545; }
         .success { color: #28a745; }
+        .page-result { margin: 10px 0; padding: 10px; border-left: 3px solid #007bff; background: #f8f9fa; }
     </style>
 </head>
 <body>
@@ -42,6 +45,20 @@ app.get('/', (req, res) => {
         <h2>Scan Website for Accessibility Issues</h2>
         <form id="scanForm">
             <input type="url" id="url" placeholder="https://example.com/" required>
+            
+            <div class="scan-options">
+                <h4>Scan Options:</h4>
+                <label>
+                    <input type="radio" name="scanType" value="single" checked> 
+                    Single Page (Fast - recommended)
+                </label><br>
+                <label>
+                    <input type="radio" name="scanType" value="crawl"> 
+                    Multi-Page Crawl (Slower - up to 
+                    <input type="number" id="maxPages" value="5" min="2" max="20"> pages)
+                </label>
+            </div>
+            
             <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
         </form>
     </div>
@@ -55,41 +72,89 @@ app.get('/', (req, res) => {
         document.getElementById('scanForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const url = document.getElementById('url').value;
+            const scanType = document.querySelector('input[name="scanType"]:checked').value;
+            const maxPages = document.getElementById('maxPages').value;
             const resultsDiv = document.getElementById('results');
             const resultsContent = document.getElementById('resultsContent');
             const scanButton = document.getElementById('scanButton');
             
             // Disable button and show loading
             scanButton.disabled = true;
-            scanButton.textContent = '⏳ Scanning...';
+            scanButton.textContent = scanType === 'single' ? '⏳ Scanning...' : '⏳ Crawling...';
             
-            resultsContent.innerHTML = '<p class="loading">🔄 Scanning in progress... This may take up to 2 minutes for complex sites.</p>';
+            const loadingMsg = scanType === 'single' 
+                ? '🔄 Scanning single page... This may take up to 30 seconds.'
+                : '🔄 Crawling multiple pages... This may take up to 5 minutes for ' + maxPages + ' pages.';
+            
+            resultsContent.innerHTML = '<p class="loading">' + loadingMsg + '</p>';
             resultsDiv.style.display = 'block';
             
             try {
+                const requestBody = { 
+                    url: url,
+                    scanType: scanType
+                };
+                
+                if (scanType === 'crawl') {
+                    requestBody.maxPages = parseInt(maxPages);
+                }
+                
                 const response = await fetch('/api/scan', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: url })
+                    body: JSON.stringify(requestBody)
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    resultsContent.innerHTML = 
-                        '<h3 class="success">✅ Scan Complete</h3>' +
-                        '<p><strong>URL:</strong> ' + result.url + '</p>' +
-                        '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
-                        '<p><strong>Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
-                        '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>' +
-                        '<h4>Violations by Impact:</h4>' +
-                        '<ul>' +
-                        '<li>Critical: ' + result.violations.filter(function(v) { return v.impact === 'critical'; }).length + '</li>' +
-                        '<li>Serious: ' + result.violations.filter(function(v) { return v.impact === 'serious'; }).length + '</li>' +
-                        '<li>Moderate: ' + result.violations.filter(function(v) { return v.impact === 'moderate'; }).length + '</li>' +
-                        '<li>Minor: ' + result.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</li>' +
-                        '</ul>' +
-                        '<details><summary>View Detailed Results</summary><pre>' + JSON.stringify(result.violations, null, 2) + '</pre></details>';
+                    if (scanType === 'single') {
+                        // Single page results
+                        resultsContent.innerHTML = 
+                            '<h3 class="success">✅ Scan Complete</h3>' +
+                            '<p><strong>URL:</strong> ' + result.url + '</p>' +
+                            '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
+                            '<p><strong>Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
+                            '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>' +
+                            '<h4>Violations by Impact:</h4>' +
+                            '<ul>' +
+                            '<li>Critical: ' + result.violations.filter(function(v) { return v.impact === 'critical'; }).length + '</li>' +
+                            '<li>Serious: ' + result.violations.filter(function(v) { return v.impact === 'serious'; }).length + '</li>' +
+                            '<li>Moderate: ' + result.violations.filter(function(v) { return v.impact === 'moderate'; }).length + '</li>' +
+                            '<li>Minor: ' + result.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</li>' +
+                            '</ul>' +
+                            '<details><summary>View Detailed Results</summary><pre>' + JSON.stringify(result.violations, null, 2) + '</pre></details>';
+                    } else {
+                        // Multi-page crawl results
+                        let html = '<h3 class="success">✅ Crawl Complete</h3>' +
+                                  '<p><strong>Pages Scanned:</strong> ' + result.pages.length + '</p>' +
+                                  '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
+                                  '<p><strong>Total Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
+                                  '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>';
+                        
+                        // Summary by impact
+                        html += '<h4>Overall Violations by Impact:</h4><ul>' +
+                               '<li>Critical: ' + result.summary.critical + '</li>' +
+                               '<li>Serious: ' + result.summary.serious + '</li>' +
+                               '<li>Moderate: ' + result.summary.moderate + '</li>' +
+                               '<li>Minor: ' + result.summary.minor + '</li></ul>';
+                        
+                        // Individual page results
+                        html += '<h4>Results by Page:</h4>';
+                        result.pages.forEach(function(page) {
+                            html += '<div class="page-result">' +
+                                   '<strong>' + page.url + '</strong><br>' +
+                                   'Issues: ' + page.violations.length + ' | ' +
+                                   'Time: ' + page.scanTime + 'ms<br>' +
+                                   '<small>Critical: ' + page.violations.filter(function(v) { return v.impact === 'critical'; }).length + 
+                                   ', Serious: ' + page.violations.filter(function(v) { return v.impact === 'serious'; }).length + 
+                                   ', Moderate: ' + page.violations.filter(function(v) { return v.impact === 'moderate'; }).length + 
+                                   ', Minor: ' + page.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</small>' +
+                                   '</div>';
+                        });
+                        
+                        resultsContent.innerHTML = html;
+                    }
                 } else {
                     resultsContent.innerHTML = '<p class="error">❌ Error: ' + result.error + '</p>';
                 }
@@ -107,76 +172,69 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
-// Scan endpoint
-app.post('/api/scan', async (req, res) => {
-    const startTime = Date.now();
-    let browser = null;
+// Helper function to extract links from a page
+async function extractLinks(page, baseUrl) {
+    try {
+        const links = await page.evaluate((baseUrl) => {
+            const anchors = Array.from(document.querySelectorAll('a[href]'));
+            const urls = anchors
+                .map(a => a.href)
+                .filter(href => {
+                    try {
+                        const url = new URL(href);
+                        const base = new URL(baseUrl);
+                        return url.hostname === base.hostname && 
+                               !href.includes('#') && 
+                               !href.includes('mailto:') && 
+                               !href.includes('tel:') &&
+                               !href.includes('.pdf') &&
+                               !href.includes('.jpg') &&
+                               !href.includes('.png');
+                    } catch (e) {
+                        return false;
+                    }
+                })
+                .slice(0, 50); // Limit to first 50 links found
+            
+            return [...new Set(urls)]; // Remove duplicates
+        }, baseUrl);
+        
+        return links;
+    } catch (error) {
+        console.log('Error extracting links:', error.message);
+        return [];
+    }
+}
+
+// Single page scan function (existing working code)
+async function scanSinglePage(browser, url) {
+    const page = await browser.newPage();
     
     try {
-        const url = req.body.url;
-        
-        if (!url) {
-            return res.status(400).json({
-                success: false,
-                error: 'URL is required'
-            });
-        }
-        
-        let targetUrl = url;
-        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-            targetUrl = 'https://' + targetUrl;
-        }
-        
-        console.log('Starting accessibility scan for: ' + targetUrl);
-        
-        // Launch Puppeteer with extended timeouts
-        browser = await puppeteer.launch({
-            headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
-            ],
-            timeout: 60000
-        });
-        
-        const page = await browser.newPage();
-        
-        // Set longer timeouts for enterprise scanning
+        // Set timeouts
         page.setDefaultNavigationTimeout(90000);
         page.setDefaultTimeout(90000);
         
         await page.setViewport({ width: 1280, height: 720 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
         
-        console.log('Navigating to: ' + targetUrl);
+        console.log('Navigating to: ' + url);
         
         // Try multiple navigation strategies
         try {
-            await page.goto(targetUrl, { 
+            await page.goto(url, { 
                 waitUntil: 'networkidle0',
                 timeout: 90000 
             });
         } catch (navError) {
             console.log('Network idle failed, trying domcontentloaded...');
-            await page.goto(targetUrl, { 
+            await page.goto(url, { 
                 waitUntil: 'domcontentloaded',
                 timeout: 90000 
             });
         }
         
-        // Wait for page to stabilize using setTimeout instead of deprecated waitForTimeout
+        // Wait for page to stabilize
         console.log('Waiting for page to stabilize...');
         await new Promise(resolve => setTimeout(resolve, 3000));
         
@@ -201,24 +259,165 @@ app.post('/api/scan', async (req, res) => {
             });
         });
         
-        const scanTime = Date.now() - startTime;
+        return results;
         
-        console.log('Scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
+    } finally {
+        await page.close();
+    }
+}
+
+// Scan endpoint
+app.post('/api/scan', async (req, res) => {
+    const startTime = Date.now();
+    let browser = null;
+    
+    try {
+        const { url, scanType = 'single', maxPages = 5 } = req.body;
         
-        res.json({
-            success: true,
-            url: targetUrl,
-            violations: results.violations,
-            timestamp: new Date().toISOString(),
-            totalIssues: results.violations.length,
-            scanTime: scanTime,
-            summary: {
-                critical: results.violations.filter(v => v.impact === 'critical').length,
-                serious: results.violations.filter(v => v.impact === 'serious').length,
-                moderate: results.violations.filter(v => v.impact === 'moderate').length,
-                minor: results.violations.filter(v => v.impact === 'minor').length
-            }
+        if (!url) {
+            return res.status(400).json({
+                success: false,
+                error: 'URL is required'
+            });
+        }
+        
+        let targetUrl = url;
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+            targetUrl = 'https://' + targetUrl;
+        }
+        
+        console.log('Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
+        
+        // Launch Puppeteer
+        browser = await puppeteer.launch({
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
+            ],
+            timeout: 60000
         });
+        
+        if (scanType === 'single') {
+            // Single page scan (existing working functionality)
+            const results = await scanSinglePage(browser, targetUrl);
+            const scanTime = Date.now() - startTime;
+            
+            console.log('Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
+            
+            res.json({
+                success: true,
+                url: targetUrl,
+                violations: results.violations,
+                timestamp: new Date().toISOString(),
+                totalIssues: results.violations.length,
+                scanTime: scanTime,
+                summary: {
+                    critical: results.violations.filter(v => v.impact === 'critical').length,
+                    serious: results.violations.filter(v => v.impact === 'serious').length,
+                    moderate: results.violations.filter(v => v.impact === 'moderate').length,
+                    minor: results.violations.filter(v => v.impact === 'minor').length
+                }
+            });
+            
+        } else if (scanType === 'crawl') {
+            // Multi-page crawl
+            console.log('Starting multi-page crawl (max ' + maxPages + ' pages)');
+            
+            const scannedPages = [];
+            const urlsToScan = [targetUrl];
+            const scannedUrls = new Set();
+            
+            // Scan the first page and extract links
+            const firstPageResults = await scanSinglePage(browser, targetUrl);
+            scannedPages.push({
+                url: targetUrl,
+                violations: firstPageResults.violations,
+                scanTime: Date.now() - startTime
+            });
+            scannedUrls.add(targetUrl);
+            
+            // Extract links from the first page for crawling
+            if (maxPages > 1) {
+                const page = await browser.newPage();
+                try {
+                    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                    const links = await extractLinks(page, targetUrl);
+                    
+                    // Add unique links to scan queue
+                    for (const link of links) {
+                        if (urlsToScan.length < maxPages && !scannedUrls.has(link)) {
+                            urlsToScan.push(link);
+                        }
+                    }
+                } catch (error) {
+                    console.log('Error extracting links:', error.message);
+                } finally {
+                    await page.close();
+                }
+            }
+            
+            // Scan additional pages
+            for (let i = 1; i < urlsToScan.length && i < maxPages; i++) {
+                const pageUrl = urlsToScan[i];
+                if (scannedUrls.has(pageUrl)) continue;
+                
+                try {
+                    console.log('Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
+                    const pageStartTime = Date.now();
+                    const pageResults = await scanSinglePage(browser, pageUrl);
+                    
+                    scannedPages.push({
+                        url: pageUrl,
+                        violations: pageResults.violations,
+                        scanTime: Date.now() - pageStartTime
+                    });
+                    scannedUrls.add(pageUrl);
+                    
+                } catch (error) {
+                    console.log('Error scanning page ' + pageUrl + ':', error.message);
+                    scannedPages.push({
+                        url: pageUrl,
+                        violations: [],
+                        scanTime: 0,
+                        error: error.message
+                    });
+                }
+            }
+            
+            // Aggregate results
+            const allViolations = scannedPages.reduce((acc, page) => acc.concat(page.violations || []), []);
+            const scanTime = Date.now() - startTime;
+            
+            console.log('Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
+            
+            res.json({
+                success: true,
+                scanType: 'crawl',
+                pages: scannedPages,
+                totalIssues: allViolations.length,
+                scanTime: scanTime,
+                timestamp: new Date().toISOString(),
+                summary: {
+                    critical: allViolations.filter(v => v.impact === 'critical').length,
+                    serious: allViolations.filter(v => v.impact === 'serious').length,
+                    moderate: allViolations.filter(v => v.impact === 'moderate').length,
+                    minor: allViolations.filter(v => v.impact === 'minor').length
+                }
+            });
+        }
         
     } catch (error) {
         console.error('Scan error:', error);
