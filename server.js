@@ -126,7 +126,7 @@ app.post('/api/scan', async (req, res) => {
                                          targetUrl = 'https://' + targetUrl;
                          }
 
-            console.log(\`Starting accessibility scan for: \${targetUrl}\`);
+console.log(`Starting accessibility scan for: ${targetUrl}`);
 
                             // Launch Puppeteer with Google Cloud Run optimized settings
                                     browser = await puppeteer.launch({
