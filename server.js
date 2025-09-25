@@ -176,10 +176,12 @@ app.post('/api/scan', async (req, res) => {
             });
         }
         
-        // Wait for page to stabilize
-        await page.waitForTimeout(3000);
+        // Wait for page to stabilize using setTimeout instead of deprecated waitForTimeout
+        console.log('Waiting for page to stabilize...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
         
         // Inject axe-core
+        console.log('Injecting axe-core...');
         await page.addScriptTag({
             content: axeCore.source
         });
