@@ -25,7 +25,11 @@ app.get('/', (req, res) => {
         input[type="url"] { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
         button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; }
         button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
         .results { margin-top: 30px; padding: 20px; background: white; border-radius: 8px; }
+        .loading { color: #007bff; }
+        .error { color: #dc3545; }
+        .success { color: #28a745; }
     </style>
 </head>
 <body>
@@ -38,7 +42,7 @@ app.get('/', (req, res) => {
         <h2>Scan Website for Accessibility Issues</h2>
         <form id="scanForm">
             <input type="url" id="url" placeholder="https://example.com/" required>
-            <button type="submit">🔍 Start Accessibility Scan</button>
+            <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
         </form>
     </div>
     
@@ -53,8 +57,13 @@ app.get('/', (req, res) => {
             const url = document.getElementById('url').value;
             const resultsDiv = document.getElementById('results');
             const resultsContent = document.getElementById('resultsContent');
+            const scanButton = document.getElementById('scanButton');
             
-            resultsContent.innerHTML = '<p>🔄 Scanning in progress... This may take a few moments.</p>';
+            // Disable button and show loading
+            scanButton.disabled = true;
+            scanButton.textContent = '⏳ Scanning...';
+            
+            resultsContent.innerHTML = '<p class="loading">🔄 Scanning in progress... This may take up to 2 minutes for complex sites.</p>';
             resultsDiv.style.display = 'block';
             
             try {
@@ -68,7 +77,7 @@ app.get('/', (req, res) => {
                 
                 if (result.success) {
                     resultsContent.innerHTML = 
-                        '<h3>✅ Scan Complete</h3>' +
+                        '<h3 class="success">✅ Scan Complete</h3>' +
                         '<p><strong>URL:</strong> ' + result.url + '</p>' +
                         '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
                         '<p><strong>Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
@@ -82,10 +91,14 @@ app.get('/', (req, res) => {
                         '</ul>' +
                         '<details><summary>View Detailed Results</summary><pre>' + JSON.stringify(result.violations, null, 2) + '</pre></details>';
                 } else {
-                    resultsContent.innerHTML = '<p>❌ Error: ' + result.error + '</p>';
+                    resultsContent.innerHTML = '<p class="error">❌ Error: ' + result.error + '</p>';
                 }
             } catch (error) {
-                resultsContent.innerHTML = '<p>❌ Network Error: ' + error.message + '</p>';
+                resultsContent.innerHTML = '<p class="error">❌ Network Error: ' + error.message + '</p>';
+            } finally {
+                // Re-enable button
+                scanButton.disabled = false;
+                scanButton.textContent = '🔍 Start Accessibility Scan';
             }
         });
     </script>
@@ -116,7 +129,7 @@ app.post('/api/scan', async (req, res) => {
         
         console.log('Starting accessibility scan for: ' + targetUrl);
         
-        // Launch Puppeteer
+        // Launch Puppeteer with extended timeouts
         browser = await puppeteer.launch({
             headless: 'new',
             executablePath: '/usr/bin/google-chrome-stable',
@@ -130,23 +143,41 @@ app.post('/api/scan', async (req, res) => {
                 '--single-process',
                 '--disable-gpu',
                 '--disable-web-security',
-                '--disable-features=VizDisplayCompositor'
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
             ],
-            timeout: 30000
+            timeout: 60000
         });
         
         const page = await browser.newPage();
+        
+        // Set longer timeouts for enterprise scanning
+        page.setDefaultNavigationTimeout(90000);
+        page.setDefaultTimeout(90000);
         
         await page.setViewport({ width: 1280, height: 720 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
         
         console.log('Navigating to: ' + targetUrl);
-        await page.goto(targetUrl, { 
-            waitUntil: 'networkidle0',
-            timeout: 30000 
-        });
         
-        await page.waitForTimeout(2000);
+        // Try multiple navigation strategies
+        try {
+            await page.goto(targetUrl, { 
+                waitUntil: 'networkidle0',
+                timeout: 90000 
+            });
+        } catch (navError) {
+            console.log('Network idle failed, trying domcontentloaded...');
+            await page.goto(targetUrl, { 
+                waitUntil: 'domcontentloaded',
+                timeout: 90000 
+            });
+        }
+        
+        // Wait for page to stabilize
+        await page.waitForTimeout(3000);
         
         // Inject axe-core
         await page.addScriptTag({
@@ -155,10 +186,15 @@ app.post('/api/scan', async (req, res) => {
         
         console.log('Running axe accessibility scan...');
         const results = await page.evaluate(() => {
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Axe scan timeout'));
+                }, 60000);
+                
                 axe.run((err, results) => {
-                    if (err) throw err;
-                    resolve(results);
+                    clearTimeout(timeout);
+                    if (err) reject(err);
+                    else resolve(results);
                 });
             });
         });
@@ -186,9 +222,18 @@ app.post('/api/scan', async (req, res) => {
         console.error('Scan error:', error);
         const scanTime = Date.now() - startTime;
         
+        let errorMessage = error.message;
+        if (errorMessage.includes('Navigation timeout')) {
+            errorMessage = 'Website took too long to load. This may be due to slow server response or complex page content. Please try a different URL or try again later.';
+        } else if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED')) {
+            errorMessage = 'Website not found. Please check the URL and try again.';
+        } else if (errorMessage.includes('net::ERR_CONNECTION_REFUSED')) {
+            errorMessage = 'Connection refused. The website may be down or blocking automated access.';
+        }
+        
         res.status(500).json({
             success: false,
-            error: error.message,
+            error: errorMessage,
             scanTime: scanTime,
             timestamp: new Date().toISOString()
         });
