@@ -12,63 +12,523 @@ app.get('/health', (req, res) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// Main page
+// Main dashboard page with PRESERVED SCANNER FUNCTIONALITY
 app.get('/', (req, res) => {
     const html = `<!DOCTYPE html>
 <html>
 <head>
-    <title>SentryPrime Enterprise Scanner</title>
+    <title>SentryPrime Enterprise Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-        .header { text-align: center; margin-bottom: 40px; }
-        .scan-form { background: #f5f5f5; padding: 30px; border-radius: 8px; }
-        input[type="url"] { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
-        input[type="number"] { width: 100px; padding: 8px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
-        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #6c757d; cursor: not-allowed; }
-        .scan-options { margin: 15px 0; padding: 15px; background: #e9ecef; border-radius: 4px; }
-        .results { margin-top: 30px; padding: 20px; background: white; border-radius: 8px; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+            color: #333;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            background: #1a1a1a;
+            color: white;
+            padding: 20px 0;
+            flex-shrink: 0;
+        }
+        
+        .sidebar-header {
+            padding: 0 20px 30px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .sidebar-header p {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 4px;
+        }
+        
+        .sidebar-nav {
+            padding: 20px 0;
+        }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: #ccc;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            gap: 12px;
+            font-size: 0.9rem;
+        }
+        
+        .nav-item:hover {
+            background: #333;
+            color: white;
+        }
+        
+        .nav-item.active {
+            background: #333;
+            color: white;
+            border-right: 3px solid #667eea;
+        }
+        
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Header */
+        .header {
+            background: white;
+            padding: 16px 24px;
+            border-bottom: 1px solid #e1e5e9;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .search-bar {
+            display: flex;
+            align-items: center;
+            background: #f8f9fa;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            padding: 8px 12px;
+            width: 300px;
+        }
+        
+        .search-bar input {
+            border: none;
+            background: none;
+            outline: none;
+            flex: 1;
+            font-size: 14px;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #667eea;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        /* Content Area */
+        .content-area {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        .page-header {
+            margin-bottom: 24px;
+        }
+        
+        .page-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .page-subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+        
+        .new-scan-btn {
+            background: #1a1a1a;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 24px;
+            transition: background 0.2s ease;
+        }
+        
+        .new-scan-btn:hover {
+            background: #333;
+        }
+        
+        /* Scanner Form - PRESERVED EXACTLY */
+        .scanner-section {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+        }
+        
+        .scanner-section h3 {
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        input[type="url"] { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 10px 0; 
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        input[type="number"] { 
+            width: 100px; 
+            padding: 8px; 
+            margin: 5px; 
+            border: 1px solid #e1e5e9;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .scan-options { 
+            margin: 15px 0; 
+            padding: 15px; 
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .scan-options h4 {
+            margin-bottom: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        
+        .scan-options label {
+            display: block;
+            margin: 8px 0;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        button { 
+            background: #007bff;
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin: 5px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        button:hover { 
+            background: #0056b3;
+        }
+        
+        button:disabled { 
+            background: #6c757d; 
+            cursor: not-allowed;
+        }
+        
+        /* Results Section - PRESERVED EXACTLY */
+        .results { 
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 30px;
+        }
+        
+        .results h2 {
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
         .loading { color: #007bff; }
         .error { color: #dc3545; }
         .success { color: #28a745; }
-        .page-result { margin: 10px 0; padding: 10px; border-left: 3px solid #007bff; background: #f8f9fa; }
+        
+        .page-result { 
+            margin: 10px 0; 
+            padding: 10px; 
+            border-left: 3px solid #007bff;
+            background: #f8f9fa;
+        }
+        
+        .recent-scans {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .recent-scans h3 {
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        .scan-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .scan-item:last-child {
+            border-bottom: none;
+        }
+        
+        .scan-info h4 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .scan-meta {
+            font-size: 0.85rem;
+            color: #666;
+        }
+        
+        .scan-score {
+            background: #1a1a1a;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .view-report-btn {
+            background: none;
+            border: 1px solid #e1e5e9;
+            color: #666;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-left: 12px;
+        }
+        
+        .view-report-btn:hover {
+            background: #f8f9fa;
+        }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🛡️ SentryPrime Enterprise</h1>
-        <p>Professional Accessibility Scanner powered by Puppeteer + axe-core</p>
-    </div>
-    
-    <div class="scan-form">
-        <h2>Scan Website for Accessibility Issues</h2>
-        <form id="scanForm">
-            <input type="url" id="url" placeholder="https://example.com/" required>
-            
-            <div class="scan-options">
-                <h4>Scan Options:</h4>
-                <label>
-                    <input type="radio" name="scanType" value="single" checked> 
-                    Single Page (Fast - recommended)
-                </label><br>
-                <label>
-                    <input type="radio" name="scanType" value="crawl"> 
-                    Multi-Page Crawl (Slower - up to 
-                    <input type="number" id="maxPages" value="5" min="2" max="20"> pages)
-                </label>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>🛡️ SentryPrime</h1>
+                <p>Enterprise Dashboard</p>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">📊</span>
+                    Dashboard
+                </a>
+                <a href="#" class="nav-item active">
+                    <span class="nav-icon">🔍</span>
+                    Scans
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">📈</span>
+                    Analytics
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">👥</span>
+                    Team
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">🔗</span>
+                    Integrations
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    API Management
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">💳</span>
+                    Billing
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    Settings
+                </a>
+            </nav>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-left">
+                    <div class="search-bar">
+                        <span>🔍</span>
+                        <input type="text" placeholder="Search scans, reports, or settings...">
+                    </div>
+                </div>
+                <div class="header-right">
+                    <span style="color: #dc3545; font-weight: 600;">2</span>
+                    <div class="user-profile">
+                        <div class="user-avatar">JD</div>
+                        <div>
+                            <div style="font-weight: 500; font-size: 0.9rem;">John Doe</div>
+                            <div style="font-size: 0.8rem; color: #666;">Acme Corporation</div>
+                        </div>
+                        <span>▼</span>
+                    </div>
+                </div>
             </div>
             
-            <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
-        </form>
-    </div>
-    
-    <div id="results" class="results" style="display: none;">
-        <h2>Scan Results</h2>
-        <div id="resultsContent"></div>
+            <!-- Content Area -->
+            <div class="content-area">
+                <div class="page-header">
+                    <h1 class="page-title">Accessibility Scans</h1>
+                    <p class="page-subtitle">Manage and review your accessibility scans</p>
+                </div>
+                
+                <button class="new-scan-btn" onclick="toggleScanner()">
+                    <span>+</span>
+                    New Scan
+                </button>
+                
+                <!-- Scanner Section - PRESERVED FUNCTIONALITY -->
+                <div class="scanner-section" id="scannerSection">
+                    <h2>Scan Website for Accessibility Issues</h2>
+                    <form id="scanForm">
+                        <input type="url" id="url" placeholder="https://example.com/" required>
+                        
+                        <div class="scan-options">
+                            <h4>Scan Options:</h4>
+                            <label>
+                                <input type="radio" name="scanType" value="single" checked> 
+                                Single Page (Fast - recommended)
+                            </label><br>
+                            <label>
+                                <input type="radio" name="scanType" value="crawl"> 
+                                Multi-Page Crawl (Slower - up to 
+                                <input type="number" id="maxPages" value="5" min="2" max="20"> pages)
+                            </label>
+                        </div>
+                        
+                        <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
+                    </form>
+                </div>
+                
+                <!-- Results Section - PRESERVED FUNCTIONALITY -->
+                <div id="results" class="results" style="display: none;">
+                    <h2>Scan Results</h2>
+                    <div id="resultsContent"></div>
+                </div>
+                
+                <!-- Recent Scans -->
+                <div class="recent-scans">
+                    <h3>Recent Scans</h3>
+                    <p style="color: #666; margin-bottom: 20px;">Your latest accessibility scan results</p>
+                    
+                    <div class="scan-item">
+                        <div class="scan-info">
+                            <h4>https://company.com</h4>
+                            <div class="scan-meta">Single Page • 2024-09-18</div>
+                        </div>
+                        <div style="display: flex; align-items: center;">
+                            <span class="scan-score">94% Score</span>
+                            <button class="view-report-btn">👁 View Report</button>
+                        </div>
+                    </div>
+                    
+                    <div class="scan-item">
+                        <div class="scan-info">
+                            <h4>https://company.com/products</h4>
+                            <div class="scan-meta">Multi-page • 2024-09-18</div>
+                        </div>
+                        <div style="display: flex; align-items: center;">
+                            <span class="scan-score">87% Score</span>
+                            <button class="view-report-btn">👁 View Report</button>
+                        </div>
+                    </div>
+                    
+                    <div class="scan-item">
+                        <div class="scan-info">
+                            <h4>https://company.com/about</h4>
+                            <div class="scan-meta">Single Page • 2024-09-17</div>
+                        </div>
+                        <div style="display: flex; align-items: center;">
+                            <span class="scan-score">96% Score</span>
+                            <button class="view-report-btn">👁 View Report</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <script>
+        // PRESERVED SCANNER FUNCTIONALITY - IDENTICAL TO WORKING VERSION
         document.getElementById('scanForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const url = document.getElementById('url').value;
@@ -109,7 +569,7 @@ app.get('/', (req, res) => {
                 
                 if (result.success) {
                     if (scanType === 'single') {
-                        // Single page results
+                        // Single page results - EXACT FORMAT FROM WORKING VERSION
                         resultsContent.innerHTML = 
                             '<h3 class="success">✅ Scan Complete</h3>' +
                             '<p><strong>URL:</strong> ' + result.url + '</p>' +
@@ -125,7 +585,7 @@ app.get('/', (req, res) => {
                             '</ul>' +
                             '<details><summary>View Detailed Results</summary><pre>' + JSON.stringify(result.violations, null, 2) + '</pre></details>';
                     } else {
-                        // Multi-page crawl results
+                        // Multi-page crawl results - EXACT FORMAT FROM WORKING VERSION
                         let html = '<h3 class="success">✅ Crawl Complete</h3>' +
                                   '<p><strong>Pages Scanned:</strong> ' + result.pages.length + '</p>' +
                                   '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
@@ -166,13 +626,19 @@ app.get('/', (req, res) => {
                 scanButton.textContent = '🔍 Start Accessibility Scan';
             }
         });
+        
+        // Dashboard functionality
+        function toggleScanner() {
+            const scanner = document.getElementById('scannerSection');
+            scanner.style.display = scanner.style.display === 'none' ? 'block' : 'none';
+        }
     </script>
 </body>
 </html>`;
     res.send(html);
 });
 
-// Helper function to extract links from a page
+// EXACT COPY OF WORKING HELPER FUNCTION
 async function extractLinks(page, baseUrl) {
     try {
         const links = await page.evaluate((baseUrl) => {
@@ -206,7 +672,7 @@ async function extractLinks(page, baseUrl) {
     }
 }
 
-// Single page scan function (existing working code)
+// EXACT COPY OF WORKING SCAN FUNCTION
 async function scanSinglePage(browser, url) {
     const page = await browser.newPage();
     
@@ -266,7 +732,7 @@ async function scanSinglePage(browser, url) {
     }
 }
 
-// Scan endpoint
+// EXACT COPY OF WORKING API ENDPOINT
 app.post('/api/scan', async (req, res) => {
     const startTime = Date.now();
     let browser = null;
@@ -288,10 +754,10 @@ app.post('/api/scan', async (req, res) => {
         
         console.log('Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
         
-        // Launch Puppeteer
+        // Launch Puppeteer - EXACT WORKING CONFIGURATION
         browser = await puppeteer.launch({
             headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',
+            executablePath: '/usr/bin/google-chrome-stable',  // CORRECTED PATH
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -299,13 +765,13 @@ app.post('/api/scan', async (req, res) => {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',
+                '--single-process',  // ADDED
                 '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
+                '--disable-web-security',  // ADDED
+                '--disable-features=VizDisplayCompositor',  // ADDED
+                '--disable-background-timer-throttling',  // ADDED
+                '--disable-backgrounding-occluded-windows',  // ADDED
+                '--disable-renderer-backgrounding'  // ADDED
             ],
             timeout: 60000
         });
@@ -333,7 +799,7 @@ app.post('/api/scan', async (req, res) => {
             });
             
         } else if (scanType === 'crawl') {
-            // Multi-page crawl
+            // Multi-page crawl - EXACT WORKING LOGIC
             console.log('Starting multi-page crawl (max ' + maxPages + ' pages)');
             
             const scannedPages = [];
@@ -452,7 +918,7 @@ app.post('/api/scan', async (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-    console.log('🚀 SentryPrime Enterprise Scanner running on port ' + PORT);
+    console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
     console.log('📊 Health check: http://localhost:' + PORT + '/health');
     console.log('🔍 Scanner: http://localhost:' + PORT + '/');
 });
