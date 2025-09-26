@@ -862,7 +862,7 @@ app.get('/', (req, res) => {
         </div>
     </div>
     
-    <script>
+       <script>
         // Load recent scans on page load
         async function loadRecentScans() {
             try {
@@ -884,7 +884,6 @@ app.get('/', (req, res) => {
                         '</div>'
                     ).join('');
                 } else {
-                    // Show demo data if no real scans
                     const container = document.getElementById('recentScansContainer');
                     container.innerHTML = 
                         '<div class="scan-item">' +
@@ -913,10 +912,8 @@ app.get('/', (req, res) => {
             }
         }
         
-        // Load recent scans when page loads
         document.addEventListener('DOMContentLoaded', loadRecentScans);
         
-        // PRESERVED SCANNER FUNCTIONALITY - IDENTICAL TO WORKING VERSION
         document.getElementById('scanForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const url = document.getElementById('url').value;
