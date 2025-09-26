@@ -41,14 +41,18 @@ if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && pro
         
         console.log('Database connection initialized');
         
-        db.query('SELECT NOW()', (err, result) => {
-            if (err) {
+        // Test connection with timeout
+        const testConnection = async () => {
+            try {
+                const result = await db.query('SELECT NOW()');
+                console.log('Database connected successfully');
+            } catch (err) {
                 console.log('Database connection failed, running in standalone mode:', err.message);
                 db = null;
-            } else {
-                console.log('Database connected successfully');
             }
-        });
+        };
+        
+        testConnection();
     } catch (error) {
         console.log('Database setup failed, running in standalone mode:', error.message);
         db = null;
@@ -58,12 +62,12 @@ if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && pro
 }
 
 // Database helper functions (with graceful fallback)
-async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned = 1) {
+async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned) {
     if (!db) return null;
     try {
         const result = await db.query(
             'INSERT INTO scans (user_id, organization_id, url, scan_type, status, total_issues, scan_time_ms, pages_scanned, completed_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING id',
-            [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned]
+            [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned || 1]
         );
         console.log('Scan saved to database with ID:', result.rows[0].id);
         return result.rows[0].id;
@@ -73,7 +77,7 @@ async function saveScan(userId, organizationId, url, scanType, totalIssues, scan
     }
 }
 
-async function getRecentScans(userId, limit = 10) {
+async function getRecentScans(userId, limit) {
     if (!db) {
         return [
             { id: 1, url: 'https://company.com', scan_type: 'single', total_issues: 7, created_at: '2024-09-18', score: 94 },
@@ -85,12 +89,15 @@ async function getRecentScans(userId, limit = 10) {
     try {
         const result = await db.query(
             'SELECT id, url, scan_type, total_issues, created_at, scan_time_ms FROM scans WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
-            [userId, limit]
+            [userId, limit || 10]
         );
-        return result.rows.map(scan => ({
-            ...scan,
-            score: Math.max(60, 100 - Math.min(40, scan.total_issues * 2))
-        }));
+        return result.rows.map(scan => {
+            const score = Math.max(60, 100 - Math.min(40, scan.total_issues * 2));
+            return {
+                ...scan,
+                score: score
+            };
+        });
     } catch (error) {
         console.log('Database error getting recent scans:', error.message);
         return [];
@@ -139,7 +146,7 @@ app.get('/api/scans/recent', authenticateToken, async (req, res) => {
     }
 });
 
-// EXACT COPY OF WORKING HELPER FUNCTION
+// Helper function to extract links
 async function extractLinks(page, baseUrl) {
     try {
         const links = await page.evaluate((baseUrl) => {
@@ -173,7 +180,7 @@ async function extractLinks(page, baseUrl) {
     }
 }
 
-// EXACT COPY OF WORKING SCAN FUNCTION
+// Scan single page function
 async function scanSinglePage(browser, url) {
     const page = await browser.newPage();
     
@@ -229,13 +236,13 @@ async function scanSinglePage(browser, url) {
     }
 }
 
-// EXACT COPY OF WORKING API ENDPOINT WITH DATABASE INTEGRATION
+// Main scan API endpoint
 app.post('/api/scan', authenticateToken, async (req, res) => {
     const startTime = Date.now();
     let browser = null;
     
     try {
-        const { url, scanType = 'single', maxPages = 5 } = req.body;
+        const { url, scanType, maxPages } = req.body;
         
         if (!url) {
             return res.status(400).json({
@@ -249,9 +256,9 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
             targetUrl = 'https://' + targetUrl;
         }
         
-        console.log('Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
+        console.log('Starting accessibility scan for: ' + targetUrl + ' (type: ' + (scanType || 'single') + ')');
         
-        // EXACT WORKING PUPPETEER CONFIGURATION
+        // Launch browser with Cloud Run compatible settings
         browser = await puppeteer.launch({
             headless: 'new',
             executablePath: '/usr/bin/google-chrome-stable',
@@ -273,14 +280,14 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
             timeout: 60000
         });
         
-        if (scanType === 'single') {
+        if (scanType === 'single' || !scanType) {
             const results = await scanSinglePage(browser, targetUrl);
             const scanTime = Date.now() - startTime;
             
             console.log('Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
             
             // Save to database if available
-            const scanId = await saveScan(req.user.id, req.user.organization_id, targetUrl, scanType, results.violations.length, scanTime, 1);
+            const scanId = await saveScan(req.user.id, req.user.organization_id, targetUrl, 'single', results.violations.length, scanTime, 1);
             
             res.json({
                 success: true,
@@ -298,7 +305,8 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
             });
             
         } else if (scanType === 'crawl') {
-            console.log('Starting multi-page crawl (max ' + maxPages + ' pages)');
+            const maxPagesToScan = Math.min(parseInt(maxPages) || 5, 20);
+            console.log('Starting multi-page crawl (max ' + maxPagesToScan + ' pages)');
             
             const scannedPages = [];
             const urlsToScan = [targetUrl];
@@ -312,14 +320,14 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
             });
             scannedUrls.add(targetUrl);
             
-            if (maxPages > 1) {
+            if (maxPagesToScan > 1) {
                 const page = await browser.newPage();
                 try {
                     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
                     const links = await extractLinks(page, targetUrl);
                     
                     for (const link of links) {
-                        if (urlsToScan.length < maxPages && !scannedUrls.has(link)) {
+                        if (urlsToScan.length < maxPagesToScan && !scannedUrls.has(link)) {
                             urlsToScan.push(link);
                         }
                     }
@@ -330,12 +338,12 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
                 }
             }
             
-            for (let i = 1; i < urlsToScan.length && i < maxPages; i++) {
+            for (let i = 1; i < urlsToScan.length && i < maxPagesToScan; i++) {
                 const pageUrl = urlsToScan[i];
                 if (scannedUrls.has(pageUrl)) continue;
                 
                 try {
-                    console.log('Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
+                    console.log('Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPagesToScan) + ': ' + pageUrl);
                     const pageStartTime = Date.now();
                     const pageResults = await scanSinglePage(browser, pageUrl);
                     
@@ -363,7 +371,7 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
             console.log('Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
             
             // Save to database if available
-            const scanId = await saveScan(req.user.id, req.user.organization_id, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length);
+            const scanId = await saveScan(req.user.id, req.user.organization_id, targetUrl, 'crawl', allViolations.length, scanTime, scannedPages.length);
             
             res.json({
                 success: true,
@@ -410,7 +418,7 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
     }
 });
 
-// Main dashboard page with PRESERVED SCANNER FUNCTIONALITY
+// Main dashboard page
 app.get('/', (req, res) => {
     const html = `<!DOCTYPE html>
 <html>
@@ -1036,35 +1044,35 @@ app.get('/', (req, res) => {
                         const date = new Date(scan.created_at).toLocaleDateString();
                         const scanTypeLabel = scan.scan_type === 'crawl' ? 'Multi-page' : 'Single Page';
                         
-                        return `
+                        return \`
                             <div class="scan-item">
                                 <div class="scan-info">
-                                    <div class="scan-url">${scan.url}</div>
-                                    <div class="scan-meta-info">${scanTypeLabel} • ${date}</div>
+                                    <div class="scan-url">\${scan.url}</div>
+                                    <div class="scan-meta-info">\${scanTypeLabel} • \${date}</div>
                                 </div>
                                 <div class="scan-score">
-                                    <div class="score-badge ${scoreClass}">${scan.score}% Score</div>
+                                    <div class="score-badge \${scoreClass}">\${scan.score}% Score</div>
                                     <a href="#" class="view-report-btn">👁 View Report</a>
                                 </div>
                             </div>
-                        `;
+                        \`;
                     }).join('');
                 } else {
-                    container.innerHTML = `
+                    container.innerHTML = \`
                         <div class="empty-state">
                             <h3>No scans yet</h3>
                             <p>Start your first accessibility scan to see results here.</p>
                         </div>
-                    `;
+                    \`;
                 }
             } catch (error) {
                 console.error('Error loading recent scans:', error);
-                document.getElementById('recentScansContent').innerHTML = `
+                document.getElementById('recentScansContent').innerHTML = \`
                     <div class="empty-state">
                         <h3>Unable to load scans</h3>
                         <p>Please try refreshing the page.</p>
                     </div>
-                `;
+                \`;
             }
         }
 
@@ -1082,12 +1090,12 @@ app.get('/', (req, res) => {
             const resultsContent = document.getElementById('resultsContent');
             
             resultsSection.style.display = 'block';
-            resultsContent.innerHTML = `
+            resultsContent.innerHTML = \`
                 <div class="loading">
                     <div class="spinner"></div>
-                    Scanning ${url}... This may take a few moments.
+                    Scanning \${url}... This may take a few moments.
                 </div>
-            `;
+            \`;
             
             try {
                 const response = await fetch('/api/scan', {
@@ -1174,5 +1182,5 @@ app.get('/', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    console.log(\`Server is running on port \${PORT}\`);
 });
