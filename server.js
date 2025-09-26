@@ -391,3 +391,642 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
         }
     }
 });
+// Dashboard HTML (EXACT COPY of your working version)
+app.get('/', (req, res) => {
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+    <title>SentryPrime Enterprise Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+            color: #333;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        .sidebar {
+            width: 240px;
+            background: #1a1a1a;
+            color: white;
+            padding: 20px 0;
+            flex-shrink: 0;
+        }
+        
+        .sidebar-header {
+            padding: 0 20px 30px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .sidebar-header p {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 4px;
+        }
+        
+        .sidebar-nav {
+            padding: 20px 0;
+        }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: #ccc;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            gap: 12px;
+            font-size: 0.9rem;
+        }
+        
+        .nav-item:hover {
+            background: #333;
+            color: white;
+        }
+        
+        .nav-item.active {
+            background: #333;
+            color: white;
+            border-right: 3px solid #667eea;
+        }
+        
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: white;
+            padding: 16px 24px;
+            border-bottom: 1px solid #e1e5e9;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .search-bar {
+            display: flex;
+            align-items: center;
+            background: #f8f9fa;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            padding: 8px 12px;
+            width: 300px;
+        }
+        
+        .search-bar input {
+            border: none;
+            background: none;
+            outline: none;
+            flex: 1;
+            font-size: 14px;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #667eea;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .content-area {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        .page-header {
+            margin-bottom: 24px;
+        }
+        
+        .page-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .page-subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+        
+        .new-scan-btn {
+            background: #1a1a1a;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 24px;
+            transition: background 0.2s ease;
+        }
+        
+        .new-scan-btn:hover {
+            background: #333;
+        }
+        
+        .scanner-section {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+        }
+        
+        .scanner-section h3 {
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        input[type="url"] { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 10px 0; 
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        input[type="number"] { 
+            width: 100px; 
+            padding: 8px; 
+            margin: 5px; 
+            border: 1px solid #e1e5e9;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .scan-options { 
+            margin: 15px 0; 
+            padding: 15px; 
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .scan-options h4 {
+            margin-bottom: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        
+        .scan-options label {
+            display: block;
+            margin: 8px 0;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        button { 
+            background: #007bff;
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin: 5px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        button:hover { 
+            background: #0056b3;
+        }
+        
+        button:disabled { 
+            background: #6c757d; 
+            cursor: not-allowed;
+        }
+        
+        .results { 
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 30px;
+        }
+        
+        .results h2 {
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        .loading { color: #007bff; }
+        .error { color: #dc3545; }
+        .success { color: #28a745; }
+        
+        .page-result { 
+            margin: 10px 0; 
+            padding: 10px; 
+            border-left: 3px solid #007bff;
+            background: #f8f9fa;
+        }
+        
+        .recent-scans {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .recent-scans h3 {
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        .scan-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .scan-item:last-child {
+            border-bottom: none;
+        }
+        
+        .scan-info h4 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .scan-meta {
+            font-size: 0.85rem;
+            color: #666;
+        }
+        
+        .scan-score {
+            background: #1a1a1a;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .view-report-btn {
+            background: none;
+            border: 1px solid #e1e5e9;
+            color: #666;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-left: 12px;
+        }
+        
+        .view-report-btn:hover {
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>🛡️ SentryPrime</h1>
+                <p>Enterprise Dashboard</p>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">📊</span>
+                    Dashboard
+                </a>
+                <a href="#" class="nav-item active">
+                    <span class="nav-icon">🔍</span>
+                    Scans
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">📈</span>
+                    Analytics
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">👥</span>
+                    Team
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">🔗</span>
+                    Integrations
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    API Management
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">💳</span>
+                    Billing
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    Settings
+                </a>
+            </nav>
+        </div>
+        
+        <div class="main-content">
+            <div class="header">
+                <div class="header-left">
+                    <div class="search-bar">
+                        <span>🔍</span>
+                        <input type="text" placeholder="Search scans, reports, or settings...">
+                    </div>
+                </div>
+                <div class="header-right">
+                    <span style="color: #dc3545; font-weight: 600;">2</span>
+                    <div class="user-profile">
+                        <div class="user-avatar">JD</div>
+                        <div>
+                            <div style="font-weight: 500; font-size: 0.9rem;">John Doe</div>
+                            <div style="font-size: 0.8rem; color: #666;">Acme Corporation</div>
+                        </div>
+                        <span>▼</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="content-area">
+                <div class="page-header">
+                    <h1 class="page-title">Accessibility Scans</h1>
+                    <p class="page-subtitle">Manage and review your accessibility scans</p>
+                </div>
+                
+                <button class="new-scan-btn" onclick="toggleScanner()">
+                    <span>+</span>
+                    New Scan
+                </button>
+                
+                <div class="scanner-section" id="scannerSection">
+                    <h2>Scan Website for Accessibility Issues</h2>
+                    <form id="scanForm">
+                        <input type="url" id="url" placeholder="https://example.com/" required>
+                        
+                        <div class="scan-options">
+                            <h4>Scan Options:</h4>
+                            <label>
+                                <input type="radio" name="scanType" value="single" checked> 
+                                Single Page (Fast - recommended )
+                            </label>  
+
+                            <label>
+                                <input type="radio" name="scanType" value="crawl"> 
+                                Multi-Page Crawl (Slower - up to 
+                                <input type="number" id="maxPages" value="5" min="2" max="20"> pages)
+                            </label>
+                        </div>
+                        
+                        <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
+                    </form>
+                </div>
+                
+                <div id="results" class="results" style="display: none;">
+                    <h2>Scan Results</h2>
+                    <div id="resultsContent"></div>
+                </div>
+                
+                <div class="recent-scans">
+                    <h3>Recent Scans</h3>
+                    <p style="color: #666; margin-bottom: 20px;">Your latest accessibility scan results</p>
+                    <div id="recentScansContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Load recent scans on page load
+        async function loadRecentScans() {
+            try {
+                const response = await fetch('/api/scans/recent');
+                const data = await response.json();
+                
+                if (data.success && data.scans.length > 0) {
+                    const container = document.getElementById('recentScansContainer');
+                    container.innerHTML = data.scans.map(scan => 
+                        '<div class="scan-item">' +
+                        '<div class="scan-info">' +
+                        '<h4>' + scan.url + '</h4>' +
+                        '<div class="scan-meta">' + (scan.scan_type === 'single' ? 'Single Page' : 'Multi-page') + ' • ' + new Date(scan.created_at).toLocaleDateString() + '</div>' +
+                        '</div>' +
+                        '<div style="display: flex; align-items: center;">' +
+                        '<span class="scan-score">' + scan.score + '% Score</span>' +
+                        '<button class="view-report-btn">👁 View Report</button>' +
+                        '</div>' +
+                        '</div>'
+                    ).join('');
+                } else {
+                    // Show demo data if no real scans
+                    const container = document.getElementById('recentScansContainer');
+                    container.innerHTML = 
+                        '<div class="scan-item">' +
+                        '<div class="scan-info">' +
+                        '<h4>https://company.com</h4>' +
+                        '<div class="scan-meta">Single Page • 2024-09-18</div>' +
+                        '</div>' +
+                        '<div style="display: flex; align-items: center;">' +
+                        '<span class="scan-score">94% Score</span>' +
+                        '<button class="view-report-btn">👁 View Report</button>' +
+                        '</div>' +
+                        '</div>' +
+                        '<div class="scan-item">' +
+                        '<div class="scan-info">' +
+                        '<h4>https://company.com/products</h4>' +
+                        '<div class="scan-meta">Multi-page • 2024-09-18</div>' +
+                        '</div>' +
+                        '<div style="display: flex; align-items: center;">' +
+                        '<span class="scan-score">87% Score</span>' +
+                        '<button class="view-report-btn">👁 View Report</button>' +
+                        '</div>' +
+                        '</div>';
+                }
+            } catch (error ) {
+                console.log('Error loading recent scans:', error);
+            }
+        }
+        
+        // Load recent scans when page loads
+        document.addEventListener('DOMContentLoaded', loadRecentScans);
+        
+        // PRESERVED SCANNER FUNCTIONALITY - IDENTICAL TO WORKING VERSION
+        document.getElementById('scanForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const url = document.getElementById('url').value;
+            const scanType = document.querySelector('input[name="scanType"]:checked').value;
+            const maxPages = document.getElementById('maxPages').value;
+            const resultsDiv = document.getElementById('results');
+            const resultsContent = document.getElementById('resultsContent');
+            const scanButton = document.getElementById('scanButton');
+            
+            scanButton.disabled = true;
+            scanButton.textContent = scanType === 'single' ? '⏳ Scanning...' : '⏳ Crawling...';
+            
+            const loadingMsg = scanType === 'single' 
+                ? '🔄 Scanning single page... This may take up to 30 seconds.'
+                : '🔄 Crawling multiple pages... This may take up to 5 minutes for ' + maxPages + ' pages.';
+            
+            resultsContent.innerHTML = '<p class="loading">' + loadingMsg + '</p>';
+            resultsDiv.style.display = 'block';
+            
+            try {
+                const requestBody = { 
+                    url: url,
+                    scanType: scanType
+                };
+                
+                if (scanType === 'crawl') {
+                    requestBody.maxPages = parseInt(maxPages);
+                }
+                
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (scanType === 'single') {
+                        resultsContent.innerHTML = 
+                            '<h3 class="success">✅ Scan Complete</h3>' +
+                            '<p><strong>URL:</strong> ' + result.url + '</p>' +
+                            '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
+                            '<p><strong>Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
+                            '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>' +
+                            '<h4>Violations by Impact:</h4>' +
+                            '<ul>' +
+                            '<li>Critical: ' + result.violations.filter(function(v) { return v.impact === 'critical'; }).length + '</li>' +
+                            '<li>Serious: ' + result.violations.filter(function(v) { return v.impact === 'serious'; }).length + '</li>' +
+                            '<li>Moderate: ' + result.violations.filter(function(v) { return v.impact === 'moderate'; }).length + '</li>' +
+                            '<li>Minor: ' + result.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</li>' +
+                            '</ul>' +
+                            '<details><summary>View Detailed Results</summary><pre>' + JSON.stringify(result.violations, null, 2) + '</pre></details>';
+                    } else {
+                        let html = '<h3 class="success">✅ Crawl Complete</h3>' +
+                                  '<p><strong>Pages Scanned:</strong> ' + result.pages.length + '</p>' +
+                                  '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
+                                  '<p><strong>Total Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
+                                  '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>';
+                        
+                        html += '<h4>Overall Violations by Impact:</h4><ul>' +
+                               '<li>Critical: ' + result.summary.critical + '</li>' +
+                               '<li>Serious: ' + result.summary.serious + '</li>' +
+                               '<li>Moderate: ' + result.summary.moderate + '</li>' +
+                               '<li>Minor: ' + result.summary.minor + '</li></ul>';
+                        
+                        html += '<h4>Results by Page:</h4>';
+                        result.pages.forEach(function(page) {
+                            html += '<div class="page-result">' +
+                                   '<strong>' + page.url + '</strong>  
+' +
+                                   'Issues: ' + page.violations.length + ' | ' +
+                                   'Time: ' + page.scanTime + 'ms  
+' +
+                                   '<small>Critical: ' + page.violations.filter(function(v) { return v.impact === 'critical'; }).length + 
+                                   ', Serious: ' + page.violations.filter(function(v) { return v.impact === 'serious'; }).length + 
+                                   ', Moderate: ' + page.violations.filter(function(v) { return v.impact === 'moderate'; }).length + 
+                                   ', Minor: ' + page.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</small>' +
+                                   '</div>';
+                        });
+                        
+                        resultsContent.innerHTML = html;
+                    }
+                    
+                    setTimeout(loadRecentScans, 1000);
+                } else {
+                    resultsContent.innerHTML = '<p class="error">❌ Error: ' + result.error + '</p>';
+                }
+            } catch (error) {
+                resultsContent.innerHTML = '<p class="error">❌ Network Error: ' + error.message + '</p>';
+            } finally {
+                scanButton.disabled = false;
+                scanButton.textContent = '🔍 Start Accessibility Scan';
+            }
+        });
+        
+        function toggleScanner() {
+            const scanner = document.getElementById('scannerSection');
+            scanner.style.display = scanner.style.display === 'none' ? 'block' : 'none';
+        }
+    </script>
+</body>
+</html>`;
+    res.send(html);
+});
+
+// Start server
+app.listen(PORT, () => {
+    console.log('🚀 SentryPrime Enterprise Dashboard v2.1.0 running on port ' + PORT);
+    console.log('📊 Health check: http://localhost:' + PORT + '/health' );
+    console.log('🔍 Scanner: http://localhost:' + PORT + '/' );
+    console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
+});
