@@ -13,7 +13,10 @@ let db = null;
 
 // Initialize database connection if environment variables are provided
 if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_NAME) {
-    console.log('Initializing database connection...');
+    console.log('🔄 Initializing database connection...');
+    console.log('📍 DB_HOST:', process.env.DB_HOST);
+    console.log('👤 DB_USER:', process.env.DB_USER);
+    console.log('🗄️ DB_NAME:', process.env.DB_NAME);
     
     // Detect if we're running in Cloud Run with Cloud SQL connection
     const isCloudRun = process.env.K_SERVICE && process.env.DB_HOST.includes(':');
@@ -21,8 +24,8 @@ if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && pro
     let dbConfig;
     
     if (isCloudRun) {
-        // Cloud Run with Cloud SQL connection - use Unix socket
-        console.log('Detected Cloud Run environment, using Unix socket connection');
+        // Cloud Run with Cloud SQL connection - use Unix socket with correct path
+        console.log('☁️ Detected Cloud Run environment, using Unix socket connection');
         dbConfig = {
             host: `/cloudsql/${process.env.DB_HOST}`,
             database: process.env.DB_NAME,
@@ -32,9 +35,10 @@ if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && pro
             idleTimeoutMillis: 30000,
             max: 10
         };
+        console.log('🔌 Unix socket path:', `/cloudsql/${process.env.DB_HOST}`);
     } else {
         // Local or other environment - use TCP connection
-        console.log('Using TCP connection');
+        console.log('🌐 Using TCP connection');
         dbConfig = {
             host: process.env.DB_HOST,
             port: process.env.DB_PORT || 5432,
@@ -50,23 +54,27 @@ if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && pro
 
     db = new Pool(dbConfig);
     
-    // Test database connection
-    db.query('SELECT NOW()')
+    // Test database connection with detailed logging
+    db.query('SELECT NOW() as current_time, version() as pg_version')
         .then((result) => {
-            console.log('✅ Database connected successfully at:', result.rows[0].now);
+            console.log('✅ Database connected successfully!');
+            console.log('⏰ Server time:', result.rows[0].current_time);
+            console.log('🐘 PostgreSQL version:', result.rows[0].pg_version.split(' ')[0]);
         })
         .catch(err => {
-            console.log('❌ Database connection failed, running in standalone mode:', err.message);
+            console.log('❌ Database connection failed, running in standalone mode');
+            console.log('🔍 Error details:', err.message);
+            console.log('🔍 Error code:', err.code);
             db = null;
         });
 } else {
     console.log('ℹ️ No database configuration found, running in standalone mode');
 }
 
-// Database helper functions - ADDED FOR PERSISTENCE
+// Database helper functions
 async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned, violations) {
     if (!db) {
-        console.log('No database connection, skipping scan save');
+        console.log('⚠️ No database connection, skipping scan save');
         return null;
     }
     
@@ -90,7 +98,7 @@ async function saveScan(userId, organizationId, url, scanType, totalIssues, scan
 async function getRecentScans(userId = 1, limit = 10) {
     if (!db) {
         // Return mock data when no database connection
-        console.log('No database connection, returning mock data');
+        console.log('⚠️ No database connection, returning mock data');
         return [
             { 
                 id: 1, 
@@ -151,7 +159,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// API endpoint to get recent scans - ADDED FOR DYNAMIC LOADING
+// API endpoint to get recent scans
 app.get('/api/scans/recent', async (req, res) => {
     try {
         const scans = await getRecentScans(1); // Default user ID for now
@@ -622,7 +630,7 @@ app.get('/', (req, res) => {
                 
                 <!-- Database Status Indicator -->
                 <div id="dbStatus" class="db-status">
-                    <span id="dbStatusText">Checking database connection...</span>
+                    <span id="dbStatusText">🔄 Checking database connection...</span>
                 </div>
                 
                 <button class="new-scan-btn" onclick="toggleScanner()">
@@ -666,7 +674,7 @@ app.get('/', (req, res) => {
                     
                     <div id="recentScansContainer">
                         <div style="text-align: center; padding: 20px; color: #666;">
-                            Loading recent scans...
+                            🔄 Loading recent scans...
                         </div>
                     </div>
                 </div>
@@ -961,12 +969,12 @@ app.post('/api/scan', async (req, res) => {
             targetUrl = 'https://' + targetUrl;
         }
         
-        console.log('Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
+        console.log('🔍 Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
         
         // Launch Puppeteer - EXACT WORKING CONFIGURATION
         browser = await puppeteer.launch({
             headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',  // CORRECTED PATH
+            executablePath: '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -974,13 +982,13 @@ app.post('/api/scan', async (req, res) => {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',  // ADDED
+                '--single-process',
                 '--disable-gpu',
-                '--disable-web-security',  // ADDED
-                '--disable-features=VizDisplayCompositor',  // ADDED
-                '--disable-background-timer-throttling',  // ADDED
-                '--disable-backgrounding-occluded-windows',  // ADDED
-                '--disable-renderer-backgrounding'  // ADDED
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
             ],
             timeout: 60000
         });
@@ -990,7 +998,7 @@ app.post('/api/scan', async (req, res) => {
             const results = await scanSinglePage(browser, targetUrl);
             const scanTime = Date.now() - startTime;
             
-            console.log('Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
+            console.log('✅ Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
             
             // Save to database - ADDED FOR PERSISTENCE
             await saveScan(1, 1, targetUrl, scanType, results.violations.length, scanTime, 1, results.violations);
@@ -1012,7 +1020,7 @@ app.post('/api/scan', async (req, res) => {
             
         } else if (scanType === 'crawl') {
             // Multi-page crawl - EXACT WORKING LOGIC
-            console.log('Starting multi-page crawl (max ' + maxPages + ' pages)');
+            console.log('🕷️ Starting multi-page crawl (max ' + maxPages + ' pages)');
             
             const scannedPages = [];
             const urlsToScan = [targetUrl];
@@ -1053,7 +1061,7 @@ app.post('/api/scan', async (req, res) => {
                 if (scannedUrls.has(pageUrl)) continue;
                 
                 try {
-                    console.log('Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
+                    console.log('🔍 Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
                     const pageStartTime = Date.now();
                     const pageResults = await scanSinglePage(browser, pageUrl);
                     
@@ -1065,7 +1073,7 @@ app.post('/api/scan', async (req, res) => {
                     scannedUrls.add(pageUrl);
                     
                 } catch (error) {
-                    console.log('Error scanning page ' + pageUrl + ':', error.message);
+                    console.log('❌ Error scanning page ' + pageUrl + ':', error.message);
                     scannedPages.push({
                         url: pageUrl,
                         violations: [],
@@ -1079,7 +1087,7 @@ app.post('/api/scan', async (req, res) => {
             const allViolations = scannedPages.reduce((acc, page) => acc.concat(page.violations || []), []);
             const scanTime = Date.now() - startTime;
             
-            console.log('Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
+            console.log('✅ Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
             
             // Save to database - ADDED FOR PERSISTENCE
             await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations);
@@ -1101,7 +1109,7 @@ app.post('/api/scan', async (req, res) => {
         }
         
     } catch (error) {
-        console.error('Scan error:', error);
+        console.error('❌ Scan error:', error);
         const scanTime = Date.now() - startTime;
         
         let errorMessage = error.message;
@@ -1123,9 +1131,9 @@ app.post('/api/scan', async (req, res) => {
         if (browser) {
             try {
                 await browser.close();
-                console.log('Browser closed successfully');
+                console.log('🔒 Browser closed successfully');
             } catch (closeError) {
-                console.error('Error closing browser:', closeError);
+                console.error('❌ Error closing browser:', closeError);
             }
         }
     }
