@@ -8,31 +8,52 @@ const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 
-// Database connection - ADDED FOR PERSISTENCE
+// Database connection - FIXED FOR CLOUD RUN
 let db = null;
 
 // Initialize database connection if environment variables are provided
 if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_NAME) {
     console.log('Initializing database connection...');
     
-    const dbConfig = {
-        host: process.env.DB_HOST,
-        port: process.env.DB_PORT || 5432,
-        database: process.env.DB_NAME,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-        connectionTimeoutMillis: 10000,
-        idleTimeoutMillis: 30000,
-        max: 10
-    };
+    // Detect if we're running in Cloud Run with Cloud SQL connection
+    const isCloudRun = process.env.K_SERVICE && process.env.DB_HOST.includes(':');
+    
+    let dbConfig;
+    
+    if (isCloudRun) {
+        // Cloud Run with Cloud SQL connection - use Unix socket
+        console.log('Detected Cloud Run environment, using Unix socket connection');
+        dbConfig = {
+            host: `/cloudsql/${process.env.DB_HOST}`,
+            database: process.env.DB_NAME,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            connectionTimeoutMillis: 10000,
+            idleTimeoutMillis: 30000,
+            max: 10
+        };
+    } else {
+        // Local or other environment - use TCP connection
+        console.log('Using TCP connection');
+        dbConfig = {
+            host: process.env.DB_HOST,
+            port: process.env.DB_PORT || 5432,
+            database: process.env.DB_NAME,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+            connectionTimeoutMillis: 10000,
+            idleTimeoutMillis: 30000,
+            max: 10
+        };
+    }
 
     db = new Pool(dbConfig);
     
     // Test database connection
     db.query('SELECT NOW()')
-        .then(() => {
-            console.log('✅ Database connected successfully');
+        .then((result) => {
+            console.log('✅ Database connected successfully at:', result.rows[0].now);
         })
         .catch(err => {
             console.log('❌ Database connection failed, running in standalone mode:', err.message);
@@ -69,6 +90,7 @@ async function saveScan(userId, organizationId, url, scanType, totalIssues, scan
 async function getRecentScans(userId = 1, limit = 10) {
     if (!db) {
         // Return mock data when no database connection
+        console.log('No database connection, returning mock data');
         return [
             { 
                 id: 1, 
@@ -107,6 +129,8 @@ async function getRecentScans(userId = 1, limit = 10) {
             [userId, limit]
         );
         
+        console.log(`✅ Retrieved ${result.rows.length} scans from database`);
+        
         return result.rows.map(scan => ({
             ...scan,
             score: Math.max(60, 100 - Math.min(40, scan.total_issues * 2)) // Calculate score based on issues
@@ -122,7 +146,8 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy', 
         timestamp: new Date().toISOString(),
-        database: db ? 'connected' : 'standalone'
+        database: db ? 'connected' : 'standalone',
+        environment: process.env.K_SERVICE ? 'cloud-run' : 'local'
     });
 });
 
@@ -500,6 +525,25 @@ app.get('/', (req, res) => {
         .view-report-btn:hover {
             background: #f8f9fa;
         }
+        
+        .db-status {
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-bottom: 16px;
+        }
+        
+        .db-connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .db-standalone {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
     </style>
 </head>
 <body>
@@ -576,6 +620,11 @@ app.get('/', (req, res) => {
                     <p class="page-subtitle">Manage and review your accessibility scans</p>
                 </div>
                 
+                <!-- Database Status Indicator -->
+                <div id="dbStatus" class="db-status">
+                    <span id="dbStatusText">Checking database connection...</span>
+                </div>
+                
                 <button class="new-scan-btn" onclick="toggleScanner()">
                     <span>+</span>
                     New Scan
@@ -626,10 +675,31 @@ app.get('/', (req, res) => {
     </div>
     
     <script>
-        // Load recent scans on page load - ADDED FOR DYNAMIC LOADING
+        // Load recent scans and check database status on page load
         document.addEventListener('DOMContentLoaded', function() {
+            checkDatabaseStatus();
             loadRecentScans();
         });
+
+        async function checkDatabaseStatus() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                const statusDiv = document.getElementById('dbStatus');
+                const statusText = document.getElementById('dbStatusText');
+                
+                if (data.database === 'connected') {
+                    statusDiv.className = 'db-status db-connected';
+                    statusText.textContent = '✅ Database connected - Scans will be saved to your history';
+                } else {
+                    statusDiv.className = 'db-status db-standalone';
+                    statusText.textContent = '⚠️ Running in standalone mode - Scans will not be saved';
+                }
+            } catch (error) {
+                console.error('Error checking database status:', error);
+            }
+        }
 
         async function loadRecentScans() {
             try {
@@ -748,8 +818,11 @@ app.get('/', (req, res) => {
                         resultsContent.innerHTML = html;
                     }
                     
-                    // Reload recent scans after successful scan - ADDED FOR DYNAMIC UPDATE
-                    setTimeout(loadRecentScans, 1000);
+                    // Reload recent scans and database status after successful scan
+                    setTimeout(function() {
+                        loadRecentScans();
+                        checkDatabaseStatus();
+                    }, 1000);
                     
                 } else {
                     resultsContent.innerHTML = '<p class="error">❌ Error: ' + result.error + '</p>';
@@ -1064,4 +1137,5 @@ app.listen(PORT, () => {
     console.log('📊 Health check: http://localhost:' + PORT + '/health');
     console.log('🔍 Scanner: http://localhost:' + PORT + '/');
     console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
+    console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
 });
