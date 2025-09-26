@@ -4,6 +4,7 @@ const axeCore = require('axe-core');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -14,23 +15,21 @@ let db = null;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // Initialize database if configured
-if (process.env.DATABASE_URL || (process.env.DB_HOST && process.env.DB_NAME)) {
+if (process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_NAME) {
     try {
         db = new Pool({
-            connectionString: process.env.DATABASE_URL,
-            host: process.env.DB_HOST,
-            port: process.env.DB_PORT || 5432,
+            host: "127.0.0.1",
+            port: 5432,
             database: process.env.DB_NAME,
             user: process.env.DB_USER,
             password: process.env.DB_PASSWORD,
-            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
         });
         
         console.log('Database connection initialized');
         
         db.query('SELECT NOW()', (err, result) => {
             if (err) {
-                console.log('Database connection failed, running in standalone mode');
+                console.log('Database connection failed, running in standalone mode', err);
                 db = null;
             } else {
                 console.log('Database connected successfully');
@@ -445,42 +444,34 @@ app.get('/', (req, res) => {
         
         .sidebar-header p {
             font-size: 0.8rem;
-            color: #888;
+            color: #999;
             margin-top: 4px;
         }
         
         .sidebar-nav {
-            padding: 20px 0;
+            padding: 0 20px;
         }
         
         .nav-item {
             display: flex;
             align-items: center;
-            padding: 12px 20px;
+            gap: 12px;
+            padding: 12px 0;
             color: #ccc;
             text-decoration: none;
-            transition: all 0.2s ease;
-            gap: 12px;
             font-size: 0.9rem;
+            border-radius: 4px;
+            transition: background 0.2s ease, color 0.2s ease;
         }
         
-        .nav-item:hover {
-            background: #333;
+        .nav-item.active, .nav-item:hover {
             color: white;
-        }
-        
-        .nav-item.active {
             background: #333;
-            color: white;
-            border-right: 3px solid #667eea;
+            padding-left: 10px;
         }
         
         .nav-icon {
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            font-size: 1.1rem;
         }
         
         .main-content {
@@ -491,12 +482,13 @@ app.get('/', (req, res) => {
         }
         
         .header {
-            background: white;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            background: white;
+            border-bottom: 1px solid #e1e5e9;
+            flex-shrink: 0;
         }
         
         .header-left {
@@ -973,52 +965,34 @@ app.get('/', (req, res) => {
                             '<h3 class="success">✅ Scan Complete</h3>' +
                             '<p><strong>URL:</strong> ' + result.url + '</p>' +
                             '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
-                            '<p><strong>Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
-                            '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>' +
-                            '<h4>Violations by Impact:</h4>' +
-                            '<ul>' +
-                            '<li>Critical: ' + result.violations.filter(function(v) { return v.impact === 'critical'; }).length + '</li>' +
-                            '<li>Serious: ' + result.violations.filter(function(v) { return v.impact === 'serious'; }).length + '</li>' +
-                            '<li>Moderate: ' + result.violations.filter(function(v) { return v.impact === 'moderate'; }).length + '</li>' +
-                            '<li>Minor: ' + result.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</li>' +
-                            '</ul>' +
-                            '<details><summary>View Detailed Results</summary><pre>' + JSON.stringify(result.violations, null, 2) + '</pre></details>';
+                            '<p><strong>Scan Time:</strong> ' + (result.scanTime / 1000).toFixed(2) + 's</p>' +
+                            '<h4>Violations:</h4>' +
+                            '<ul>' + result.violations.map(v => '<li><strong>' + v.impact + ':</strong> ' + v.help + '</li>').join('') + '</ul>';
                     } else {
-                        let html = '<h3 class="success">✅ Crawl Complete</h3>' +
-                                  '<p><strong>Pages Scanned:</strong> ' + result.pages.length + '</p>' +
-                                  '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
-                                  '<p><strong>Total Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
-                                  '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>';
+                        let pagesHtml = '';
+                        for (const page of result.pages) {
+                            pagesHtml += 
+                                '<div class="page-result">' +
+                                '<h4>' + page.url + ' (' + page.violations.length + ' issues)</h4>' +
+                                '<ul>' + page.violations.map(v => '<li><strong>' + v.impact + ':</strong> ' + v.help + '</li>').join('') + '</ul>' +
+                                '</div>';
+                        }
                         
-                        html += '<h4>Overall Violations by Impact:</h4><ul>' +
-                               '<li>Critical: ' + result.summary.critical + '</li>' +
-                               '<li>Serious: ' + result.summary.serious + '</li>' +
-                               '<li>Moderate: ' + result.summary.moderate + '</li>' +
-                               '<li>Minor: ' + result.summary.minor + '</li></ul>';
-                        
-                        html += '<h4>Results by Page:</h4>';
-                        result.pages.forEach(function(page) {
-                            html += '<div class="page-result">' +
-                                   '<strong>' + page.url + '</strong><br>' +
-                                   'Issues: ' + page.violations.length + ' | ' +
-                                   'Time: ' + page.scanTime + 'ms<br>' +
-                                   '<small>Critical: ' + page.violations.filter(function(v) { return v.impact === 'critical'; }).length + 
-                                   ', Serious: ' + page.violations.filter(function(v) { return v.impact === 'serious'; }).length + 
-                                   ', Moderate: ' + page.violations.filter(function(v) { return v.impact === 'moderate'; }).length + 
-                                   ', Minor: ' + page.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</small>' +
-                                   '</div>';
-                        });
-                        
-                        resultsContent.innerHTML = html;
+                        resultsContent.innerHTML = 
+                            '<h3 class="success">✅ Crawl Complete</h3>' +
+                            '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
+                            '<p><strong>Scan Time:</strong> ' + (result.scanTime / 1000).toFixed(2) + 's</p>' +
+                            '<h4>Pages Scanned:</h4>' + pagesHtml;
                     }
                     
-                    // Refresh recent scans after successful scan
-                    setTimeout(loadRecentScans, 1000);
+                    // Refresh recent scans
+                    loadRecentScans();
+                    
                 } else {
                     resultsContent.innerHTML = '<p class="error">❌ Error: ' + result.error + '</p>';
                 }
-            } catch (error) {
-                resultsContent.innerHTML = '<p class="error">❌ Network Error: ' + error.message + '</p>';
+            } catch (err) {
+                resultsContent.innerHTML = '<p class="error">❌ An unexpected error occurred. Please try again.</p>';
             } finally {
                 scanButton.disabled = false;
                 scanButton.textContent = '🔍 Start Accessibility Scan';
@@ -1026,8 +1000,12 @@ app.get('/', (req, res) => {
         });
         
         function toggleScanner() {
-            const scanner = document.getElementById('scannerSection');
-            scanner.style.display = scanner.style.display === 'none' ? 'block' : 'none';
+            const scannerSection = document.getElementById('scannerSection');
+            if (scannerSection.style.display === 'none') {
+                scannerSection.style.display = 'block';
+            } else {
+                scannerSection.style.display = 'none';
+            }
         }
     </script>
 </body>
@@ -1036,8 +1014,6 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log('🚀 SentryPrime Enterprise Dashboard v2.1.0 running on port ' + PORT);
-    console.log('📊 Health check: http://localhost:' + PORT + '/health');
-    console.log('🔍 Scanner: http://localhost:' + PORT + '/');
-    console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
+    console.log(`Server is running on port ${PORT}`);
 });
+
