@@ -9,9 +9,11 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 app.use(express.json());
 
+// Database connection (optional - graceful fallback)
 let db = null;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
+// Initialize database if configured
 if (process.env.DATABASE_URL || (process.env.DB_HOST && process.env.DB_NAME)) {
     try {
         db = new Pool({
@@ -42,6 +44,7 @@ if (process.env.DATABASE_URL || (process.env.DB_HOST && process.env.DB_NAME)) {
     console.log('No database configuration found, running in standalone mode');
 }
 
+// Database helper functions (with graceful fallback)
 async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned = 1) {
     if (!db) return null;
     try {
@@ -69,7 +72,7 @@ async function getRecentScans(userId, limit = 10) {
         const result = await db.query(
             'SELECT id, url, scan_type, total_issues, created_at, scan_time_ms FROM scans WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
             [userId, limit]
-         );
+        );
         return result.rows.map(scan => ({
             ...scan,
             score: Math.max(60, 100 - Math.min(40, scan.total_issues * 2))
@@ -80,11 +83,13 @@ async function getRecentScans(userId, limit = 10) {
     }
 }
 
+// Authentication middleware (graceful fallback)
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     
     if (!token) {
+        // If no database, allow anonymous access (preserves current functionality)
         if (!db) {
             req.user = { id: 1, email: 'anonymous@example.com', organization_id: 1 };
             return next();
@@ -99,6 +104,7 @@ function authenticateToken(req, res, next) {
     });
 }
 
+// Health check (enhanced with database status)
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy', 
@@ -108,6 +114,7 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Get user's recent scans
 app.get('/api/scans/recent', authenticateToken, async (req, res) => {
     try {
         const scans = await getRecentScans(req.user.id);
@@ -118,6 +125,7 @@ app.get('/api/scans/recent', authenticateToken, async (req, res) => {
     }
 });
 
+// EXACT COPY OF WORKING HELPER FUNCTION
 async function extractLinks(page, baseUrl) {
     try {
         const links = await page.evaluate((baseUrl) => {
@@ -151,6 +159,7 @@ async function extractLinks(page, baseUrl) {
     }
 }
 
+// EXACT COPY OF WORKING SCAN FUNCTION
 async function scanSinglePage(browser, url) {
     const page = await browser.newPage();
     
@@ -206,6 +215,7 @@ async function scanSinglePage(browser, url) {
     }
 }
 
+// EXACT COPY OF WORKING API ENDPOINT WITH DATABASE INTEGRATION
 app.post('/api/scan', authenticateToken, async (req, res) => {
     const startTime = Date.now();
     let browser = null;
@@ -221,12 +231,13 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
         }
         
         let targetUrl = url;
-        if (!targetUrl.startsWith('http://' ) && !targetUrl.startsWith('https://' )) {
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
             targetUrl = 'https://' + targetUrl;
         }
         
-        console.log('Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ' )');
+        console.log('Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
         
+        // EXACT WORKING PUPPETEER CONFIGURATION
         browser = await puppeteer.launch({
             headless: 'new',
             executablePath: '/usr/bin/google-chrome-stable',
@@ -254,6 +265,7 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
             
             console.log('Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
             
+            // Save to database if available
             const scanId = await saveScan(req.user.id, req.user.organization_id, targetUrl, scanType, results.violations.length, scanTime, 1);
             
             res.json({
@@ -336,6 +348,7 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
             
             console.log('Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
             
+            // Save to database if available
             const scanId = await saveScan(req.user.id, req.user.organization_id, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length);
             
             res.json({
@@ -383,64 +396,363 @@ app.post('/api/scan', authenticateToken, async (req, res) => {
     }
 });
 
+// Main dashboard page with PRESERVED SCANNER FUNCTIONALITY
 app.get('/', (req, res) => {
     const html = `<!DOCTYPE html>
 <html>
 <head>
     <title>SentryPrime Enterprise Dashboard</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8f9fa; color: #333; height: 100vh; overflow: hidden; }
-        .dashboard-container { display: flex; height: 100vh; }
-        .sidebar { width: 240px; background: #1a1a1a; color: white; padding: 20px 0; flex-shrink: 0; }
-        .sidebar-header { padding: 0 20px 30px; border-bottom: 1px solid #333; }
-        .sidebar-header h1 { font-size: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-        .sidebar-header p { font-size: 0.8rem; color: #888; margin-top: 4px; }
-        .sidebar-nav { padding: 20px 0; }
-        .nav-item { display: flex; align-items: center; padding: 12px 20px; color: #ccc; text-decoration: none; transition: all 0.2s ease; gap: 12px; font-size: 0.9rem; }
-        .nav-item:hover { background: #333; color: white; }
-        .nav-item.active { background: #333; color: white; border-right: 3px solid #667eea; }
-        .nav-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; }
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-        .header { background: white; padding: 16px 24px; border-bottom: 1px solid #e1e5e9; display: flex; align-items: center; justify-content: space-between; }
-        .header-left { display: flex; align-items: center; gap: 20px; }
-        .search-bar { display: flex; align-items: center; background: #f8f9fa; border: 1px solid #e1e5e9; border-radius: 6px; padding: 8px 12px; width: 300px; }
-        .search-bar input { border: none; background: none; outline: none; flex: 1; font-size: 14px; }
-        .header-right { display: flex; align-items: center; gap: 16px; }
-        .user-profile { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
-        .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: #667eea; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 14px; }
-        .content-area { flex: 1; padding: 24px; overflow-y: auto; }
-        .page-header { margin-bottom: 24px; }
-        .page-title { font-size: 1.8rem; font-weight: 600; margin-bottom: 8px; }
-        .page-subtitle { color: #666; font-size: 1rem; }
-        .new-scan-btn { background: #1a1a1a; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 8px; margin-bottom: 24px; transition: background 0.2s ease; }
-        .new-scan-btn:hover { background: #333; }
-        .scanner-section { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
-        .scanner-section h3 { margin-bottom: 20px; font-size: 1.2rem; font-weight: 600; }
-        input[type="url"] { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #e1e5e9; border-radius: 6px; font-size: 14px; }
-        input[type="url"]:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1); }
-        input[type="number"] { width: 100px; padding: 8px; margin: 5px; border: 1px solid #e1e5e9; border-radius: 4px; text-align: center; }
-        .scan-options { margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 6px; }
-        .scan-options h4 { margin-bottom: 12px; font-size: 1rem; font-weight: 600; }
-        .scan-options label { display: block; margin: 8px 0; font-weight: 500; cursor: pointer; }
-        button { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; font-size: 14px; font-weight: 500; }
-        button:hover { background: #0056b3; }
-        button:disabled { background: #6c757d; cursor: not-allowed; }
-        .results { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-top: 30px; }
-        .results h2 { margin-bottom: 16px; font-size: 1.2rem; font-weight: 600; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+            color: #333;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .dashboard-container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        .sidebar {
+            width: 240px;
+            background: #1a1a1a;
+            color: white;
+            padding: 20px 0;
+            flex-shrink: 0;
+        }
+        
+        .sidebar-header {
+            padding: 0 20px 30px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .sidebar-header p {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 4px;
+        }
+        
+        .sidebar-nav {
+            padding: 20px 0;
+        }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: #ccc;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            gap: 12px;
+            font-size: 0.9rem;
+        }
+        
+        .nav-item:hover {
+            background: #333;
+            color: white;
+        }
+        
+        .nav-item.active {
+            background: #333;
+            color: white;
+            border-right: 3px solid #667eea;
+        }
+        
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .header {
+            background: white;
+            padding: 16px 24px;
+            border-bottom: 1px solid #e1e5e9;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .search-bar {
+            display: flex;
+            align-items: center;
+            background: #f8f9fa;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            padding: 8px 12px;
+            width: 300px;
+        }
+        
+        .search-bar input {
+            border: none;
+            background: none;
+            outline: none;
+            flex: 1;
+            font-size: 14px;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #667eea;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .content-area {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        .page-header {
+            margin-bottom: 24px;
+        }
+        
+        .page-title {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .page-subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+        
+        .new-scan-btn {
+            background: #1a1a1a;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 24px;
+            transition: background 0.2s ease;
+        }
+        
+        .new-scan-btn:hover {
+            background: #333;
+        }
+        
+        .scanner-section {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+        }
+        
+        .scanner-section h3 {
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        input[type="url"] { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 10px 0; 
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        input[type="number"] { 
+            width: 100px; 
+            padding: 8px; 
+            margin: 5px; 
+            border: 1px solid #e1e5e9;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .scan-options { 
+            margin: 15px 0; 
+            padding: 15px; 
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .scan-options h4 {
+            margin-bottom: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        
+        .scan-options label {
+            display: block;
+            margin: 8px 0;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        button { 
+            background: #007bff;
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin: 5px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        button:hover { 
+            background: #0056b3;
+        }
+        
+        button:disabled { 
+            background: #6c757d; 
+            cursor: not-allowed;
+        }
+        
+        .results { 
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 30px;
+        }
+        
+        .results h2 {
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
         .loading { color: #007bff; }
         .error { color: #dc3545; }
         .success { color: #28a745; }
-        .page-result { margin: 10px 0; padding: 10px; border-left: 3px solid #007bff; background: #f8f9fa; }
-        .recent-scans { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .recent-scans h3 { margin-bottom: 16px; font-size: 1.2rem; font-weight: 600; }
-        .scan-item { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid #f0f0f0; }
-        .scan-item:last-child { border-bottom: none; }
-        .scan-info h4 { font-size: 1rem; font-weight: 500; margin-bottom: 4px; }
-        .scan-meta { font-size: 0.85rem; color: #666; }
-        .scan-score { background: #1a1a1a; color: white; padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; font-weight: 500; }
-        .view-report-btn { background: none; border: 1px solid #e1e5e9; color: #666; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; margin-left: 12px; }
-        .view-report-btn:hover { background: #f8f9fa; }
+        
+        .page-result { 
+            margin: 10px 0; 
+            padding: 10px; 
+            border-left: 3px solid #007bff;
+            background: #f8f9fa;
+        }
+        
+        .recent-scans {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .recent-scans h3 {
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        .scan-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .scan-item:last-child {
+            border-bottom: none;
+        }
+        
+        .scan-info h4 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .scan-meta {
+            font-size: 0.85rem;
+            color: #666;
+        }
+        
+        .scan-score {
+            background: #1a1a1a;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .view-report-btn {
+            background: none;
+            border: 1px solid #e1e5e9;
+            color: #666;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-left: 12px;
+        }
+        
+        .view-report-btn:hover {
+            background: #f8f9fa;
+        }
     </style>
 </head>
 <body>
@@ -451,16 +763,41 @@ app.get('/', (req, res) => {
                 <p>Enterprise Dashboard</p>
             </div>
             <nav class="sidebar-nav">
-                <a href="#" class="nav-item"><span class="nav-icon">📊</span>Dashboard</a>
-                <a href="#" class="nav-item active"><span class="nav-icon">🔍</span>Scans</a>
-                <a href="#" class="nav-item"><span class="nav-icon">📈</span>Analytics</a>
-                <a href="#" class="nav-item"><span class="nav-icon">👥</span>Team</a>
-                <a href="#" class="nav-item"><span class="nav-icon">🔗</span>Integrations</a>
-                <a href="#" class="nav-item"><span class="nav-icon">⚙️</span>API Management</a>
-                <a href="#" class="nav-item"><span class="nav-icon">💳</span>Billing</a>
-                <a href="#" class="nav-item"><span class="nav-icon">⚙️</span>Settings</a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">📊</span>
+                    Dashboard
+                </a>
+                <a href="#" class="nav-item active">
+                    <span class="nav-icon">🔍</span>
+                    Scans
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">📈</span>
+                    Analytics
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">👥</span>
+                    Team
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">🔗</span>
+                    Integrations
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    API Management
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">💳</span>
+                    Billing
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-icon">⚙️</span>
+                    Settings
+                </a>
             </nav>
         </div>
+        
         <div class="main-content">
             <div class="header">
                 <div class="header-left">
@@ -481,41 +818,89 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
             </div>
+            
             <div class="content-area">
                 <div class="page-header">
                     <h1 class="page-title">Accessibility Scans</h1>
                     <p class="page-subtitle">Manage and review your accessibility scans</p>
                 </div>
+                
                 <button class="new-scan-btn" onclick="toggleScanner()">
-                    <span>+</span>New Scan
+                    <span>+</span>
+                    New Scan
                 </button>
+                
                 <div class="scanner-section" id="scannerSection">
                     <h2>Scan Website for Accessibility Issues</h2>
                     <form id="scanForm">
                         <input type="url" id="url" placeholder="https://example.com/" required>
+                        
                         <div class="scan-options">
                             <h4>Scan Options:</h4>
-                            <label><input type="radio" name="scanType" value="single" checked> Single Page (Fast - recommended )</label>  
-
-                            <label><input type="radio" name="scanType" value="crawl"> Multi-Page Crawl (Slower - up to <input type="number" id="maxPages" value="5" min="2" max="20"> pages)</label>
+                            <label>
+                                <input type="radio" name="scanType" value="single" checked> 
+                                Single Page (Fast - recommended)
+                            </label><br>
+                            <label>
+                                <input type="radio" name="scanType" value="crawl"> 
+                                Multi-Page Crawl (Slower - up to 
+                                <input type="number" id="maxPages" value="5" min="2" max="20"> pages)
+                            </label>
                         </div>
+                        
                         <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
                     </form>
                 </div>
+                
                 <div id="results" class="results" style="display: none;">
                     <h2>Scan Results</h2>
                     <div id="resultsContent"></div>
                 </div>
+                
                 <div class="recent-scans">
                     <h3>Recent Scans</h3>
                     <p style="color: #666; margin-bottom: 20px;">Your latest accessibility scan results</p>
-                    <div id="recentScansContainer"></div>
+                    <div id="recentScansContainer">
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>https://company.com</h4>
+                                <div class="scan-meta">Single Page • 2024-09-18</div>
+                            </div>
+                            <div style="display: flex; align-items: center;">
+                                <span class="scan-score">94% Score</span>
+                                <button class="view-report-btn">👁 View Report</button>
+                            </div>
+                        </div>
+                        
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>https://company.com/products</h4>
+                                <div class="scan-meta">Multi-page • 2024-09-18</div>
+                            </div>
+                            <div style="display: flex; align-items: center;">
+                                <span class="scan-score">87% Score</span>
+                                <button class="view-report-btn">👁 View Report</button>
+                            </div>
+                        </div>
+                        
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>https://company.com/about</h4>
+                                <div class="scan-meta">Single Page • 2024-09-17</div>
+                            </div>
+                            <div style="display: flex; align-items: center;">
+                                <span class="scan-score">96% Score</span>
+                                <button class="view-report-btn">👁 View Report</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
     
     <script>
+        // Load recent scans on page load (with database integration)
         async function loadRecentScans() {
             try {
                 const response = await fetch('/api/scans/recent');
@@ -535,37 +920,16 @@ app.get('/', (req, res) => {
                         '</div>' +
                         '</div>'
                     ).join('');
-                } else {
-                    const container = document.getElementById('recentScansContainer');
-                    container.innerHTML = 
-                        '<div class="scan-item">' +
-                        '<div class="scan-info">' +
-                        '<h4>https://company.com</h4>' +
-                        '<div class="scan-meta">Single Page • 2024-09-18</div>' +
-                        '</div>' +
-                        '<div style="display: flex; align-items: center;">' +
-                        '<span class="scan-score">94% Score</span>' +
-                        '<button class="view-report-btn">👁 View Report</button>' +
-                        '</div>' +
-                        '</div>' +
-                        '<div class="scan-item">' +
-                        '<div class="scan-info">' +
-                        '<h4>https://company.com/products</h4>' +
-                        '<div class="scan-meta">Multi-page • 2024-09-18</div>' +
-                        '</div>' +
-                        '<div style="display: flex; align-items: center;">' +
-                        '<span class="scan-score">87% Score</span>' +
-                        '<button class="view-report-btn">👁 View Report</button>' +
-                        '</div>' +
-                        '</div>';
                 }
-            } catch (error ) {
+            } catch (error) {
                 console.log('Error loading recent scans:', error);
             }
         }
         
+        // Load recent scans when page loads
         document.addEventListener('DOMContentLoaded', loadRecentScans);
         
+        // PRESERVED SCANNER FUNCTIONALITY - IDENTICAL TO WORKING VERSION
         document.getElementById('scanForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const url = document.getElementById('url').value;
@@ -586,7 +950,11 @@ app.get('/', (req, res) => {
             resultsDiv.style.display = 'block';
             
             try {
-                const requestBody = { url: url, scanType: scanType };
+                const requestBody = { 
+                    url: url,
+                    scanType: scanType
+                };
+                
                 if (scanType === 'crawl') {
                     requestBody.maxPages = parseInt(maxPages);
                 }
@@ -631,11 +999,9 @@ app.get('/', (req, res) => {
                         html += '<h4>Results by Page:</h4>';
                         result.pages.forEach(function(page) {
                             html += '<div class="page-result">' +
-                                   '<strong>' + page.url + '</strong>  
-' +
+                                   '<strong>' + page.url + '</strong><br>' +
                                    'Issues: ' + page.violations.length + ' | ' +
-                                   'Time: ' + page.scanTime + 'ms  
-' +
+                                   'Time: ' + page.scanTime + 'ms<br>' +
                                    '<small>Critical: ' + page.violations.filter(function(v) { return v.impact === 'critical'; }).length + 
                                    ', Serious: ' + page.violations.filter(function(v) { return v.impact === 'serious'; }).length + 
                                    ', Moderate: ' + page.violations.filter(function(v) { return v.impact === 'moderate'; }).length + 
@@ -646,6 +1012,7 @@ app.get('/', (req, res) => {
                         resultsContent.innerHTML = html;
                     }
                     
+                    // Refresh recent scans after successful scan
                     setTimeout(loadRecentScans, 1000);
                 } else {
                     resultsContent.innerHTML = '<p class="error">❌ Error: ' + result.error + '</p>';
@@ -670,7 +1037,7 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => {
     console.log('🚀 SentryPrime Enterprise Dashboard v2.1.0 running on port ' + PORT);
-    console.log('📊 Health check: http://localhost:' + PORT + '/health' );
-    console.log('🔍 Scanner: http://localhost:' + PORT + '/' );
+    console.log('📊 Health check: http://localhost:' + PORT + '/health');
+    console.log('🔍 Scanner: http://localhost:' + PORT + '/');
     console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
 });
