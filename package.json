@@ -1,18 +1,12 @@
 {
   "name": "sentryprime-enterprise",
-  "version": "2.0.0",
-  "description": "SentryPrime Enterprise Accessibility Scanner with Professional Dashboard",
+  "version": "2.1.0",
+  "description": "Professional accessibility scanner with enterprise dashboard and database persistence",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "puppeteer": "^23.5.0",
-    "axe-core": "^4.10.0",
-    "express": "^4.19.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "accessibility",
@@ -20,8 +14,20 @@
     "axe-core",
     "puppeteer",
     "enterprise",
-    "dashboard"
+    "dashboard",
+    "saas"
   ],
   "author": "SentryPrime Team",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "puppeteer": "23.5.0",
+    "axe-core": "4.10.0",
+    "bcrypt": "^5.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
