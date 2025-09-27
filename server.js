@@ -1349,6 +1349,10 @@ app.get('/', (req, res) => {
                         </div>
                     \`).join('')}
                 </div>
+                
+                <button class="view-details-btn" onclick="showMultiPageViolationDetails(\${JSON.stringify(result.pages).replace(/"/g, '&quot;')})">
+                    ▶ View Detailed Results
+                </button>
             \`;
             
             document.getElementById('results-content').innerHTML = content;
@@ -1380,6 +1384,124 @@ app.get('/', (req, res) => {
                                 </details>
                             </div>
                         \`).join('')}
+                    </div>
+                </body>
+                </html>
+            \`);
+        }
+        
+        function showMultiPageViolationDetails(pages) {
+            // Create a detailed report window for multi-page scan results
+            const detailsWindow = window.open('', '_blank', 'width=1000,height=700');
+            
+            // Collect all violations from all pages
+            let allViolations = [];
+            pages.forEach(page => {
+                if (page.violations) {
+                    page.violations.forEach(violation => {
+                        allViolations.push({
+                            ...violation,
+                            pageUrl: page.url
+                        });
+                    });
+                }
+            });
+            
+            detailsWindow.document.write(\`
+                <html>
+                <head>
+                    <title>Multi-Page Accessibility Report</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }
+                        .page-section { border: 1px solid #ddd; margin: 20px 0; padding: 20px; border-radius: 8px; }
+                        .page-header { background: #f8f9fa; padding: 15px; margin: -20px -20px 15px -20px; border-radius: 8px 8px 0 0; }
+                        .violation { border-left: 4px solid #dc3545; margin: 15px 0; padding: 15px; background: #fff5f5; border-radius: 0 5px 5px 0; }
+                        .violation h4 { color: #dc3545; margin-bottom: 10px; }
+                        .impact-critical { border-left-color: #dc3545; background: #fff5f5; }
+                        .impact-serious { border-left-color: #fd7e14; background: #fff8f0; }
+                        .impact-moderate { border-left-color: #ffc107; background: #fffbf0; }
+                        .impact-minor { border-left-color: #28a745; background: #f0fff4; }
+                        .elements { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 4px; }
+                        .elements code { background: #e9ecef; padding: 2px 4px; border-radius: 3px; }
+                        details { margin: 10px 0; }
+                        summary { cursor: pointer; font-weight: bold; }
+                        .summary-stats { background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+                        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+                        .stat-item { text-align: center; }
+                        .stat-value { font-size: 2rem; font-weight: bold; }
+                        .stat-label { font-size: 0.9rem; color: #666; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Multi-Page Accessibility Report</h1>
+                    
+                    <div class="summary-stats">
+                        <h3>Summary</h3>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-value">\${pages.length}</div>
+                                <div class="stat-label">Pages Scanned</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${allViolations.length}</div>
+                                <div class="stat-label">Total Violations</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${allViolations.filter(v => v.impact === 'critical').length}</div>
+                                <div class="stat-label">Critical</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${allViolations.filter(v => v.impact === 'serious').length}</div>
+                                <div class="stat-label">Serious</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${allViolations.filter(v => v.impact === 'moderate').length}</div>
+                                <div class="stat-label">Moderate</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${allViolations.filter(v => v.impact === 'minor').length}</div>
+                                <div class="stat-label">Minor</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    \${pages.map(page => \`
+                        <div class="page-section">
+                            <div class="page-header">
+                                <h2>\${page.url}</h2>
+                                <p><strong>Issues found:</strong> \${page.violations ? page.violations.length : 0} • <strong>Scan time:</strong> \${page.loadTime || page.scanTime || 'N/A'}ms</p>
+                            </div>
+                            
+                            \${page.violations && page.violations.length > 0 ? 
+                                page.violations.map(violation => \`
+                                    <div class="violation impact-\${violation.impact}">
+                                        <h4>\${violation.id} (\${violation.impact.toUpperCase()})</h4>
+                                        <p><strong>Description:</strong> \${violation.description}</p>
+                                        <p><strong>Help:</strong> \${violation.help}</p>
+                                        <p><strong>Elements affected:</strong> \${violation.nodes.length}</p>
+                                        
+                                        <details>
+                                            <summary>Show affected elements (\${violation.nodes.length})</summary>
+                                            <div class="elements">
+                                                \${violation.nodes.map(node => \`
+                                                    <div style="margin: 8px 0; padding: 8px; background: white; border-radius: 4px;">
+                                                        <code>\${node.html}</code>
+                                                        \${node.failureSummary ? \`<br><small><strong>Issue:</strong> \${node.failureSummary}</small>\` : ''}
+                                                    </div>
+                                                \`).join('')}
+                                            </div>
+                                        </details>
+                                    </div>
+                                \`).join('') 
+                                : '<p style="color: #28a745; font-weight: bold;">✓ No accessibility violations found on this page!</p>'
+                            }
+                        </div>
+                    \`).join('')}
+                    
+                    <div style="margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                        <h3>Report Generated</h3>
+                        <p>This report was generated on \${new Date().toLocaleString()} by SentryPrime Enterprise Scanner.</p>
+                        <p>For more information about accessibility guidelines, visit <a href="https://www.w3.org/WAI/WCAG21/quickref/" target="_blank">WCAG 2.1 Quick Reference</a>.</p>
                     </div>
                 </body>
                 </html>
