@@ -887,7 +887,7 @@ app.get('/', async (req, res) => {
                             </div>
                         </div>
                         
-                        ${aiFixEngine ? `
+                        ${process.env.OPENAI_API_KEY ? `
                         <div class="form-group">
                             <div class="checkbox-group">
                                 <input type="checkbox" id="enableAI" checked>
@@ -1017,10 +1017,7 @@ app.get('/', async (req, res) => {
                 
                 if (result.success) {
                     displayScanResults(result);
-                    // Refresh recent scans
-                    setTimeout(() => {
-                        location.reload();
-                    }, 2000);
+                    // Results will stay visible until user navigates away
                 } else {
                     resultsContent.innerHTML = \`
                         <div style="background: #fee2e2; border: 1px solid #fecaca; border-radius: 0.5rem; padding: 1rem; color: #991b1b;">
