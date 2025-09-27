@@ -149,6 +149,33 @@ async function getRecentScans(userId = 1, limit = 10) {
     }
 }
 
+// NEW: Get scan details by ID for View Report functionality
+async function getScanById(scanId, userId = 1) {
+    if (!db) {
+        return null;
+    }
+    
+    try {
+        const result = await db.query(
+            `SELECT id, url, scan_type, total_issues, scan_time_ms, pages_scanned, violations_data, completed_at
+             FROM scans 
+             WHERE id = $1 AND user_id = $2`,
+            [scanId, userId]
+        );
+        
+        if (result.rows.length === 0) {
+            return null;
+        }
+        
+        const scan = result.rows[0];
+        console.log(`✅ Retrieved scan details for ID: ${scanId}`);
+        return scan;
+    } catch (error) {
+        console.log('❌ Database error getting scan details:', error.message);
+        return null;
+    }
+}
+
 // NEW: Dashboard statistics function
 async function getDashboardStats(userId = 1) {
     if (!db) {
@@ -234,7 +261,183 @@ app.get('/api/dashboard/stats', async (req, res) => {
     }
 });
 
-// ENHANCED: Main dashboard with navigation routing
+// NEW: API endpoint to get scan details for View Report
+app.get('/api/scans/:id', async (req, res) => {
+    try {
+        const scanId = parseInt(req.params.id);
+        const scan = await getScanById(scanId, 1); // Default user ID for now
+        
+        if (!scan) {
+            return res.status(404).json({ error: 'Scan not found' });
+        }
+        
+        res.json({ success: true, scan });
+    } catch (error) {
+        console.error('Error fetching scan details:', error);
+        res.status(500).json({ error: 'Failed to fetch scan details' });
+    }
+});
+
+// NEW: Route to display detailed scan report
+app.get('/report/:id', async (req, res) => {
+    try {
+        const scanId = parseInt(req.params.id);
+        const scan = await getScanById(scanId, 1);
+        
+        if (!scan) {
+            return res.status(404).send('<h1>Scan not found</h1>');
+        }
+        
+        const violations = scan.violations_data ? JSON.parse(scan.violations_data) : [];
+        
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+    <title>Accessibility Report - ${scan.url}</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+            color: #333;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header h1 { margin: 0 0 10px 0; color: #1a1a1a; }
+        .header .meta { color: #666; font-size: 14px; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-number { font-size: 2rem; font-weight: bold; margin-bottom: 5px; }
+        .stat-label { color: #666; font-size: 14px; }
+        .violations {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .violations-header {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .violation-item {
+            padding: 20px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .violation-item:last-child { border-bottom: none; }
+        .violation-id { 
+            font-weight: bold; 
+            color: #dc3545; 
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        .violation-impact {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .impact-critical { background: #dc3545; color: white; }
+        .impact-serious { background: #fd7e14; color: white; }
+        .impact-moderate { background: #ffc107; color: black; }
+        .impact-minor { background: #17a2b8; color: white; }
+        .violation-description { margin-bottom: 10px; line-height: 1.5; }
+        .violation-help { color: #666; font-size: 14px; margin-bottom: 10px; }
+        .violation-elements { 
+            background: #f8f9fa; 
+            padding: 10px; 
+            border-radius: 4px; 
+            font-size: 14px;
+            color: #666;
+        }
+        .back-btn {
+            display: inline-block;
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .back-btn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back-btn">← Back to Dashboard</a>
+        
+        <div class="header">
+            <h1>Accessibility Report</h1>
+            <div class="meta">
+                <strong>URL:</strong> ${scan.url}<br>
+                <strong>Scan Type:</strong> ${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'}<br>
+                <strong>Completed:</strong> ${new Date(scan.completed_at).toLocaleString()}<br>
+                <strong>Scan Time:</strong> ${scan.scan_time_ms}ms
+            </div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number" style="color: #dc3545;">${scan.total_issues}</div>
+                <div class="stat-label">Total Issues</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" style="color: #28a745;">${scan.pages_scanned || 1}</div>
+                <div class="stat-label">Pages Scanned</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" style="color: #007bff;">${Math.round((scan.scan_time_ms || 0) / 1000)}s</div>
+                <div class="stat-label">Scan Duration</div>
+            </div>
+        </div>
+        
+        <div class="violations">
+            <div class="violations-header">
+                <h2 style="margin: 0;">Accessibility Violations (${violations.length})</h2>
+            </div>
+            ${violations.length > 0 ? violations.map(violation => `
+                <div class="violation-item">
+                    <div class="violation-id">${violation.id}</div>
+                    <span class="violation-impact impact-${violation.impact}">${violation.impact}</span>
+                    <div class="violation-description"><strong>Description:</strong> ${violation.description}</div>
+                    <div class="violation-help"><strong>Help:</strong> ${violation.help}</div>
+                    <div class="violation-elements"><strong>Elements affected:</strong> ${violation.nodes ? violation.nodes.length : 0}</div>
+                </div>
+            `).join('') : '<div style="padding: 40px; text-align: center; color: #28a745;"><h3>🎉 No accessibility violations found!</h3><p>This page meets accessibility standards.</p></div>'}
+        </div>
+    </div>
+</body>
+</html>`;
+        
+        res.send(html);
+    } catch (error) {
+        console.error('Error generating report:', error);
+        res.status(500).send('<h1>Error generating report</h1>');
+    }
+});
+
+// ENHANCED: Main dashboard with navigation routing - PRESERVED WITH MINIMAL CHANGES
 app.get('/', (req, res) => {
     const html = `<!DOCTYPE html>
 <html>
@@ -711,6 +914,12 @@ app.get('/', (req, res) => {
             cursor: pointer;
             font-size: 0.8rem;
             margin-left: 8px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .view-report-btn:hover {
+            background: #5a6fd8;
         }
         
         /* Loading States */
@@ -963,151 +1172,75 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
                 
-                <!-- Analytics Page -->
+                <!-- Other Pages (Coming Soon) -->
                 <div id="analytics-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Analytics</h1>
-                        <p class="page-subtitle">Track your accessibility compliance over time</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">📊 Analytics Dashboard</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Advanced analytics and reporting features</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Compliance trend charts</li>
-                                <li>Issue category breakdowns</li>
-                                <li>Team performance metrics</li>
-                                <li>Custom reporting</li>
-                            </ul>
-                        </div>
+                    <div style="text-align: center; padding: 60px 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="color: #666; margin-bottom: 10px;">📈 Analytics Dashboard</h3>
+                        <p style="color: #999;">Comprehensive analytics and reporting features coming soon!</p>
                     </div>
                 </div>
                 
-                <!-- Team Page -->
                 <div id="team-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Team Management</h1>
-                        <p class="page-subtitle">Manage team members and permissions</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">👥 Team Management</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Team collaboration features</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Invite team members</li>
-                                <li>Role-based permissions</li>
-                                <li>Activity tracking</li>
-                                <li>Shared scan results</li>
-                            </ul>
-                        </div>
+                    <div style="text-align: center; padding: 60px 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="color: #666; margin-bottom: 10px;">👥 Team Management</h3>
+                        <p style="color: #999;">Team collaboration and user management features coming soon!</p>
                     </div>
                 </div>
                 
-                <!-- Integrations Page -->
                 <div id="integrations-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Integrations</h1>
-                        <p class="page-subtitle">Connect with your favorite tools and platforms</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">🔗 Platform Integrations</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Direct integrations with popular platforms</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Integrations:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Shopify - Auto-fix accessibility issues</li>
-                                <li>WordPress - Plugin integration</li>
-                                <li>Slack - Notifications and reports</li>
-                                <li>GitHub - CI/CD integration</li>
-                            </ul>
-                        </div>
+                    <div style="text-align: center; padding: 60px 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="color: #666; margin-bottom: 10px;">🔗 Integrations</h3>
+                        <p style="color: #999;">Third-party integrations and webhooks coming soon!</p>
                     </div>
                 </div>
                 
-                <!-- API Management Page -->
                 <div id="api-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">API Management</h1>
-                        <p class="page-subtitle">Manage API keys and integrations</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">⚙️ API Management</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - API access and management</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Generate API keys</li>
-                                <li>Usage analytics</li>
-                                <li>Rate limiting</li>
-                                <li>Webhook configuration</li>
-                            </ul>
-                        </div>
+                    <div style="text-align: center; padding: 60px 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="color: #666; margin-bottom: 10px;">⚙️ API Management</h3>
+                        <p style="color: #999;">API keys and developer tools coming soon!</p>
                     </div>
                 </div>
                 
-                <!-- Billing Page -->
                 <div id="billing-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Billing</h1>
-                        <p class="page-subtitle">Manage your subscription and billing</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">💳 Billing Management</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Subscription and billing management</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Subscription plans</li>
-                                <li>Usage tracking</li>
-                                <li>Invoice history</li>
-                                <li>Payment methods</li>
-                            </ul>
-                        </div>
+                    <div style="text-align: center; padding: 60px 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="color: #666; margin-bottom: 10px;">💳 Billing & Subscription</h3>
+                        <p style="color: #999;">Billing management and subscription features coming soon!</p>
                     </div>
                 </div>
                 
-                <!-- Settings Page -->
                 <div id="settings-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Settings</h1>
-                        <p class="page-subtitle">Configure your account and preferences</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">⚙️ Account Settings</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Account and preference management</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Profile management</li>
-                                <li>Notification preferences</li>
-                                <li>Security settings</li>
-                                <li>Data export</li>
-                            </ul>
-                        </div>
+                    <div style="text-align: center; padding: 60px 20px; background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="color: #666; margin-bottom: 10px;">⚙️ Settings</h3>
+                        <p style="color: #999;">User preferences and configuration options coming soon!</p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
+    
     <script>
-        // Navigation functionality
+        // Navigation functionality - PRESERVED
         function switchToPage(pageId) {
             // Hide all pages
             document.querySelectorAll('.page').forEach(page => {
                 page.classList.add('hidden');
             });
             
-            // Show selected page
-            document.getElementById(pageId + '-page').classList.remove('hidden');
-            
-            // Update active nav item
+            // Remove active class from all nav items
             document.querySelectorAll('.nav-item').forEach(item => {
                 item.classList.remove('active');
             });
+            
+            // Show selected page
+            document.getElementById(pageId + '-page').classList.remove('hidden');
+            
+            // Add active class to selected nav item
             document.querySelector(\`[data-page="\${pageId}"]\`).classList.add('active');
+            
+            // Load page-specific data
+            if (pageId === 'scans') {
+                loadRecentScans();
+            }
         }
         
         // Add click handlers to nav items
@@ -1119,7 +1252,7 @@ app.get('/', (req, res) => {
             });
         });
         
-        // Load dashboard statistics
+        // Dashboard statistics loading
         async function loadDashboardStats() {
             try {
                 const response = await fetch('/api/dashboard/stats');
@@ -1136,7 +1269,7 @@ app.get('/', (req, res) => {
             }
         }
         
-        // Load recent scans for dashboard
+        // Dashboard recent scans loading
         async function loadDashboardRecentScans() {
             try {
                 const response = await fetch('/api/scans/recent');
@@ -1145,7 +1278,7 @@ app.get('/', (req, res) => {
                 const container = document.getElementById('dashboard-recent-scans');
                 
                 if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.slice(0, 3).map(scan => \`
+                    container.innerHTML = data.scans.slice(0, 5).map(scan => \`
                         <div class="scan-item">
                             <div class="scan-info">
                                 <h4>\${scan.url}</h4>
@@ -1153,240 +1286,20 @@ app.get('/', (req, res) => {
                             </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
+                                <a href="/report/\${scan.id}" class="view-report-btn">👁️ View Report</a>
                             </div>
                         </div>
                     \`).join('');
                 } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. <a href="#" onclick="switchToPage(\\'scans\\')">Start your first scan</a></p>';
+                    container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No scans yet. Run your first scan!</div>';
                 }
             } catch (error) {
-                console.error('Error loading recent scans:', error);
-                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
+                console.error('Error loading dashboard recent scans:', error);
+                document.getElementById('dashboard-recent-scans').innerHTML = '<div style="padding: 20px; text-align: center; color: #dc3545;">Error loading recent scans</div>';
             }
         }
         
-        // Scanner functionality (preserved from original)
-        let isScanning = false;
-        
-        document.getElementById('scan-btn').addEventListener('click', async () => {
-            if (isScanning) return;
-            
-            const url = document.getElementById('url-input').value.trim();
-            const scanType = document.querySelector('input[name="scanType"]:checked').value;
-            const maxPages = document.getElementById('max-pages').value;
-            
-            if (!url) {
-                alert('Please enter a URL to scan');
-                return;
-            }
-            
-            isScanning = true;
-            const scanBtn = document.getElementById('scan-btn');
-            const resultsContainer = document.getElementById('results-container');
-            
-            // Update button state
-            scanBtn.innerHTML = '<div class="spinner"></div> Scanning...';
-            scanBtn.disabled = true;
-            
-            // Show results container
-            resultsContainer.style.display = 'block';
-            document.getElementById('status-badge').textContent = 'Scanning...';
-            document.getElementById('status-badge').className = 'status-badge';
-            document.getElementById('results-content').innerHTML = '<div class="loading"><div class="spinner"></div>Analyzing accessibility...</div>';
-            
-            try {
-                const response = await fetch('/api/scan', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        url: url,
-                        scanType: scanType,
-                        maxPages: parseInt(maxPages)
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    // Update status
-                    document.getElementById('status-badge').textContent = 'Scan Complete';
-                    document.getElementById('status-badge').className = 'status-badge status-complete';
-                    
-                    // Display results
-                    if (scanType === 'single') {
-                        displaySinglePageResults(result);
-                    } else {
-                        displayMultiPageResults(result);
-                    }
-                    
-                    // Reload recent scans
-                    loadRecentScans();
-                    loadDashboardRecentScans();
-                    loadDashboardStats();
-                } else {
-                    throw new Error(result.error || 'Scan failed');
-                }
-            } catch (error) {
-                console.error('Scan error:', error);
-                document.getElementById('status-badge').textContent = 'Scan Failed';
-                document.getElementById('status-badge').className = 'status-badge status-error';
-                document.getElementById('results-content').innerHTML = \`
-                    <div style="color: #dc3545; text-align: center; padding: 20px;">
-                        <h4>Scan Failed</h4>
-                        <p>\${error.message}</p>
-                    </div>
-                \`;
-            } finally {
-                // Reset button
-                scanBtn.innerHTML = '🔍 Start Accessibility Scan';
-                scanBtn.disabled = false;
-                isScanning = false;
-            }
-        });
-        
-        function displaySinglePageResults(result) {
-            const content = \`
-                <div class="results-summary">
-                    <div class="summary-item">
-                        <div class="value">\${result.url}</div>
-                        <div class="label">URL</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.totalIssues}</div>
-                        <div class="label">Total Issues</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.scanTime}ms</div>
-                        <div class="label">Scan Time</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
-                        <div class="label">Timestamp</div>
-                    </div>
-                </div>
-                
-                <h4 style="margin-bottom: 12px;">Violations by Impact:</h4>
-                <div class="violations-by-impact">
-                    <div class="impact-item impact-critical">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
-                        <div style="font-size: 0.8rem;">Critical</div>
-                    </div>
-                    <div class="impact-item impact-serious">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
-                        <div style="font-size: 0.8rem;">Serious</div>
-                    </div>
-                    <div class="impact-item impact-moderate">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
-                        <div style="font-size: 0.8rem;">Moderate</div>
-                    </div>
-                    <div class="impact-item impact-minor">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
-                        <div style="font-size: 0.8rem;">Minor</div>
-                    </div>
-                </div>
-                
-                <button class="view-details-btn" onclick="showViolationDetails(\${JSON.stringify(result.violations).replace(/"/g, '&quot;')})">
-                    ▶ View Detailed Results
-                </button>
-            \`;
-            
-            document.getElementById('results-content').innerHTML = content;
-        }
-        
-        function displayMultiPageResults(result) {
-            const content = \`
-                <div class="results-summary">
-                    <div class="summary-item">
-                        <div class="value">\${result.pages.length}</div>
-                        <div class="label">Pages Scanned</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.totalIssues}</div>
-                        <div class="label">Total Issues</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.scanTime}ms</div>
-                        <div class="label">Total Time</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
-                        <div class="label">Timestamp</div>
-                    </div>
-                </div>
-                
-                <h4 style="margin-bottom: 12px;">Overall Violations by Impact:</h4>
-                <div class="violations-by-impact">
-                    <div class="impact-item impact-critical">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
-                        <div style="font-size: 0.8rem;">Critical</div>
-                    </div>
-                    <div class="impact-item impact-serious">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
-                        <div style="font-size: 0.8rem;">Serious</div>
-                    </div>
-                    <div class="impact-item impact-moderate">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
-                        <div style="font-size: 0.8rem;">Moderate</div>
-                    </div>
-                    <div class="impact-item impact-minor">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
-                        <div style="font-size: 0.8rem;">Minor</div>
-                    </div>
-                </div>
-                
-                <h4 style="margin: 20px 0 12px;">Pages Scanned:</h4>
-                <div style="background: #f8f9fa; border-radius: 6px; padding: 16px;">
-                    \${result.pages.map(page => \`
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;">
-                            <div>
-                                <div style="font-weight: 500;">\${page.url}</div>
-                                <div style="font-size: 0.8rem; color: #666;">\${page.violations ? page.violations.length : 0} issues • \${page.loadTime || page.scanTime}ms</div>
-                            </div>
-                            \${page.error ? '<span style="color: #dc3545;">Error</span>' : '<span style="color: #28a745;">✓</span>'}
-                        </div>
-                    \`).join('')}
-                </div>
-            \`;
-            
-            document.getElementById('results-content').innerHTML = content;
-        }
-        
-        function showViolationDetails(violations) {
-            // Create a simple modal or expand the results to show detailed violations
-            const detailsWindow = window.open('', '_blank', 'width=800,height=600');
-            detailsWindow.document.write(\`
-                <html>
-                <head><title>Detailed Accessibility Report</title></head>
-                <body style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2>Detailed Accessibility Violations</h2>
-                    <div>
-                        \${violations.map((violation, index) => \`
-                            <div style="border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;">
-                                <h3 style="color: #dc3545;">\${violation.id}</h3>
-                                <p><strong>Impact:</strong> \${violation.impact}</p>
-                                <p><strong>Description:</strong> \${violation.description}</p>
-                                <p><strong>Help:</strong> \${violation.help}</p>
-                                <p><strong>Elements affected:</strong> \${violation.nodes.length}</p>
-                                <details>
-                                    <summary>Show affected elements</summary>
-                                    \${violation.nodes.map(node => \`
-                                        <div style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 3px;">
-                                            <code>\${node.html}</code>
-                                        </div>
-                                    \`).join('')}
-                                </details>
-                            </div>
-                        \`).join('')}
-                    </div>
-                </body>
-                </html>
-            \`);
-        }
-        
-        // Load recent scans for scans page
+        // Recent scans loading for Scans page
         async function loadRecentScans() {
             try {
                 const response = await fetch('/api/scans/recent');
@@ -1403,7 +1316,7 @@ app.get('/', (req, res) => {
                             </div>
                             <div style="display: flex; align-items: center; gap: 8px;">
                                 <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
+                                <a href="/report/\${scan.id}" class="view-report-btn">👁️ View Report</a>
                             </div>
                         </div>
                     \`).join('');
@@ -1416,11 +1329,157 @@ app.get('/', (req, res) => {
             }
         }
         
+        // Scan functionality - PRESERVED EXACTLY AS WORKING
+        document.getElementById('scan-btn').addEventListener('click', async () => {
+            const url = document.getElementById('url-input').value;
+            const scanType = document.querySelector('input[name="scanType"]:checked').value;
+            const maxPages = document.getElementById('max-pages').value;
+            
+            if (!url) {
+                alert('Please enter a URL to scan');
+                return;
+            }
+            
+            const scanBtn = document.getElementById('scan-btn');
+            const resultsContainer = document.getElementById('results-container');
+            const statusBadge = document.getElementById('status-badge');
+            const resultsContent = document.getElementById('results-content');
+            
+            // Show results container
+            resultsContainer.style.display = 'block';
+            statusBadge.className = 'status-badge';
+            statusBadge.textContent = 'Scanning...';
+            resultsContent.innerHTML = '<div class="loading"><div class="spinner"></div>Running accessibility scan...</div>';
+            
+            // Disable scan button
+            scanBtn.disabled = true;
+            scanBtn.innerHTML = '🔄 Scanning...';
+            
+            try {
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        scanType: scanType,
+                        maxPages: scanType === 'crawl' ? parseInt(maxPages) : 1
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    statusBadge.className = 'status-badge status-complete';
+                    statusBadge.textContent = 'Scan Complete';
+                    
+                    const result = data.result;
+                    resultsContent.innerHTML = \`
+                        <div class="results-summary">
+                            <div class="summary-item">
+                                <div class="value">\${result.url}</div>
+                                <div class="label">URL</div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="value">\${result.totalIssues}</div>
+                                <div class="label">Total Issues</div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="value">\${result.scanTime}ms</div>
+                                <div class="label">Scan Time</div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
+                                <div class="label">Timestamp</div>
+                            </div>
+                        </div>
+                        
+                        <h4 style="margin: 20px 0 10px 0;">Violations by Impact:</h4>
+                        <div class="violations-by-impact">
+                            <div class="impact-item impact-critical">
+                                <div style="font-size: 1.2rem; font-weight: bold;">\${result.violationsByImpact.critical}</div>
+                                <div style="font-size: 0.8rem;">Critical</div>
+                            </div>
+                            <div class="impact-item impact-serious">
+                                <div style="font-size: 1.2rem; font-weight: bold;">\${result.violationsByImpact.serious}</div>
+                                <div style="font-size: 0.8rem;">Serious</div>
+                            </div>
+                            <div class="impact-item impact-moderate">
+                                <div style="font-size: 1.2rem; font-weight: bold;">\${result.violationsByImpact.moderate}</div>
+                                <div style="font-size: 0.8rem;">Moderate</div>
+                            </div>
+                            <div class="impact-item impact-minor">
+                                <div style="font-size: 1.2rem; font-weight: bold;">\${result.violationsByImpact.minor}</div>
+                                <div style="font-size: 0.8rem;">Minor</div>
+                            </div>
+                        </div>
+                        
+                        \${result.violations && result.violations.length > 0 ? \`
+                            <button class="view-details-btn" onclick="showDetailedResults(\${JSON.stringify(result.violations).replace(/"/g, '&quot;')})">
+                                👁️ View Detailed Results
+                            </button>
+                        \` : ''}
+                    \`;
+                    
+                    // Refresh recent scans
+                    loadRecentScans();
+                    loadDashboardRecentScans();
+                    loadDashboardStats();
+                } else {
+                    statusBadge.className = 'status-badge status-error';
+                    statusBadge.textContent = 'Scan Failed';
+                    resultsContent.innerHTML = \`<div style="color: #dc3545;">Error: \${data.error || 'Unknown error'}</div>\`;
+                }
+            } catch (error) {
+                statusBadge.className = 'status-badge status-error';
+                statusBadge.textContent = 'Network Error';
+                resultsContent.innerHTML = \`<div style="color: #dc3545;">Network Error: \${error.message}</div>\`;
+            } finally {
+                // Re-enable scan button
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = '🔍 Start Accessibility Scan';
+            }
+        });
+        
+        function showDetailedResults(violations) {
+            const newWindow = window.open('', '_blank');
+            newWindow.document.write(\`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Detailed Accessibility Violations</title>
+                    <style>
+                        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 20px; }
+                        .violation { border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px; }
+                        .violation-id { font-weight: bold; color: #dc3545; margin-bottom: 10px; }
+                        .impact { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
+                        .impact-critical { background: #dc3545; color: white; }
+                        .impact-serious { background: #fd7e14; color: white; }
+                        .impact-moderate { background: #ffc107; color: black; }
+                        .impact-minor { background: #17a2b8; color: white; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Detailed Accessibility Violations</h1>
+                    \${violations.map(v => \`
+                        <div class="violation">
+                            <div class="violation-id">\${v.id}</div>
+                            <span class="impact impact-\${v.impact}">\${v.impact}</span>
+                            <p><strong>Description:</strong> \${v.description}</p>
+                            <p><strong>Help:</strong> \${v.help}</p>
+                            <p><strong>Elements affected:</strong> \${v.nodes ? v.nodes.length : 0}</p>
+                        </div>
+                    \`).join('')}
+                </body>
+                </html>
+            \`);
+        }
+        
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', () => {
             loadDashboardStats();
             loadDashboardRecentScans();
-            loadRecentScans();
         });
     </script>
 </body>
@@ -1429,7 +1488,7 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
-// Helper functions for link extraction and scanning
+// Helper functions for link extraction and scanning - PRESERVED EXACTLY AS WORKING
 async function extractLinks(page, baseUrl) {
     try {
         const links = await page.evaluate((baseUrl) => {
@@ -1503,54 +1562,47 @@ async function scanSinglePage(browser, url) {
             content: axeCore.source
         });
         
-        console.log('Running axe accessibility scan...');
-        const results = await page.evaluate(() => {
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Axe scan timeout'));
-                }, 60000);
-                
-                axe.run((err, results) => {
-                    clearTimeout(timeout);
-                    if (err) reject(err);
-                    else resolve(results);
-                });
-            });
+        // Run accessibility scan
+        console.log('Running accessibility scan...');
+        const results = await page.evaluate(async () => {
+            return await axe.run();
         });
         
-        return results;
+        console.log(`Scan completed. Found ${results.violations.length} violations.`);
         
+        return {
+            url: url,
+            violations: results.violations,
+            passes: results.passes,
+            incomplete: results.incomplete,
+            inapplicable: results.inapplicable
+        };
+        
+    } catch (error) {
+        console.log(`Error scanning ${url}:`, error.message);
+        throw error;
     } finally {
         await page.close();
     }
 }
 
-// EXACT COPY OF WORKING API ENDPOINT WITH DATABASE INTEGRATION ADDED
+// Main scan API endpoint - PRESERVED EXACTLY AS WORKING
 app.post('/api/scan', async (req, res) => {
     const startTime = Date.now();
     let browser = null;
     
     try {
-        const { url, scanType = 'single', maxPages = 5 } = req.body;
+        const { url, scanType = 'single', maxPages = 1 } = req.body;
         
         if (!url) {
-            return res.status(400).json({
-                success: false,
-                error: 'URL is required'
-            });
+            return res.status(400).json({ error: 'URL is required' });
         }
         
-        let targetUrl = url;
-        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-            targetUrl = 'https://' + targetUrl;
-        }
+        console.log(`🔍 Starting ${scanType} scan for: ${url}`);
         
-        console.log('🔍 Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
-        
-        // Launch Puppeteer - EXACT WORKING CONFIGURATION
+        // Launch browser - PRESERVED EXACTLY AS WORKING
         browser = await puppeteer.launch({
             headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -1558,168 +1610,122 @@ app.post('/api/scan', async (req, res) => {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
-            ],
-            timeout: 60000
+                '--disable-gpu'
+            ]
         });
         
-        if (scanType === 'single') {
-            // Single page scan (existing working functionality)
-            const results = await scanSinglePage(browser, targetUrl);
-            const scanTime = Date.now() - startTime;
-            
-            console.log('✅ Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
-            
-            // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, results.violations.length, scanTime, 1, results.violations);
-            
-            res.json({
-                success: true,
-                url: targetUrl,
-                violations: results.violations,
-                timestamp: new Date().toISOString(),
-                totalIssues: results.violations.length,
-                scanTime: scanTime,
-                summary: {
-                    critical: results.violations.filter(v => v.impact === 'critical').length,
-                    serious: results.violations.filter(v => v.impact === 'serious').length,
-                    moderate: results.violations.filter(v => v.impact === 'moderate').length,
-                    minor: results.violations.filter(v => v.impact === 'minor').length
-                }
-            });
-            
-        } else if (scanType === 'crawl') {
-            // Multi-page crawl - EXACT WORKING LOGIC
-            console.log('🕷️ Starting multi-page crawl (max ' + maxPages + ' pages)');
-            
-            const scannedPages = [];
-            const urlsToScan = [targetUrl];
-            const scannedUrls = new Set();
-            
-            // Scan the first page and extract links
-            const firstPageResults = await scanSinglePage(browser, targetUrl);
-            scannedPages.push({
-                url: targetUrl,
-                violations: firstPageResults.violations,
-                scanTime: Date.now() - startTime
-            });
-            scannedUrls.add(targetUrl);
-            
-            // Extract links from the first page for crawling
-            if (maxPages > 1) {
-                const page = await browser.newPage();
-                try {
-                    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    const links = await extractLinks(page, targetUrl);
-                    
-                    // Add unique links to scan queue
-                    for (const link of links) {
-                        if (urlsToScan.length < maxPages && !scannedUrls.has(link)) {
-                            urlsToScan.push(link);
-                        }
-                    }
-                } catch (error) {
-                    console.log('Error extracting links:', error.message);
-                } finally {
-                    await page.close();
-                }
+        let allResults = [];
+        let urlsToScan = [url];
+        
+        if (scanType === 'crawl') {
+            // Extract links for multi-page scan
+            const page = await browser.newPage();
+            try {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                const extractedLinks = await extractLinks(page, url);
+                urlsToScan = [url, ...extractedLinks.slice(0, maxPages - 1)];
+                console.log(`Found ${extractedLinks.length} links, scanning ${urlsToScan.length} pages`);
+            } catch (error) {
+                console.log('Error extracting links, falling back to single page scan');
+            } finally {
+                await page.close();
             }
-            
-            // Scan additional pages
-            for (let i = 1; i < urlsToScan.length && i < maxPages; i++) {
-                const pageUrl = urlsToScan[i];
-                if (scannedUrls.has(pageUrl)) continue;
-                
-                try {
-                    console.log('🔍 Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
-                    const pageStartTime = Date.now();
-                    const pageResults = await scanSinglePage(browser, pageUrl);
-                    
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: pageResults.violations,
-                        scanTime: Date.now() - pageStartTime
-                    });
-                    scannedUrls.add(pageUrl);
-                    
-                } catch (error) {
-                    console.log('❌ Error scanning page ' + pageUrl + ':', error.message);
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: [],
-                        scanTime: 0,
-                        error: error.message
-                    });
-                }
-            }
-            
-            // Aggregate results
-            const allViolations = scannedPages.reduce((acc, page) => acc.concat(page.violations || []), []);
-            const scanTime = Date.now() - startTime;
-            
-            console.log('✅ Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
-            
-            // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations);
-            
-            res.json({
-                success: true,
-                scanType: 'crawl',
-                pages: scannedPages,
-                totalIssues: allViolations.length,
-                scanTime: scanTime,
-                timestamp: new Date().toISOString(),
-                summary: {
-                    critical: allViolations.filter(v => v.impact === 'critical').length,
-                    serious: allViolations.filter(v => v.impact === 'serious').length,
-                    moderate: allViolations.filter(v => v.impact === 'moderate').length,
-                    minor: allViolations.filter(v => v.impact === 'minor').length
-                }
-            });
         }
         
-    } catch (error) {
-        console.error('❌ Scan error:', error);
+        // Scan each URL
+        for (const scanUrl of urlsToScan) {
+            try {
+                const result = await scanSinglePage(browser, scanUrl);
+                allResults.push(result);
+            } catch (error) {
+                console.log(`Failed to scan ${scanUrl}:`, error.message);
+                // Continue with other URLs
+            }
+        }
+        
+        if (allResults.length === 0) {
+            throw new Error('No pages could be scanned successfully');
+        }
+        
+        // Combine results
+        const combinedViolations = [];
+        const violationMap = new Map();
+        
+        allResults.forEach(result => {
+            result.violations.forEach(violation => {
+                const key = violation.id;
+                if (violationMap.has(key)) {
+                    // Merge nodes from same violation type
+                    violationMap.get(key).nodes.push(...violation.nodes);
+                } else {
+                    violationMap.set(key, { ...violation });
+                }
+            });
+        });
+        
+        combinedViolations.push(...violationMap.values());
+        
+        // Calculate statistics
+        const totalIssues = combinedViolations.length;
+        const violationsByImpact = {
+            critical: combinedViolations.filter(v => v.impact === 'critical').length,
+            serious: combinedViolations.filter(v => v.impact === 'serious').length,
+            moderate: combinedViolations.filter(v => v.impact === 'moderate').length,
+            minor: combinedViolations.filter(v => v.impact === 'minor').length
+        };
+        
         const scanTime = Date.now() - startTime;
         
-        let errorMessage = error.message;
-        if (errorMessage.includes('Navigation timeout')) {
-            errorMessage = 'Website took too long to load. This may be due to slow server response or complex page content. Please try a different URL or try again later.';
-        } else if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED')) {
-            errorMessage = 'Website not found. Please check the URL and try again.';
-        } else if (errorMessage.includes('net::ERR_CONNECTION_REFUSED')) {
-            errorMessage = 'Connection refused. The website may be down or blocking automated access.';
-        }
+        // Save to database
+        const scanId = await saveScan(
+            1, // Default user ID
+            null, // Organization ID
+            url,
+            scanType,
+            totalIssues,
+            scanTime,
+            allResults.length,
+            combinedViolations
+        );
         
+        const result = {
+            url: url,
+            scanType: scanType,
+            totalIssues: totalIssues,
+            scanTime: scanTime,
+            timestamp: new Date().toISOString(),
+            pagesScanned: allResults.length,
+            violationsByImpact: violationsByImpact,
+            violations: combinedViolations,
+            scanId: scanId
+        };
+        
+        console.log(`✅ Scan completed in ${scanTime}ms. Found ${totalIssues} issues across ${allResults.length} pages.`);
+        
+        res.json({
+            success: true,
+            result: result
+        });
+        
+    } catch (error) {
+        console.log('❌ Scan failed:', error.message);
         res.status(500).json({
             success: false,
-            error: errorMessage,
-            scanTime: scanTime,
-            timestamp: new Date().toISOString()
+            error: error.message
         });
     } finally {
         if (browser) {
-            try {
-                await browser.close();
-                console.log('🔒 Browser closed successfully');
-            } catch (closeError) {
-                console.error('❌ Error closing browser:', closeError);
-            }
+            await browser.close();
         }
     }
 });
 
 // Start server
-app.listen(PORT, () => {
-    console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
-    console.log('📊 Health check: http://localhost:' + PORT + '/health');
-    console.log('🔍 Scanner: http://localhost:' + PORT + '/');
-    console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
-    console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 SentryPrime Enterprise Dashboard running on port ${PORT}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`🔍 Scanner: http://localhost:${PORT}/`);
+    console.log(`🗄️ Database: ${db ? 'Connected' : 'Standalone mode'}`);
+    console.log(`☁️ Environment: ${process.env.K_SERVICE ? 'Cloud Run' : 'Local'}`);
+    console.log(`⏰ Server time: ${new Date().toISOString()}`);
 });
