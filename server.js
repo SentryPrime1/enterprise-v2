@@ -209,6 +209,71 @@ async function getDashboardStats(userId = 1) {
     }
 }
 
+// ENHANCED: Puppeteer browser launch with Cloud Run compatibility
+async function launchBrowser() {
+    const isCloudRun = process.env.K_SERVICE;
+    
+    let launchOptions = {
+        headless: 'new',
+        timeout: 60000,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--disable-ipc-flooding-protection',
+            '--disable-extensions',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-translate',
+            '--hide-scrollbars',
+            '--mute-audio',
+            '--no-default-browser-check',
+            '--no-pings',
+            '--single-process'
+        ]
+    };
+    
+    if (isCloudRun) {
+        console.log('☁️ Launching browser for Cloud Run environment');
+        // For Cloud Run, let Puppeteer find Chrome automatically
+        // The Cloud Run container should have Chrome installed
+    } else {
+        console.log('🖥️ Launching browser for local environment');
+    }
+    
+    try {
+        const browser = await puppeteer.launch(launchOptions);
+        console.log('✅ Browser launched successfully');
+        return browser;
+    } catch (error) {
+        console.log('❌ Failed to launch browser with default settings:', error.message);
+        
+        // Fallback: try with minimal args
+        console.log('🔄 Trying fallback browser launch...');
+        const fallbackOptions = {
+            headless: 'new',
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        };
+        
+        try {
+            const browser = await puppeteer.launch(fallbackOptions);
+            console.log('✅ Browser launched with fallback settings');
+            return browser;
+        } catch (fallbackError) {
+            console.log('❌ Fallback browser launch also failed:', fallbackError.message);
+            throw new Error('Unable to launch browser. Chrome may not be installed in the container.');
+        }
+    }
+}
+
 // Health check - PRESERVED
 app.get('/health', (req, res) => {
     res.json({ 
@@ -1554,7 +1619,7 @@ async function scanSinglePage(browser, url) {
     }
 }
 
-// Main scan API endpoint - PRESERVED FROM WORKING VERSION
+// Main scan API endpoint - ENHANCED with better browser handling
 app.post('/api/scan', async (req, res) => {
     const startTime = Date.now();
     let browser = null;
@@ -1568,23 +1633,8 @@ app.post('/api/scan', async (req, res) => {
         
         console.log(`🔍 Starting ${scanType} scan for: ${url}`);
         
-        // Launch browser with optimized settings
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-gpu',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
-            ],
-            timeout: 60000
-        });
+        // Launch browser with enhanced error handling
+        browser = await launchBrowser();
         
         let allResults = [];
         let urlsToScan = [url];
