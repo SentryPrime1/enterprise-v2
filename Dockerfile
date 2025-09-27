@@ -15,14 +15,13 @@ RUN apt-get update \
 WORKDIR /usr/src/app
 
 # Copy package files
-COPY package-production.json package.json
-COPY ai-fix-engine-corrected.js ./
+COPY package*.json ./
 
 # Install dependencies
 RUN npm install --only=production
 
 # Copy application code
-COPY server-production-ready.js ./
+COPY server.js ./
 
 # Create a non-privileged user that the app will run under
 RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
@@ -37,4 +36,4 @@ USER pptruser
 EXPOSE 8080
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
