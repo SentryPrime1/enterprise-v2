@@ -873,15 +873,15 @@ app.get('/', (req, res) => {
                                     <input type="number" id="maxPages" value="5" min="2" max="20"> pages)
                                 </label>
                                 
-                                ${process.env.OPENAI_API_KEY ? `
-                                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e1e5e9;">
+${process.env.OPENAI_API_KEY ? 
+                                `<div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e1e5e9;">
                                     <label style="display: flex; align-items: center; gap: 8px;">
                                         <input type="checkbox" id="enableAI" checked> 
                                         Enable AI Fix Suggestions
                                         <span style="background: linear-gradient(135deg, #8b5cf6, #3b82f6); color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600;">NEW</span>
                                     </label>
-                                </div>
-                                ` : ''}
+                                </div>` : 
+                                ''}
                             </div>
                             
                             <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
