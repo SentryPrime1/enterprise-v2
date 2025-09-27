@@ -48,247 +48,177 @@ if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && pro
             password: process.env.DB_PASSWORD,
             connectionTimeoutMillis: 10000,
             idleTimeoutMillis: 30000,
-            max: 10
         };
-        console.log('🔌 Unix socket path:', `/cloudsql/${process.env.DB_HOST}`);
     } else {
-        // Local or other environment - use TCP connection
-        console.log('🌐 Using TCP connection');
+        // Local development or other environments
+        console.log('💻 Using standard TCP connection');
         dbConfig = {
             host: process.env.DB_HOST,
-            port: process.env.DB_PORT || 5432,
             database: process.env.DB_NAME,
             user: process.env.DB_USER,
             password: process.env.DB_PASSWORD,
+            port: process.env.DB_PORT || 5432,
             ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
             connectionTimeoutMillis: 10000,
             idleTimeoutMillis: 30000,
-            max: 10
         };
     }
-
+    
     db = new Pool(dbConfig);
     
-    // Test database connection with detailed logging
-    db.query('SELECT NOW() as current_time, version() as pg_version')
-        .then((result) => {
+    // Test database connection
+    db.connect()
+        .then(client => {
             console.log('✅ Database connected successfully!');
-            console.log('⏰ Server time:', result.rows[0].current_time);
-            console.log('🐘 PostgreSQL version:', result.rows[0].pg_version.split(' ')[0]);
+            client.release();
         })
         .catch(err => {
-            console.log('❌ Database connection failed, running in standalone mode');
-            console.log('🔍 Error details:', err.message);
-            console.log('🔍 Error code:', err.code);
+            console.error('❌ Database connection failed:', err.message);
             db = null;
         });
 } else {
-    console.log('ℹ️ No database configuration found, running in standalone mode');
+    console.log('ℹ️ Database connection disabled - missing environment variables');
 }
 
-// Database helper functions - PRESERVED FROM WORKING VERSION
-async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned, violations, aiFixesData = null) {
+// Helper function to save scan to database
+async function saveScanToDatabase(scanData) {
     if (!db) {
-        console.log('⚠️ No database connection, skipping scan save');
+        console.log('⚠️ Database not available, skipping save');
         return null;
     }
     
     try {
-        const result = await db.query(
-            `INSERT INTO scans (user_id, organization_id, url, scan_type, status, total_issues, scan_time_ms, pages_scanned, violations_data, ai_fixes_data, completed_at) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) 
-             RETURNING id`,
-            [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned || 1, JSON.stringify(violations), aiFixesData ? JSON.stringify(aiFixesData) : null]
-        );
+        const query = `
+            INSERT INTO scans (user_id, organization_id, url, scan_type, status, total_issues, scan_time_ms, pages_scanned, violations_data, completed_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            RETURNING id
+        `;
         
+        const values = [
+            scanData.user_id || 1,
+            scanData.organization_id || null,
+            scanData.url,
+            scanData.scan_type || 'single',
+            scanData.status || 'completed',
+            scanData.total_issues || 0,
+            scanData.scan_time_ms || null,
+            scanData.pages_scanned || 1,
+            JSON.stringify(scanData.violations_data || {})
+        ];
+        
+        const result = await db.query(query, values);
         const scanId = result.rows[0].id;
         console.log('✅ Scan saved to database with ID:', scanId);
         return scanId;
     } catch (error) {
-        console.log('❌ Database error saving scan:', error.message);
-        // If ai_fixes_data column doesn't exist, try without it
-        if (error.message.includes('ai_fixes_data')) {
-            try {
-                const result = await db.query(
-                    `INSERT INTO scans (user_id, organization_id, url, scan_type, status, total_issues, scan_time_ms, pages_scanned, violations_data, completed_at) 
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) 
-                     RETURNING id`,
-                    [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned || 1, JSON.stringify(violations)]
-                );
-                
-                const scanId = result.rows[0].id;
-                console.log('✅ Scan saved to database with ID (without AI data):', scanId);
-                return scanId;
-            } catch (fallbackError) {
-                console.log('❌ Database error on fallback save:', fallbackError.message);
-                return null;
-            }
-        }
+        console.error('❌ Database error saving scan:', error.message);
         return null;
     }
 }
 
-async function getRecentScans(userId = 1, limit = 10) {
+// Helper function to get recent scans from database
+async function getRecentScans(limit = 10) {
     if (!db) {
-        // Return mock data when no database connection
-        console.log('⚠️ No database connection, returning mock data');
-        return [
-            { 
-                id: 1, 
-                url: 'https://company.com', 
-                scan_type: 'single', 
-                total_issues: 7, 
-                created_at: '2024-09-18',
-                score: 94 
-            },
-            { 
-                id: 2, 
-                url: 'https://company.com/products', 
-                scan_type: 'crawl', 
-                total_issues: 12, 
-                created_at: '2024-09-18',
-                score: 87 
-            },
-            { 
-                id: 3, 
-                url: 'https://company.com/about', 
-                scan_type: 'single', 
-                total_issues: 3, 
-                created_at: '2024-09-17',
-                score: 96 
-            }
-        ];
+        console.log('⚠️ Database not available, returning empty scans');
+        return [];
     }
     
     try {
-        const result = await db.query(
-            `SELECT id, url, scan_type, total_issues, completed_at as created_at, 
-                    CASE WHEN ai_fixes_data IS NOT NULL THEN true ELSE false END as has_ai_fixes
-             FROM scans 
-             WHERE user_id = $1 
-             ORDER BY completed_at DESC 
-             LIMIT $2`,
-            [userId, limit]
-        );
+        const query = `
+            SELECT id, url, scan_type, total_issues, pages_scanned, completed_at, violations_data
+            FROM scans 
+            ORDER BY completed_at DESC 
+            LIMIT $1
+        `;
         
+        const result = await db.query(query, [limit]);
         console.log(`✅ Retrieved ${result.rows.length} scans from database`);
-        
-        return result.rows.map(scan => ({
-            ...scan,
-            score: Math.max(60, 100 - Math.min(40, scan.total_issues * 2)) // Calculate score based on issues
-        }));
+        return result.rows;
     } catch (error) {
-        console.log('❌ Database error getting recent scans:', error.message);
+        console.error('❌ Database error getting recent scans:', error.message);
         return [];
     }
 }
 
-// Dashboard statistics function
-async function getDashboardStats(userId = 1) {
+// Helper function to get dashboard statistics
+async function getDashboardStats() {
     if (!db) {
         return {
-            totalScans: 3,
-            totalIssues: 22,
-            avgScore: 92,
-            weeklyScans: 2,
-            aiFixesGenerated: aiFixEngine ? 15 : 0
+            totalScans: 0,
+            totalIssues: 0,
+            averageScore: 0,
+            thisWeekScans: 0,
+            aiFixesGenerated: 0
         };
     }
     
     try {
-        // Get total scans
-        const totalScansResult = await db.query(
-            'SELECT COUNT(*) as count FROM scans WHERE user_id = $1',
-            [userId]
-        );
+        // Get total scans and issues
+        const totalQuery = `
+            SELECT 
+                COUNT(*) as total_scans,
+                COALESCE(SUM(total_issues), 0) as total_issues,
+                COUNT(CASE WHEN completed_at >= NOW() - INTERVAL '7 days' THEN 1 END) as this_week_scans
+            FROM scans
+        `;
         
-        // Get total issues
-        const totalIssuesResult = await db.query(
-            'SELECT SUM(total_issues) as total FROM scans WHERE user_id = $1',
-            [userId]
-        );
+        const totalResult = await db.query(totalQuery);
+        const stats = totalResult.rows[0];
         
-        // Get average score (calculated from issues)
-        const avgScoreResult = await db.query(
-            'SELECT AVG(GREATEST(60, 100 - LEAST(40, total_issues * 2))) as avg_score FROM scans WHERE user_id = $1',
-            [userId]
-        );
+        // Calculate average score (assuming 100 - (issues/pages ratio))
+        const avgScoreQuery = `
+            SELECT AVG(GREATEST(0, 100 - (total_issues * 10))) as avg_score
+            FROM scans 
+            WHERE total_issues IS NOT NULL
+        `;
         
-        // Get scans from last 7 days
-        const weeklyScansResult = await db.query(
-            'SELECT COUNT(*) as count FROM scans WHERE user_id = $1 AND completed_at >= NOW() - INTERVAL \'7 days\'',
-            [userId]
-        );
+        const avgResult = await db.query(avgScoreQuery);
+        const averageScore = Math.round(avgResult.rows[0].avg_score || 75);
         
-        // Get AI fixes count (if column exists)
-        let aiFixesGenerated = 0;
-        try {
-            const aiFixesResult = await db.query(
-                'SELECT COUNT(*) as count FROM scans WHERE user_id = $1 AND ai_fixes_data IS NOT NULL',
-                [userId]
-            );
-            aiFixesGenerated = parseInt(aiFixesResult.rows[0].count) || 0;
-        } catch (error) {
-            // Column doesn't exist yet, that's okay
-        }
+        // Count AI fixes generated (if violations_data contains ai_fixes)
+        const aiFixesQuery = `
+            SELECT COUNT(*) as ai_fixes_count
+            FROM scans 
+            WHERE violations_data::text LIKE '%ai_fixes%'
+        `;
+        
+        const aiFixesResult = await db.query(aiFixesQuery);
+        const aiFixesGenerated = parseInt(aiFixesResult.rows[0].ai_fixes_count) || 0;
         
         return {
-            totalScans: parseInt(totalScansResult.rows[0].count) || 0,
-            totalIssues: parseInt(totalIssuesResult.rows[0].total) || 0,
-            avgScore: Math.round(parseFloat(avgScoreResult.rows[0].avg_score)) || 0,
-            weeklyScans: parseInt(weeklyScansResult.rows[0].count) || 0,
+            totalScans: parseInt(stats.total_scans),
+            totalIssues: parseInt(stats.total_issues),
+            averageScore: averageScore,
+            thisWeekScans: parseInt(stats.this_week_scans),
             aiFixesGenerated: aiFixesGenerated
         };
     } catch (error) {
-        console.log('❌ Database error getting dashboard stats:', error.message);
+        console.error('❌ Database error getting stats:', error.message);
         return {
             totalScans: 0,
             totalIssues: 0,
-            avgScore: 0,
-            weeklyScans: 0,
+            averageScore: 0,
+            thisWeekScans: 0,
             aiFixesGenerated: 0
         };
     }
 }
 
-// Health check - PRESERVED
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'healthy', 
-        timestamp: new Date().toISOString(),
-        database: db ? 'connected' : 'standalone',
-        environment: process.env.K_SERVICE ? 'cloud-run' : 'local',
-        aiEngine: aiFixEngine ? 'enabled' : 'disabled'
-    });
-});
+// Serve static files
+app.use(express.static('public'));
 
-// API endpoint to get recent scans - PRESERVED
-app.get('/api/scans/recent', async (req, res) => {
+// Main route - Dashboard Overview
+app.get('/', async (req, res) => {
     try {
-        const scans = await getRecentScans(1); // Default user ID for now
-        res.json({ success: true, scans });
-    } catch (error) {
-        console.error('Error fetching recent scans:', error);
-        res.status(500).json({ error: 'Failed to fetch scans' });
-    }
-});
-
-// API endpoint for dashboard statistics
-app.get('/api/dashboard/stats', async (req, res) => {
-    try {
-        const stats = await getDashboardStats(1); // Default user ID for now
-        res.json({ success: true, stats });
-    } catch (error) {
-        console.error('Error fetching dashboard stats:', error);
-        res.status(500).json({ error: 'Failed to fetch dashboard stats' });
-    }
-});
-
-// Main dashboard with navigation routing - ENHANCED WITH AI TOGGLE
-app.get('/', (req, res) => {
-    const html = `<!DOCTYPE html>
-<html>
+        const stats = await getDashboardStats();
+        const recentScans = await getRecentScans(5);
+        
+        res.send(`
+<!DOCTYPE html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SentryPrime Enterprise Dashboard</title>
     <style>
         * {
@@ -297,565 +227,497 @@ app.get('/', (req, res) => {
             box-sizing: border-box;
         }
         
-        body { 
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8f9fa;
-            color: #333;
-            height: 100vh;
-            overflow: hidden;
+            background-color: #f8fafc;
+            color: #1e293b;
+            line-height: 1.6;
         }
         
-        .dashboard-container {
+        .container {
             display: flex;
-            height: 100vh;
+            min-height: 100vh;
         }
         
-        /* Sidebar */
         .sidebar {
-            width: 240px;
-            background: #1a1a1a;
+            width: 250px;
+            background: linear-gradient(180deg, #1e293b 0%, #334155 100%);
             color: white;
-            padding: 20px 0;
-            flex-shrink: 0;
+            padding: 0;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
         }
         
-        .sidebar-header {
-            padding: 0 20px 30px;
-            border-bottom: 1px solid #333;
+        .logo {
+            padding: 1.5rem;
+            border-bottom: 1px solid #475569;
         }
         
-        .sidebar-header h1 {
-            font-size: 1.2rem;
-            font-weight: 600;
+        .logo h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #f97316;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 0.5rem;
         }
         
-        .sidebar-header p {
-            font-size: 0.8rem;
-            color: #888;
-            margin-top: 4px;
+        .logo-subtitle {
+            font-size: 0.875rem;
+            color: #94a3b8;
+            margin-top: 0.25rem;
         }
         
-        .sidebar-nav {
-            padding: 20px 0;
+        .nav-menu {
+            padding: 1rem 0;
         }
         
         .nav-item {
+            display: block;
+            padding: 0.75rem 1.5rem;
+            color: #cbd5e1;
+            text-decoration: none;
+            transition: all 0.2s;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            cursor: pointer;
+            font-size: 0.875rem;
             display: flex;
             align-items: center;
-            padding: 12px 20px;
-            color: #ccc;
-            text-decoration: none;
-            transition: all 0.2s ease;
-            gap: 12px;
-            font-size: 0.9rem;
-            cursor: pointer;
+            gap: 0.75rem;
         }
         
         .nav-item:hover {
-            background: #333;
+            background-color: #475569;
             color: white;
         }
         
         .nav-item.active {
-            background: #333;
+            background-color: #f97316;
             color: white;
-            border-right: 3px solid #667eea;
         }
         
         .nav-icon {
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            width: 1.25rem;
+            height: 1.25rem;
+            flex-shrink: 0;
         }
         
-        /* Main Content */
         .main-content {
             flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            margin-left: 250px;
+            padding: 2rem;
         }
         
-        /* Header */
         .header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 2rem;
             background: white;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
         
         .search-bar {
-            display: flex;
-            align-items: center;
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 8px 12px;
-            width: 300px;
-        }
-        
-        .search-bar input {
-            border: none;
-            background: none;
-            outline: none;
             flex: 1;
-            font-size: 14px;
+            max-width: 400px;
+            position: relative;
         }
         
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 16px;
+        .search-input {
+            width: 100%;
+            padding: 0.5rem 1rem 0.5rem 2.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
         }
         
-        .user-profile {
+        .search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6b7280;
+            width: 1rem;
+            height: 1rem;
+        }
+        
+        .header-actions {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            border-radius: 6px;
+            gap: 1rem;
+        }
+        
+        .notification-badge {
+            position: relative;
+            padding: 0.5rem;
+            color: #6b7280;
             cursor: pointer;
         }
         
-        .user-avatar {
-            width: 32px;
-            height: 32px;
+        .badge {
+            position: absolute;
+            top: 0.25rem;
+            right: 0.25rem;
+            background: #ef4444;
+            color: white;
             border-radius: 50%;
-            background: #667eea;
+            width: 1rem;
+            height: 1rem;
+            font-size: 0.75rem;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
-            font-weight: 600;
-            font-size: 14px;
         }
         
-        /* Content Area */
-        .content-area {
-            flex: 1;
-            padding: 24px;
-            overflow-y: auto;
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .user-menu:hover {
+            background-color: #f3f4f6;
+        }
+        
+        .user-avatar {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            background: #3b82f6;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+        
+        .user-info h3 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        
+        .user-info p {
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        
+        .page-content {
+            display: none;
+        }
+        
+        .page-content.active {
+            display: block;
         }
         
         .page-header {
-            margin-bottom: 24px;
+            margin-bottom: 2rem;
         }
         
         .page-title {
-            font-size: 1.8rem;
-            font-weight: 600;
-            margin-bottom: 8px;
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 0.5rem;
         }
         
         .page-subtitle {
-            color: #666;
+            color: #64748b;
             font-size: 1rem;
         }
         
-        /* Dashboard Overview Styles */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
         }
         
         .stat-card {
             background: white;
-            border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            border-left: 4px solid #667eea;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid;
         }
         
-        .stat-card h3 {
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 8px;
+        .stat-card.primary {
+            border-left-color: #3b82f6;
+        }
+        
+        .stat-card.success {
+            border-left-color: #10b981;
+        }
+        
+        .stat-card.warning {
+            border-left-color: #f59e0b;
+        }
+        
+        .stat-card.info {
+            border-left-color: #8b5cf6;
+        }
+        
+        .stat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-title {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #6b7280;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.05em;
         }
         
-        .stat-card .stat-value {
+        .stat-value {
             font-size: 2rem;
             font-weight: 700;
-            color: #333;
-            margin-bottom: 4px;
+            color: #1e293b;
+            margin-bottom: 0.25rem;
         }
         
-        .stat-card .stat-change {
-            font-size: 0.8rem;
-            color: #28a745;
+        .stat-change {
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .stat-change.positive {
+            color: #10b981;
+        }
+        
+        .stat-change.negative {
+            color: #ef4444;
         }
         
         .quick-actions {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 30px;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
         }
         
         .action-card {
             background: white;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
             text-align: center;
             cursor: pointer;
-            transition: transform 0.2s ease;
+            transition: all 0.2s;
+            border: 1px solid #e5e7eb;
         }
         
         .action-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         
-        .action-card .action-icon {
-            font-size: 2rem;
-            margin-bottom: 12px;
-        }
-        
-        .action-card h4 {
-            font-size: 1rem;
-            margin-bottom: 8px;
-        }
-        
-        .action-card p {
-            font-size: 0.8rem;
-            color: #666;
-        }
-        
-        /* Scanner Styles */
-        .scanner-container {
-            background: white;
-            border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 24px;
-        }
-        
-        .url-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 16px;
-            margin-bottom: 16px;
-        }
-        
-        .scan-options {
-            margin-bottom: 20px;
-        }
-        
-        .scan-options h4 {
-            margin-bottom: 12px;
-            font-size: 1rem;
-        }
-        
-        .radio-group {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .radio-option {
+        .action-icon {
+            width: 3rem;
+            height: 3rem;
+            margin: 0 auto 1rem;
+            border-radius: 50%;
             display: flex;
             align-items: center;
-            gap: 8px;
-        }
-        
-        .multi-page-options {
-            margin-left: 24px;
-            margin-top: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .multi-page-options input[type="number"] {
-            width: 60px;
-            padding: 4px 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        
-        .ai-options {
-            margin-top: 16px;
-            padding: 16px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            border: 1px solid #e1e5e9;
-        }
-        
-        .ai-toggle {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-        
-        .ai-description {
-            font-size: 0.8rem;
-            color: #666;
-            margin-left: 24px;
-        }
-        
-        .scan-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .scan-btn:hover {
-            background: #5a6fd8;
-        }
-        
-        .scan-btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        
-        /* Results Styles */
-        .results-container {
-            background: white;
-            border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 24px;
-            display: none;
-        }
-        
-        .results-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 16px;
-        }
-        
-        .results-header h3 {
-            font-size: 1.2rem;
-        }
-        
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-        
-        .status-complete {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status-error {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .results-summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 16px;
-            margin-bottom: 20px;
-        }
-        
-        .summary-item {
-            text-align: center;
-            padding: 16px;
-            background: #f8f9fa;
-            border-radius: 6px;
-        }
-        
-        .summary-item .value {
+            justify-content: center;
             font-size: 1.5rem;
+        }
+        
+        .action-icon.primary {
+            background: #dbeafe;
+            color: #3b82f6;
+        }
+        
+        .action-icon.success {
+            background: #d1fae5;
+            color: #10b981;
+        }
+        
+        .action-icon.warning {
+            background: #fef3c7;
+            color: #f59e0b;
+        }
+        
+        .action-icon.info {
+            background: #ede9fe;
+            color: #8b5cf6;
+        }
+        
+        .action-title {
+            font-size: 1.125rem;
             font-weight: 600;
-            margin-bottom: 4px;
+            color: #1e293b;
+            margin-bottom: 0.5rem;
         }
         
-        .summary-item .label {
-            font-size: 0.8rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+        .action-description {
+            color: #64748b;
+            font-size: 0.875rem;
         }
         
-        .violations-by-impact {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .impact-item {
-            text-align: center;
-            padding: 12px;
-            border-radius: 6px;
-        }
-        
-        .impact-critical { background: #f8d7da; color: #721c24; }
-        .impact-serious { background: #fff3cd; color: #856404; }
-        .impact-moderate { background: #cce5ff; color: #004085; }
-        .impact-minor { background: #d1ecf1; color: #0c5460; }
-        
-        .view-details-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .ai-fixes-section {
-            margin-top: 20px;
-            padding: 20px;
-            background: #f0f8ff;
-            border-radius: 6px;
-            border: 1px solid #b3d9ff;
-        }
-        
-        .ai-fixes-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        
-        .export-fixes-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            margin-left: auto;
-        }
-        
-        /* Recent Scans */
-        .recent-scans {
+        .recent-activity {
             background: white;
-            border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
         }
         
-        .recent-scans h3 {
-            margin-bottom: 16px;
-            font-size: 1.2rem;
+        .activity-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid #e5e7eb;
         }
         
-        .scan-item {
+        .activity-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 0.25rem;
+        }
+        
+        .activity-subtitle {
+            color: #64748b;
+            font-size: 0.875rem;
+        }
+        
+        .activity-list {
+            padding: 0;
+        }
+        
+        .activity-item {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding: 16px 0;
-            border-bottom: 1px solid #eee;
+            justify-content: space-between;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #f3f4f6;
+            transition: background-color 0.2s;
         }
         
-        .scan-item:last-child {
+        .activity-item:hover {
+            background-color: #f8fafc;
+        }
+        
+        .activity-item:last-child {
             border-bottom: none;
         }
         
-        .scan-info h4 {
-            font-size: 1rem;
-            margin-bottom: 4px;
+        .activity-info {
+            flex: 1;
         }
         
-        .scan-meta {
-            font-size: 0.8rem;
-            color: #666;
+        .activity-url {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 0.25rem;
         }
         
-        .scan-score {
-            background: #28a745;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
+        .activity-meta {
+            font-size: 0.875rem;
+            color: #64748b;
         }
         
-        .ai-badge {
-            background: #667eea;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 0.7rem;
-            font-weight: 500;
-            margin-left: 8px;
+        .activity-score {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .score-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        
+        .score-badge.excellent {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .score-badge.good {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .score-badge.poor {
+            background: #fee2e2;
+            color: #991b1b;
         }
         
         .view-report-btn {
-            background: #667eea;
+            padding: 0.5rem 1rem;
+            background: #3b82f6;
             color: white;
             border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
             cursor: pointer;
-            font-size: 0.8rem;
-            margin-left: 8px;
-        }
-        
-        /* Loading States */
-        .loading {
-            display: flex;
+            transition: background-color 0.2s;
+            text-decoration: none;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
-            color: #666;
+            gap: 0.5rem;
         }
         
-        .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
+        .view-report-btn:hover {
+            background: #2563eb;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .ai-badge {
+            background: linear-gradient(135deg, #8b5cf6, #3b82f6);
+            color: white;
+            padding: 0.125rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
         }
         
-        /* Hidden class */
-        .hidden {
-            display: none !important;
+        .coming-soon {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: #64748b;
         }
         
-        /* Responsive */
+        .coming-soon h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #1e293b;
+        }
+        
+        .coming-soon p {
+            font-size: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .coming-soon-icon {
+            font-size: 4rem;
+            margin-bottom: 2rem;
+            opacity: 0.5;
+        }
+        
         @media (max-width: 768px) {
-            .dashboard-container {
-                flex-direction: column;
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s;
             }
             
-            .sidebar {
-                width: 100%;
-                height: auto;
+            .main-content {
+                margin-left: 0;
             }
             
             .stats-grid {
@@ -869,799 +731,546 @@ app.get('/', (req, res) => {
     </style>
 </head>
 <body>
-    <div class="dashboard-container">
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="sidebar-header">
+    <div class="container">
+        <nav class="sidebar">
+            <div class="logo">
                 <h1>🛡️ SentryPrime</h1>
-                <p>Enterprise Dashboard</p>
+                <div class="logo-subtitle">Enterprise Dashboard</div>
             </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" data-page="dashboard">
-                    <div class="nav-icon">📊</div>
+            <div class="nav-menu">
+                <button class="nav-item active" onclick="showPage('dashboard')">
+                    <span class="nav-icon">📊</span>
                     Dashboard
-                </a>
-                <a href="#" class="nav-item" data-page="scans">
-                    <div class="nav-icon">🔍</div>
+                </button>
+                <button class="nav-item" onclick="showPage('scans')">
+                    <span class="nav-icon">🔍</span>
                     Scans
-                </a>
-                <a href="#" class="nav-item" data-page="analytics">
-                    <div class="nav-icon">📈</div>
+                </button>
+                <button class="nav-item" onclick="showPage('analytics')">
+                    <span class="nav-icon">📈</span>
                     Analytics
-                </a>
-                <a href="#" class="nav-item" data-page="team">
-                    <div class="nav-icon">👥</div>
+                </button>
+                <button class="nav-item" onclick="showPage('team')">
+                    <span class="nav-icon">👥</span>
                     Team
-                </a>
-                <a href="#" class="nav-item" data-page="integrations">
-                    <div class="nav-icon">🔗</div>
+                </button>
+                <button class="nav-item" onclick="showPage('integrations')">
+                    <span class="nav-icon">🔗</span>
                     Integrations
-                </a>
-                <a href="#" class="nav-item" data-page="api">
-                    <div class="nav-icon">⚙️</div>
+                </button>
+                <button class="nav-item" onclick="showPage('api')">
+                    <span class="nav-icon">⚙️</span>
                     API Management
-                </a>
-                <a href="#" class="nav-item" data-page="billing">
-                    <div class="nav-icon">💳</div>
+                </button>
+                <button class="nav-item" onclick="showPage('billing')">
+                    <span class="nav-icon">💳</span>
                     Billing
-                </a>
-                <a href="#" class="nav-item" data-page="settings">
-                    <div class="nav-icon">⚙️</div>
+                </button>
+                <button class="nav-item" onclick="showPage('settings')">
+                    <span class="nav-icon">⚙️</span>
                     Settings
-                </a>
-            </nav>
-        </div>
+                </button>
+            </div>
+        </nav>
         
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Header -->
-            <div class="header">
-                <div class="header-left">
-                    <div class="search-bar">
-                        <span>🔍</span>
-                        <input type="text" placeholder="Search scans, reports, or settings...">
+        <main class="main-content">
+            <header class="header">
+                <div class="search-bar">
+                    <input type="text" class="search-input" placeholder="Search scans, reports, or settings...">
+                    <span class="search-icon">🔍</span>
+                </div>
+                <div class="header-actions">
+                    <div class="notification-badge">
+                        🔔
+                        <span class="badge">${stats.aiFixesGenerated > 0 ? '!' : '2'}</span>
+                    </div>
+                    <div class="user-menu">
+                        <div class="user-avatar">JD</div>
+                        <div class="user-info">
+                            <h3>John Doe</h3>
+                            <p>Acme Corporation</p>
+                        </div>
+                        <span>▼</span>
                     </div>
                 </div>
-                <div class="header-right">
-                    <div style="position: relative;">
-                        <span style="font-size: 1.2rem; cursor: pointer;">🔔</span>
-                        <span style="position: absolute; top: -4px; right: -4px; background: #dc3545; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">2</span>
-                    </div>
-                    <div class="user-profile">
-                        <div class="user-avatar">JD</div>
-                        <div>
-                            <div style="font-size: 0.9rem; font-weight: 500;">John Doe</div>
-                            <div style="font-size: 0.7rem; color: #666;">Acme Corporation</div>
+            </header>
+            
+            <!-- Dashboard Overview Page -->
+            <div id="dashboard" class="page-content active">
+                <div class="page-header">
+                    <h1 class="page-title">Dashboard Overview</h1>
+                    <p class="page-subtitle">Monitor your accessibility compliance and recent activity</p>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card primary">
+                        <div class="stat-header">
+                            <span class="stat-title">Total Scans</span>
                         </div>
-                        <span style="margin-left: 8px;">▼</span>
+                        <div class="stat-value">${stats.totalScans}</div>
+                        <div class="stat-change positive">+${stats.thisWeekScans} this week</div>
+                    </div>
+                    
+                    <div class="stat-card warning">
+                        <div class="stat-header">
+                            <span class="stat-title">Issues Found</span>
+                        </div>
+                        <div class="stat-value">${stats.totalIssues}</div>
+                        <div class="stat-change ${stats.totalIssues > 50 ? 'negative' : 'positive'}">
+                            ${stats.totalIssues > 50 ? '+5 from last week' : '-5 from last week'}
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card success">
+                        <div class="stat-header">
+                            <span class="stat-title">Average Score</span>
+                        </div>
+                        <div class="stat-value">${stats.averageScore}%</div>
+                        <div class="stat-change positive">+3% improvement</div>
+                    </div>
+                    
+                    <div class="stat-card info">
+                        <div class="stat-header">
+                            <span class="stat-title">This Week</span>
+                        </div>
+                        <div class="stat-value">${stats.thisWeekScans}</div>
+                        <div class="stat-change positive">scans completed</div>
+                    </div>
+                    
+                    ${stats.aiFixesGenerated > 0 ? `
+                    <div class="stat-card info">
+                        <div class="stat-header">
+                            <span class="stat-title">AI Fixes Generated</span>
+                        </div>
+                        <div class="stat-value">${stats.aiFixesGenerated}</div>
+                        <div class="stat-change positive">🤖 AI-powered solutions</div>
+                    </div>
+                    ` : ''}
+                </div>
+                
+                <div class="quick-actions">
+                    <div class="action-card" onclick="showPage('scans')">
+                        <div class="action-icon primary">🔍</div>
+                        <h3 class="action-title">New Scan</h3>
+                        <p class="action-description">Start a new accessibility scan</p>
+                    </div>
+                    
+                    <div class="action-card" onclick="showPage('analytics')">
+                        <div class="action-icon success">📊</div>
+                        <h3 class="action-title">View Analytics</h3>
+                        <p class="action-description">Analyze compliance trends</p>
+                    </div>
+                    
+                    <div class="action-card" onclick="showPage('team')">
+                        <div class="action-icon warning">👥</div>
+                        <h3 class="action-title">Manage Team</h3>
+                        <p class="action-description">Add or remove team members</p>
+                    </div>
+                    
+                    <div class="action-card" onclick="showPage('settings')">
+                        <div class="action-icon info">⚙️</div>
+                        <h3 class="action-title">Settings</h3>
+                        <p class="action-description">Configure your preferences</p>
+                    </div>
+                </div>
+                
+                <div class="recent-activity">
+                    <div class="activity-header">
+                        <h2 class="activity-title">Recent Scans</h2>
+                        <p class="activity-subtitle">Your latest accessibility scan results</p>
+                    </div>
+                    <div class="activity-list">
+                        ${recentScans.length > 0 ? recentScans.map(scan => {
+                            const score = Math.max(0, 100 - (scan.total_issues * 10));
+                            const scoreClass = score >= 80 ? 'excellent' : score >= 60 ? 'good' : 'poor';
+                            const hasAiFixes = scan.violations_data && JSON.stringify(scan.violations_data).includes('ai_fixes');
+                            
+                            return `
+                                <div class="activity-item">
+                                    <div class="activity-info">
+                                        <div class="activity-url">${scan.url}${hasAiFixes ? '<span class="ai-badge">AI</span>' : ''}</div>
+                                        <div class="activity-meta">${scan.scan_type} • ${new Date(scan.completed_at).toLocaleDateString()}</div>
+                                    </div>
+                                    <div class="activity-score">
+                                        <span class="score-badge ${scoreClass}">${score}% Score</span>
+                                        <a href="#" class="view-report-btn">
+                                            👁️ View Report
+                                        </a>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('') : `
+                            <div class="activity-item">
+                                <div class="activity-info">
+                                    <div class="activity-url">No scans yet</div>
+                                    <div class="activity-meta">Run your first accessibility scan to see results here</div>
+                                </div>
+                            </div>
+                        `}
                     </div>
                 </div>
             </div>
             
-            <!-- Content Area -->
-            <div class="content-area">
-                <!-- Dashboard Overview Page -->
-                <div id="dashboard-page" class="page">
-                    <div class="page-header">
-                        <h1 class="page-title">Dashboard Overview</h1>
-                        <p class="page-subtitle">Monitor your accessibility compliance and recent activity</p>
+            <!-- Scans Page -->
+            <div id="scans" class="page-content">
+                <div class="page-header">
+                    <h1 class="page-title">Accessibility Scans</h1>
+                    <p class="page-subtitle">Manage and review your accessibility scans</p>
+                </div>
+                
+                <div style="background: white; padding: 2rem; border-radius: 0.75rem; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); margin-bottom: 2rem;">
+                    <div style="background: #d1fae5; border: 1px solid #a7f3d0; border-radius: 0.5rem; padding: 1rem; margin-bottom: 2rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="color: #065f46;">✅</span>
+                        <span style="color: #065f46; font-weight: 500;">Database connected - Scans will be saved to your history</span>
                     </div>
                     
-                    <!-- Statistics Cards -->
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <h3>Total Scans</h3>
-                            <div class="stat-value" id="total-scans">-</div>
-                            <div class="stat-change">+2 this week</div>
+                    <h2 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem; color: #1e293b;">Scan Website for Accessibility Issues</h2>
+                    
+                    <form id="scanForm" style="margin-bottom: 2rem;">
+                        <div style="margin-bottom: 1.5rem;">
+                            <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: #374151;">Website URL</label>
+                            <input type="url" id="urlInput" placeholder="https://example.com/" required 
+                                   style="width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem;">
                         </div>
-                        <div class="stat-card">
-                            <h3>Issues Found</h3>
-                            <div class="stat-value" id="total-issues">-</div>
-                            <div class="stat-change">-5 from last week</div>
+                        
+                        <div style="margin-bottom: 1.5rem;">
+                            <label style="display: block; font-weight: 600; margin-bottom: 1rem; color: #374151;">Scan Options:</label>
+                            <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="radio" name="scanType" value="single" checked style="margin: 0;">
+                                    <span>Single Page (Fast - recommended)</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="radio" name="scanType" value="multi" style="margin: 0;">
+                                    <span>Multi-Page Crawl (Slower - up to <input type="number" id="maxPages" value="5" min="1" max="10" style="width: 60px; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 0.25rem; text-align: center;"> pages)</span>
+                                </label>
+                            </div>
                         </div>
-                        <div class="stat-card">
-                            <h3>Average Score</h3>
-                            <div class="stat-value" id="avg-score">-</div>
-                            <div class="stat-change">+3% improvement</div>
-                        </div>
-                        <div class="stat-card">
-                            <h3>This Week</h3>
-                            <div class="stat-value" id="weekly-scans">-</div>
-                            <div class="stat-change">scans completed</div>
-                        </div>
+                        
                         ${aiFixEngine ? `
-                        <div class="stat-card">
-                            <h3>AI Fixes Generated</h3>
-                            <div class="stat-value" id="ai-fixes-generated">-</div>
-                            <div class="stat-change">🤖 AI-powered solutions</div>
+                        <div style="margin-bottom: 1.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; background: linear-gradient(135deg, #f3f4f6, #e5e7eb); padding: 1rem; border-radius: 0.5rem; border: 1px solid #d1d5db;">
+                                <input type="checkbox" id="enableAI" style="margin: 0;">
+                                <span style="font-weight: 600; color: #374151;">🤖 Enable AI Fix Suggestions</span>
+                                <span style="background: linear-gradient(135deg, #8b5cf6, #3b82f6); color: white; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; margin-left: 0.5rem;">NEW</span>
+                            </label>
+                            <p style="font-size: 0.875rem; color: #6b7280; margin-top: 0.5rem; margin-left: 1.5rem;">Generate AI-powered code fixes for accessibility violations</p>
                         </div>
                         ` : ''}
-                    </div>
-                    
-                    <!-- Quick Actions -->
-                    <div class="quick-actions">
-                        <div class="action-card" onclick="switchToPage('scans')">
-                            <div class="action-icon">🔍</div>
-                            <h4>New Scan</h4>
-                            <p>Start a new accessibility scan</p>
-                        </div>
-                        <div class="action-card" onclick="switchToPage('analytics')">
-                            <div class="action-icon">📊</div>
-                            <h4>View Analytics</h4>
-                            <p>Analyze compliance trends</p>
-                        </div>
-                        <div class="action-card" onclick="switchToPage('team')">
-                            <div class="action-icon">👥</div>
-                            <h4>Manage Team</h4>
-                            <p>Add or remove team members</p>
-                        </div>
-                        <div class="action-card" onclick="switchToPage('settings')">
-                            <div class="action-icon">⚙️</div>
-                            <h4>Settings</h4>
-                            <p>Configure your preferences</p>
-                        </div>
-                    </div>
-                    
-                    <!-- Recent Activity -->
-                    <div class="recent-scans">
-                        <h3>Recent Scans</h3>
-                        <p style="color: #666; margin-bottom: 16px;">Your latest accessibility scan results</p>
-                        <div id="dashboard-recent-scans">
-                            <div class="loading">
-                                <div class="spinner"></div>
-                                Loading recent scans...
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Scans Page -->
-                <div id="scans-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Accessibility Scans</h1>
-                        <p class="page-subtitle">Manage and review your accessibility scans</p>
-                    </div>
-                    
-                    <div style="background: #d4edda; color: #155724; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
-                        ✅ Database connected - Scans will be saved to your history
-                    </div>
-                    
-                    <!-- Scanner -->
-                    <div class="scanner-container">
-                        <h3 style="margin-bottom: 16px;">Scan Website for Accessibility Issues</h3>
                         
-                        <input type="text" id="url-input" class="url-input" placeholder="https://example.com/" value="https://example.com/">
-                        
-                        <div class="scan-options">
-                            <h4>Scan Options:</h4>
-                            <div class="radio-group">
-                                <label class="radio-option">
-                                    <input type="radio" name="scanType" value="single" checked>
-                                    Single Page (Fast - recommended)
-                                </label>
-                                <label class="radio-option">
-                                    <input type="radio" name="scanType" value="crawl">
-                                    Multi-Page Crawl (Slower - up to 
-                                    <div class="multi-page-options">
-                                        <input type="number" id="max-pages" value="5" min="1" max="20">
-                                        pages)
-                                    </div>
-                                </label>
-                            </div>
-                            
-                            ${aiFixEngine ? `
-                            <div class="ai-options">
-                                <label class="ai-toggle">
-                                    <input type="checkbox" id="ai-fixes-enabled" checked>
-                                    🤖 Generate AI Fix Suggestions
-                                </label>
-                                <div class="ai-description">
-                                    AI will analyze violations and provide specific code fixes for each issue found.
-                                </div>
-                            </div>
-                            ` : ''}
-                        </div>
-                        
-                        <button id="scan-btn" class="scan-btn">
+                        <button type="submit" id="scanButton" 
+                                style="background: #3b82f6; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 0.5rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; font-size: 1rem;">
                             🔍 Start Accessibility Scan
                         </button>
-                    </div>
+                    </form>
                     
-                    <!-- Results -->
-                    <div id="results-container" class="results-container">
-                        <div class="results-header">
-                            <h3>Scan Results</h3>
-                            <span id="status-badge" class="status-badge"></span>
-                        </div>
-                        <div id="results-content"></div>
+                    <div id="scanResults" style="display: none;">
+                        <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; color: #1e293b;">Scan Results</h3>
+                        <div id="resultsContent"></div>
                     </div>
+                </div>
+                
+                <div style="background: white; padding: 2rem; border-radius: 0.75rem; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+                    <h2 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; color: #1e293b;">Recent Scans</h2>
+                    <p style="color: #64748b; margin-bottom: 1.5rem;">Your latest accessibility scan results</p>
                     
-                    <!-- Recent Scans -->
-                    <div class="recent-scans">
-                        <h3>Recent Scans</h3>
-                        <p style="color: #666; margin-bottom: 16px;">Your latest accessibility scan results</p>
-                        <div id="recent-scans-list">
-                            <div class="loading">
-                                <div class="spinner"></div>
-                                Loading recent scans...
+                    <div id="recentScansList">
+                        ${recentScans.length > 0 ? recentScans.map(scan => {
+                            const score = Math.max(0, 100 - (scan.total_issues * 10));
+                            const scoreClass = score >= 80 ? 'excellent' : score >= 60 ? 'good' : 'poor';
+                            const hasAiFixes = scan.violations_data && JSON.stringify(scan.violations_data).includes('ai_fixes');
+                            
+                            return `
+                                <div style="display: flex; align-items: center; justify-content: space-between; padding: 1rem; border-bottom: 1px solid #f3f4f6;">
+                                    <div>
+                                        <div style="font-weight: 600; color: #1e293b; margin-bottom: 0.25rem;">
+                                            ${scan.url}${hasAiFixes ? '<span class="ai-badge">AI</span>' : ''}
+                                        </div>
+                                        <div style="font-size: 0.875rem; color: #64748b;">
+                                            ${scan.scan_type} • ${new Date(scan.completed_at).toLocaleDateString()}
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                        <span class="score-badge ${scoreClass}">${score}% Score</span>
+                                        <a href="#" class="view-report-btn">👁️ View Report</a>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('') : `
+                            <div style="text-align: center; padding: 2rem; color: #64748b;">
+                                <div style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">📊</div>
+                                <h3 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: #1e293b;">No scans yet</h3>
+                                <p>Run your first accessibility scan to see results here</p>
                             </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Placeholder pages for other navigation items -->
-                <div id="analytics-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Analytics</h1>
-                        <p class="page-subtitle">Accessibility compliance trends and insights</p>
-                    </div>
-                    <div style="background: white; border-radius: 8px; padding: 40px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="color: #666; margin-bottom: 16px;">📈 Analytics Dashboard</h3>
-                        <p style="color: #888;">Advanced analytics and reporting features coming soon!</p>
-                    </div>
-                </div>
-                
-                <div id="team-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Team Management</h1>
-                        <p class="page-subtitle">Manage team members and permissions</p>
-                    </div>
-                    <div style="background: white; border-radius: 8px; padding: 40px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="color: #666; margin-bottom: 16px;">👥 Team Management</h3>
-                        <p style="color: #888;">Team collaboration features coming soon!</p>
-                    </div>
-                </div>
-                
-                <div id="integrations-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Integrations</h1>
-                        <p class="page-subtitle">Connect with your favorite tools and platforms</p>
-                    </div>
-                    <div style="background: white; border-radius: 8px; padding: 40px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="color: #666; margin-bottom: 16px;">🔗 Platform Integrations</h3>
-                        <p style="color: #888;">Shopify, WordPress, and other platform integrations coming soon!</p>
-                    </div>
-                </div>
-                
-                <div id="api-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">API Management</h1>
-                        <p class="page-subtitle">Manage API keys and developer resources</p>
-                    </div>
-                    <div style="background: white; border-radius: 8px; padding: 40px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="color: #666; margin-bottom: 16px;">⚙️ API Management</h3>
-                        <p style="color: #888;">Developer API and documentation coming soon!</p>
-                    </div>
-                </div>
-                
-                <div id="billing-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Billing & Subscription</h1>
-                        <p class="page-subtitle">Manage your subscription and billing information</p>
-                    </div>
-                    <div style="background: white; border-radius: 8px; padding: 40px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="color: #666; margin-bottom: 16px;">💳 Billing Management</h3>
-                        <p style="color: #888;">Subscription and billing features coming soon!</p>
-                    </div>
-                </div>
-                
-                <div id="settings-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Settings</h1>
-                        <p class="page-subtitle">Configure your account and preferences</p>
-                    </div>
-                    <div style="background: white; border-radius: 8px; padding: 40px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="color: #666; margin-bottom: 16px;">⚙️ Account Settings</h3>
-                        <p style="color: #888;">User preferences and configuration options coming soon!</p>
+                        `}
                     </div>
                 </div>
             </div>
-        </div>
+            
+            <!-- Other Pages (Coming Soon) -->
+            <div id="analytics" class="page-content">
+                <div class="coming-soon">
+                    <div class="coming-soon-icon">📈</div>
+                    <h2>Analytics Dashboard</h2>
+                    <p>Comprehensive analytics and reporting features are coming soon.</p>
+                </div>
+            </div>
+            
+            <div id="team" class="page-content">
+                <div class="coming-soon">
+                    <div class="coming-soon-icon">👥</div>
+                    <h2>Team Management</h2>
+                    <p>Team collaboration and user management features are coming soon.</p>
+                </div>
+            </div>
+            
+            <div id="integrations" class="page-content">
+                <div class="coming-soon">
+                    <div class="coming-soon-icon">🔗</div>
+                    <h2>Integrations</h2>
+                    <p>Third-party integrations and webhooks are coming soon.</p>
+                </div>
+            </div>
+            
+            <div id="api" class="page-content">
+                <div class="coming-soon">
+                    <div class="coming-soon-icon">⚙️</div>
+                    <h2>API Management</h2>
+                    <p>API keys and developer tools are coming soon.</p>
+                </div>
+            </div>
+            
+            <div id="billing" class="page-content">
+                <div class="coming-soon">
+                    <div class="coming-soon-icon">💳</div>
+                    <h2>Billing & Subscriptions</h2>
+                    <p>Billing management and subscription features are coming soon.</p>
+                </div>
+            </div>
+            
+            <div id="settings" class="page-content">
+                <div class="coming-soon">
+                    <div class="coming-soon-icon">⚙️</div>
+                    <h2>Settings</h2>
+                    <p>User preferences and configuration options are coming soon.</p>
+                </div>
+            </div>
+        </main>
     </div>
     
     <script>
-        // Navigation functionality
-        function switchToPage(pageId) {
+        function showPage(pageId) {
             // Hide all pages
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.add('hidden');
+            document.querySelectorAll('.page-content').forEach(page => {
+                page.classList.remove('active');
             });
             
-            // Show selected page
-            document.getElementById(pageId + '-page').classList.remove('hidden');
-            
-            // Update active nav item
+            // Remove active class from all nav items
             document.querySelectorAll('.nav-item').forEach(item => {
                 item.classList.remove('active');
             });
-            document.querySelector(\`[data-page="\${pageId}"]\`).classList.add('active');
+            
+            // Show selected page
+            document.getElementById(pageId).classList.add('active');
+            
+            // Add active class to clicked nav item
+            event.target.classList.add('active');
         }
         
-        // Add click handlers to nav items
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                e.preventDefault();
-                const pageId = item.getAttribute('data-page');
-                switchToPage(pageId);
-            });
-        });
-        
-        // Scanner functionality - PRESERVED FROM WORKING VERSION
-        let currentScan = null;
-        
-        document.getElementById('scan-btn').addEventListener('click', async () => {
-            const url = document.getElementById('url-input').value.trim();
+        // Scan form handling
+        document.getElementById('scanForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const url = document.getElementById('urlInput').value;
             const scanType = document.querySelector('input[name="scanType"]:checked').value;
-            const maxPages = document.getElementById('max-pages').value;
-            const aiEnabled = document.getElementById('ai-fixes-enabled') ? document.getElementById('ai-fixes-enabled').checked : false;
+            const maxPages = document.getElementById('maxPages').value;
+            const enableAI = document.getElementById('enableAI') ? document.getElementById('enableAI').checked : false;
+            const scanButton = document.getElementById('scanButton');
+            const resultsDiv = document.getElementById('scanResults');
+            const resultsContent = document.getElementById('resultsContent');
             
-            if (!url) {
-                alert('Please enter a URL to scan');
-                return;
-            }
+            // Update button state
+            scanButton.innerHTML = '⏳ Scanning...';
+            scanButton.disabled = true;
             
-            const scanBtn = document.getElementById('scan-btn');
-            const resultsContainer = document.getElementById('results-container');
-            const statusBadge = document.getElementById('status-badge');
-            const resultsContent = document.getElementById('results-content');
-            
-            // Show loading state
-            scanBtn.disabled = true;
-            scanBtn.innerHTML = '<div class="spinner"></div> Scanning...';
-            resultsContainer.style.display = 'block';
-            statusBadge.textContent = 'Scanning...';
-            statusBadge.className = 'status-badge';
-            resultsContent.innerHTML = '<div class="loading"><div class="spinner"></div>Analyzing accessibility issues...</div>';
+            // Show results area
+            resultsDiv.style.display = 'block';
+            resultsContent.innerHTML = '<div style="text-align: center; padding: 2rem; color: #6b7280;">🔍 Scanning website for accessibility issues...</div>';
             
             try {
                 const response = await fetch('/api/scan', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
                         url: url,
                         scanType: scanType,
                         maxPages: parseInt(maxPages),
-                        aiEnabled: aiEnabled
-                    })
+                        enableAI: enableAI
+                    }),
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    currentScan = result;
-                    displayScanResults(result);
-                    loadRecentScans(); // Refresh recent scans
-                    loadDashboardStats(); // Refresh dashboard stats
+                    displayScanResults(result.data);
+                    // Refresh recent scans
+                    setTimeout(() => {
+                        location.reload();
+                    }, 2000);
                 } else {
-                    throw new Error(result.error || 'Scan failed');
+                    resultsContent.innerHTML = \`
+                        <div style="background: #fee2e2; border: 1px solid #fecaca; border-radius: 0.5rem; padding: 1rem; color: #991b1b;">
+                            <strong>❌ Scan Failed:</strong> \${result.error}
+                        </div>
+                    \`;
                 }
-                
             } catch (error) {
-                console.error('Scan error:', error);
-                statusBadge.textContent = 'Scan Failed';
-                statusBadge.className = 'status-badge status-error';
                 resultsContent.innerHTML = \`
-                    <div style="color: #dc3545; text-align: center; padding: 20px;">
-                        <h4>❌ Scan Failed</h4>
-                        <p>\${error.message}</p>
+                    <div style="background: #fee2e2; border: 1px solid #fecaca; border-radius: 0.5rem; padding: 1rem; color: #991b1b;">
+                        <strong>❌ Error:</strong> \${error.message}
                     </div>
                 \`;
             } finally {
-                scanBtn.disabled = false;
-                scanBtn.innerHTML = '🔍 Start Accessibility Scan';
+                // Reset button
+                scanButton.innerHTML = '🔍 Start Accessibility Scan';
+                scanButton.disabled = false;
             }
         });
         
-        function displayScanResults(result) {
-            const statusBadge = document.getElementById('status-badge');
-            const resultsContent = document.getElementById('results-content');
+        function displayScanResults(data) {
+            const resultsContent = document.getElementById('resultsContent');
+            const score = Math.max(0, 100 - (data.totalIssues * 10));
+            const scoreClass = score >= 80 ? 'excellent' : score >= 60 ? 'good' : 'poor';
             
-            statusBadge.textContent = 'Scan Complete';
-            statusBadge.className = 'status-badge status-complete';
-            
-            let html = '';
-            
-            if (result.scanType === 'crawl') {
-                // Multi-page results
-                const allViolations = result.pages.reduce((acc, page) => acc.concat(page.violations || []), []);
-                
-                html = \`
-                    <div class="results-summary">
-                        <div class="summary-item">
-                            <div class="value">\${result.url}</div>
-                            <div class="label">URL</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="value">\${result.totalIssues}</div>
-                            <div class="label">Total Issues</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="value">\${result.scanTime}ms</div>
-                            <div class="label">Scan Time</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
-                            <div class="label">Timestamp</div>
-                        </div>
-                    </div>
-                    
-                    <h4>Violations by Impact:</h4>
-                    <div class="violations-by-impact">
-                        <div class="impact-item impact-critical">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.critical}</div>
-                            <div style="font-size: 0.8rem;">Critical</div>
-                        </div>
-                        <div class="impact-item impact-serious">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.serious}</div>
-                            <div style="font-size: 0.8rem;">Serious</div>
-                        </div>
-                        <div class="impact-item impact-moderate">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.moderate}</div>
-                            <div style="font-size: 0.8rem;">Moderate</div>
-                        </div>
-                        <div class="impact-item impact-minor">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.minor}</div>
-                            <div style="font-size: 0.8rem;">Minor</div>
-                        </div>
-                    </div>
-                    
-                    <button class="view-details-btn" onclick="showDetailedViolations()">👁️ View Detailed Results</button>
-                \`;
-            } else {
-                // Single page results
-                html = \`
-                    <div class="results-summary">
-                        <div class="summary-item">
-                            <div class="value">\${result.url}</div>
-                            <div class="label">URL</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="value">\${result.totalIssues}</div>
-                            <div class="label">Total Issues</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="value">\${result.scanTime}ms</div>
-                            <div class="label">Scan Time</div>
-                        </div>
-                        <div class="summary-item">
-                            <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
-                            <div class="label">Timestamp</div>
-                        </div>
-                    </div>
-                    
-                    <h4>Violations by Impact:</h4>
-                    <div class="violations-by-impact">
-                        <div class="impact-item impact-critical">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.critical}</div>
-                            <div style="font-size: 0.8rem;">Critical</div>
-                        </div>
-                        <div class="impact-item impact-serious">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.serious}</div>
-                            <div style="font-size: 0.8rem;">Serious</div>
-                        </div>
-                        <div class="impact-item impact-moderate">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.moderate}</div>
-                            <div style="font-size: 0.8rem;">Moderate</div>
-                        </div>
-                        <div class="impact-item impact-minor">
-                            <div style="font-size: 1.5rem; font-weight: 600;">\${result.summary.minor}</div>
-                            <div style="font-size: 0.8rem;">Minor</div>
-                        </div>
-                    </div>
-                    
-                    <button class="view-details-btn" onclick="showDetailedViolations()">👁️ View Detailed Results</button>
-                \`;
-            }
-            
-            // Add AI fixes section if available
-            if (result.aiFixes && result.aiFixes.fixes && result.aiFixes.fixes.length > 0) {
-                html += \`
-                    <div class="ai-fixes-section">
-                        <div class="ai-fixes-header">
-                            <h4>🤖 AI-Generated Fix Suggestions</h4>
-                            <button class="export-fixes-btn" onclick="exportAIFixes()">📥 Export Fixes</button>
-                        </div>
-                        <p style="margin-bottom: 12px; color: #666;">
-                            AI has generated \${result.aiFixes.fixes.length} specific code fixes for the accessibility issues found.
-                            Confidence: \${Math.round(result.aiFixes.averageConfidence)}%
-                        </p>
-                        <div style="background: white; padding: 12px; border-radius: 4px; border: 1px solid #ddd;">
-                            <strong>Fix Categories:</strong>
-                            <ul style="margin: 8px 0 0 20px;">
-                                \${result.aiFixes.summary.categories.map(cat => \`<li>\${cat}</li>\`).join('')}
-                            </ul>
-                        </div>
+            let aiFixesSection = '';
+            if (data.aiFixReport && data.aiFixReport.fixes && data.aiFixReport.fixes.length > 0) {
+                aiFixesSection = \`
+                    <div style="background: linear-gradient(135deg, #f3f4f6, #e5e7eb); border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 1.5rem; margin-top: 1.5rem;">
+                        <h4 style="color: #374151; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            🤖 AI Fix Suggestions
+                            <span style="background: linear-gradient(135deg, #8b5cf6, #3b82f6); color: white; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600;">NEW</span>
+                        </h4>
+                        <p style="color: #6b7280; margin-bottom: 1rem;">AI has generated \${data.aiFixReport.fixes.length} specific code fixes for your accessibility issues.</p>
+                        <button onclick="downloadAIFixes()" style="background: linear-gradient(135deg, #8b5cf6, #3b82f6); color: white; padding: 0.5rem 1rem; border: none; border-radius: 0.375rem; font-weight: 500; cursor: pointer;">
+                            📥 Download AI Fixes
+                        </button>
                     </div>
                 \`;
             }
             
-            resultsContent.innerHTML = html;
-        }
-        
-        function showDetailedViolations() {
-            if (!currentScan) return;
+            resultsContent.innerHTML = \`
+                <div style="background: #d1fae5; border: 1px solid #a7f3d0; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1.5rem;">
+                    <span style="color: #065f46; font-weight: 600;">✅ Scan Complete</span>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                    <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 0.5rem;">
+                        <div style="font-size: 2rem; font-weight: 700; color: #1e293b;">\${data.url}</div>
+                        <div style="color: #64748b; font-size: 0.875rem;">URL</div>
+                    </div>
+                    <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 0.5rem;">
+                        <div style="font-size: 2rem; font-weight: 700; color: #1e293b;">\${data.totalIssues}</div>
+                        <div style="color: #64748b; font-size: 0.875rem;">TOTAL ISSUES</div>
+                    </div>
+                    <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 0.5rem;">
+                        <div style="font-size: 2rem; font-weight: 700; color: #1e293b;">\${data.scanTime}ms</div>
+                        <div style="color: #64748b; font-size: 0.875rem;">SCAN TIME</div>
+                    </div>
+                    <div style="text-align: center; padding: 1rem; background: #f8fafc; border-radius: 0.5rem;">
+                        <div style="font-size: 2rem; font-weight: 700; color: #1e293b;">\${data.timestamp}</div>
+                        <div style="color: #64748b; font-size: 0.875rem;">TIMESTAMP</div>
+                    </div>
+                </div>
+                
+                <h4 style="color: #374151; margin-bottom: 1rem;">Violations by Impact:</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                    <div style="text-align: center; padding: 1rem; background: #fee2e2; border-radius: 0.5rem;">
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #991b1b;">\${data.violations.critical || 0}</div>
+                        <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">Critical</div>
+                    </div>
+                    <div style="text-align: center; padding: 1rem; background: #fef3c7; border-radius: 0.5rem;">
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #92400e;">\${data.violations.serious || 0}</div>
+                        <div style="color: #92400e; font-size: 0.875rem; font-weight: 600;">Serious</div>
+                    </div>
+                    <div style="text-align: center; padding: 1rem; background: #dbeafe; border-radius: 0.5rem;">
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #1d4ed8;">\${data.violations.moderate || 0}</div>
+                        <div style="color: #1d4ed8; font-size: 0.875rem; font-weight: 600;">Moderate</div>
+                    </div>
+                    <div style="text-align: center; padding: 1rem; background: #ecfdf5; border-radius: 0.5rem;">
+                        <div style="font-size: 1.5rem; font-weight: 700; color: #065f46;">\${data.violations.minor || 0}</div>
+                        <div style="color: #065f46; font-size: 0.875rem; font-weight: 600;">Minor</div>
+                    </div>
+                </div>
+                
+                \${aiFixesSection}
+                
+                <button onclick="showDetailedResults()" style="background: #10b981; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 0.5rem; font-weight: 600; cursor: pointer; margin-top: 1rem;">
+                    👁️ View Detailed Results
+                </button>
+            \`;
             
-            let violations = [];
-            if (currentScan.scanType === 'crawl') {
-                violations = currentScan.pages.reduce((acc, page) => acc.concat(page.violations || []), []);
-            } else {
-                violations = currentScan.violations || [];
-            }
-            
-            const detailsWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes');
-            detailsWindow.document.write(\`
-                <html>
-                <head>
-                    <title>Detailed Accessibility Violations</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        .violation { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
-                        .violation h3 { color: #d32f2f; margin-top: 0; }
-                        .impact-critical { border-left: 4px solid #d32f2f; }
-                        .impact-serious { border-left: 4px solid #f57c00; }
-                        .impact-moderate { border-left: 4px solid #1976d2; }
-                        .impact-minor { border-left: 4px solid #388e3c; }
-                        .elements { background: #f5f5f5; padding: 10px; margin-top: 10px; border-radius: 3px; }
-                    </style>
-                </head>
-                <body>
-                    <h1>Detailed Accessibility Violations</h1>
-                    \${violations.map(violation => \`
-                        <div class="violation impact-\${violation.impact}">
-                            <h3>\${violation.id}</h3>
-                            <p><strong>Impact:</strong> \${violation.impact}</p>
-                            <p><strong>Description:</strong> \${violation.description}</p>
-                            <p><strong>Help:</strong> \${violation.help}</p>
-                            <p><strong>Elements affected:</strong> \${violation.nodes ? violation.nodes.length : 0}</p>
-                            \${violation.nodes && violation.nodes.length > 0 ? \`
-                                <div class="elements">
-                                    <strong>Show affected elements</strong>
-                                    <details>
-                                        <summary>Click to expand</summary>
-                                        \${violation.nodes.map(node => \`<p>• \${node.html}</p>\`).join('')}
-                                    </details>
-                                </div>
-                            \` : ''}
-                        </div>
-                    \`).join('')}
-                </body>
-                </html>
-            \`);
+            // Store the data for detailed view
+            window.currentScanData = data;
         }
         
-        function exportAIFixes() {
-            if (!currentScan || !currentScan.aiFixes) return;
-            
-            const dataStr = JSON.stringify(currentScan.aiFixes, null, 2);
-            const dataBlob = new Blob([dataStr], {type: 'application/json'});
-            const url = URL.createObjectURL(dataBlob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = \`ai-fixes-\${new Date().toISOString().split('T')[0]}.json\`;
-            link.click();
-            URL.revokeObjectURL(url);
-        }
-        
-        // Dashboard statistics loading
-        async function loadDashboardStats() {
-            try {
-                const response = await fetch('/api/dashboard/stats');
-                const data = await response.json();
-                
-                if (data.success) {
-                    document.getElementById('total-scans').textContent = data.stats.totalScans;
-                    document.getElementById('total-issues').textContent = data.stats.totalIssues;
-                    document.getElementById('avg-score').textContent = data.stats.avgScore + '%';
-                    document.getElementById('weekly-scans').textContent = data.stats.weeklyScans;
-                    
-                    const aiFixesElement = document.getElementById('ai-fixes-generated');
-                    if (aiFixesElement) {
-                        aiFixesElement.textContent = data.stats.aiFixesGenerated || 0;
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading dashboard stats:', error);
+        function showDetailedResults() {
+            if (window.currentScanData && window.currentScanData.detailedResults) {
+                const newWindow = window.open('', '_blank');
+                newWindow.document.write(window.currentScanData.detailedResults);
             }
         }
         
-        // Recent scans loading for dashboard
-        async function loadDashboardRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const data = await response.json();
-                
-                const container = document.getElementById('dashboard-recent-scans');
-                
-                if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.slice(0, 3).map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                \${scan.has_ai_fixes ? '<span class="ai-badge">AI</span>' : ''}
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading dashboard recent scans:', error);
-                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
+        function downloadAIFixes() {
+            if (window.currentScanData && window.currentScanData.aiFixReport) {
+                const dataStr = JSON.stringify(window.currentScanData.aiFixReport, null, 2);
+                const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                const url = URL.createObjectURL(dataBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'ai-accessibility-fixes.json';
+                link.click();
+                URL.revokeObjectURL(url);
             }
         }
-        
-        // Recent scans loading for scans page
-        async function loadRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const data = await response.json();
-                
-                const container = document.getElementById('recent-scans-list');
-                
-                if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                \${scan.has_ai_fixes ? '<span class="ai-badge">AI</span>' : ''}
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading recent scans:', error);
-                document.getElementById('recent-scans-list').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        // Initialize dashboard
-        document.addEventListener('DOMContentLoaded', () => {
-            loadDashboardStats();
-            loadDashboardRecentScans();
-            loadRecentScans();
-        });
     </script>
 </body>
-</html>`;
-    
-    res.send(html);
+</html>
+        `);
+    } catch (error) {
+        console.error('Error rendering dashboard:', error);
+        res.status(500).send('Internal Server Error');
+    }
 });
 
-// Helper functions for link extraction and scanning - PRESERVED FROM WORKING VERSION
-async function extractLinks(page, baseUrl) {
-    try {
-        const links = await page.evaluate((baseUrl) => {
-            const anchors = Array.from(document.querySelectorAll('a[href]'));
-            const baseUrlObj = new URL(baseUrl);
-            
-            return anchors
-                .map(a => {
-                    try {
-                        const href = a.getAttribute('href');
-                        if (!href) return null;
-                        
-                        // Convert relative URLs to absolute
-                        const url = new URL(href, baseUrl);
-                        
-                        // Only include URLs from the same domain
-                        if (url.hostname !== baseUrlObj.hostname) return null;
-                        
-                        // Exclude common non-page URLs
-                        if (url.pathname.match(/\.(pdf|jpg|jpeg|png|gif|css|js|xml|zip|doc|docx)$/i)) return null;
-                        if (url.pathname.includes('#')) return null;
-                        
-                        return url.href;
-                    } catch (e) {
-                        return null;
-                    }
-                })
-                .filter(url => url !== null)
-                .filter((url, index, self) => self.indexOf(url) === index) // Remove duplicates
-                .slice(0, 20); // Limit to 20 links max
-        }, baseUrl);
-        
-        return links;
-    } catch (error) {
-        console.log('Error extracting links:', error.message);
-        return [];
-    }
-}
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        database: db ? 'connected' : 'disconnected',
+        ai: aiFixEngine ? 'enabled' : 'disabled'
+    });
+});
 
-async function scanSinglePage(browser, url) {
-    const page = await browser.newPage();
-    
-    try {
-        // Set viewport and user agent
-        await page.setViewport({ width: 1280, height: 720 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-        
-        console.log('Navigating to: ' + url);
-        
-        // Try multiple navigation strategies
-        try {
-            await page.goto(url, { 
-                waitUntil: 'networkidle0',
-                timeout: 90000 
-            });
-        } catch (navError) {
-            console.log('Network idle failed, trying domcontentloaded...');
-            await page.goto(url, { 
-                waitUntil: 'domcontentloaded',
-                timeout: 90000 
-            });
-        }
-        
-        // Wait for page to stabilize
-        console.log('Waiting for page to stabilize...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        // Inject axe-core
-        console.log('Injecting axe-core...');
-        await page.addScriptTag({
-            content: axeCore.source
-        });
-        
-        console.log('Running axe accessibility scan...');
-        const results = await page.evaluate(() => {
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Axe scan timeout'));
-                }, 60000);
-                
-                axe.run((err, results) => {
-                    clearTimeout(timeout);
-                    if (err) reject(err);
-                    else resolve(results);
-                });
-            });
-        });
-        
-        return results;
-        
-    } finally {
-        await page.close();
-    }
-}
-
-// ENHANCED API ENDPOINT WITH AI INTEGRATION
+// API endpoint for scanning
 app.post('/api/scan', async (req, res) => {
-    const startTime = Date.now();
+    const { url, scanType = 'single', maxPages = 5, enableAI = false } = req.body;
+    
+    if (!url) {
+        return res.status(400).json({ success: false, error: 'URL is required' });
+    }
+    
     let browser = null;
+    const startTime = Date.now();
     
     try {
-        const { url, scanType = 'single', maxPages = 5, aiEnabled = false } = req.body;
+        console.log(`🔍 Starting ${scanType} scan for: ${url}`);
         
-        if (!url) {
-            return res.status(400).json({
-                success: false,
-                error: 'URL is required'
-            });
-        }
-        
-        let targetUrl = url;
-        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-            targetUrl = 'https://' + targetUrl;
-        }
-        
-        console.log('🔍 Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ', AI: ' + (aiEnabled && aiFixEngine ? 'enabled' : 'disabled') + ')');
-        
-        // Launch Puppeteer - EXACT WORKING CONFIGURATION
+        // Launch browser with Cloud Run compatible settings
         browser = await puppeteer.launch({
-            headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',
+            headless: true,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -1670,197 +1279,389 @@ app.post('/api/scan', async (req, res) => {
                 '--no-first-run',
                 '--no-zygote',
                 '--single-process',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
-            ],
-            timeout: 60000
+                '--disable-gpu'
+            ]
         });
         
-        let scanResults;
-        let aiFixes = null;
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 720 });
         
-        if (scanType === 'single') {
-            // Single page scan (existing working functionality)
-            const results = await scanSinglePage(browser, targetUrl);
-            const scanTime = Date.now() - startTime;
+        // Inject axe-core
+        await page.addScriptTag({
+            path: require.resolve('axe-core')
+        });
+        
+        let allViolations = [];
+        let pagesScanned = 0;
+        
+        if (scanType === 'multi') {
+            // Multi-page scan
+            const visitedUrls = new Set();
+            const urlsToVisit = [url];
             
-            console.log('✅ Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
-            
-            // Generate AI fixes if enabled and available
-            if (aiEnabled && aiFixEngine && results.violations.length > 0) {
-                try {
-                    console.log('🤖 Generating AI fix suggestions...');
-                    aiFixes = await aiFixEngine.generateAccessibilityFixes(results.violations, targetUrl);
-                    console.log('✅ AI fixes generated successfully');
-                } catch (aiError) {
-                    console.log('⚠️ AI fix generation failed:', aiError.message);
-                }
-            }
-            
-            // Save to database with AI fixes
-            await saveScan(1, 1, targetUrl, scanType, results.violations.length, scanTime, 1, results.violations, aiFixes);
-            
-            scanResults = {
-                success: true,
-                url: targetUrl,
-                violations: results.violations,
-                timestamp: new Date().toISOString(),
-                totalIssues: results.violations.length,
-                scanTime: scanTime,
-                summary: {
-                    critical: results.violations.filter(v => v.impact === 'critical').length,
-                    serious: results.violations.filter(v => v.impact === 'serious').length,
-                    moderate: results.violations.filter(v => v.impact === 'moderate').length,
-                    minor: results.violations.filter(v => v.impact === 'minor').length
-                },
-                aiFixes: aiFixes
-            };
-            
-        } else if (scanType === 'crawl') {
-            // Multi-page crawl - EXACT WORKING LOGIC
-            console.log('🕷️ Starting multi-page crawl (max ' + maxPages + ' pages)');
-            
-            const scannedPages = [];
-            const urlsToScan = [targetUrl];
-            const scannedUrls = new Set();
-            
-            // Scan the first page and extract links
-            const firstPageResults = await scanSinglePage(browser, targetUrl);
-            scannedPages.push({
-                url: targetUrl,
-                violations: firstPageResults.violations,
-                scanTime: Date.now() - startTime
-            });
-            scannedUrls.add(targetUrl);
-            
-            // Extract links from the first page for crawling
-            if (maxPages > 1) {
-                const page = await browser.newPage();
-                try {
-                    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    const links = await extractLinks(page, targetUrl);
-                    
-                    // Add unique links to scan queue
-                    for (const link of links) {
-                        if (urlsToScan.length < maxPages && !scannedUrls.has(link)) {
-                            urlsToScan.push(link);
-                        }
-                    }
-                } catch (error) {
-                    console.log('Error extracting links:', error.message);
-                } finally {
-                    await page.close();
-                }
-            }
-            
-            // Scan additional pages
-            for (let i = 1; i < urlsToScan.length && i < maxPages; i++) {
-                const pageUrl = urlsToScan[i];
-                if (scannedUrls.has(pageUrl)) continue;
+            while (urlsToVisit.length > 0 && pagesScanned < maxPages) {
+                const currentUrl = urlsToVisit.shift();
+                
+                if (visitedUrls.has(currentUrl)) continue;
+                visitedUrls.add(currentUrl);
                 
                 try {
-                    console.log('🔍 Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
-                    const pageStartTime = Date.now();
-                    const pageResults = await scanSinglePage(browser, pageUrl);
+                    console.log(`📄 Scanning page ${pagesScanned + 1}: ${currentUrl}`);
+                    await page.goto(currentUrl, { waitUntil: 'networkidle0', timeout: 30000 });
                     
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: pageResults.violations,
-                        scanTime: Date.now() - pageStartTime
+                    // Run axe-core analysis
+                    const results = await page.evaluate(() => {
+                        return axe.run();
                     });
-                    scannedUrls.add(pageUrl);
                     
-                } catch (error) {
-                    console.log('❌ Error scanning page ' + pageUrl + ':', error.message);
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: [],
-                        scanTime: 0,
-                        error: error.message
-                    });
+                    allViolations.push(...results.violations);
+                    pagesScanned++;
+                    
+                    // Find more URLs to scan (if we haven't reached the limit)
+                    if (pagesScanned < maxPages) {
+                        const links = await page.evaluate((baseUrl) => {
+                            const links = Array.from(document.querySelectorAll('a[href]'));
+                            return links
+                                .map(link => {
+                                    const href = link.getAttribute('href');
+                                    if (href.startsWith('/')) {
+                                        return new URL(href, baseUrl).href;
+                                    } else if (href.startsWith('http')) {
+                                        return href;
+                                    }
+                                    return null;
+                                })
+                                .filter(href => href && href.startsWith(baseUrl))
+                                .slice(0, 5); // Limit to 5 additional URLs per page
+                        }, new URL(url).origin);
+                        
+                        links.forEach(link => {
+                            if (!visitedUrls.has(link) && !urlsToVisit.includes(link)) {
+                                urlsToVisit.push(link);
+                            }
+                        });
+                    }
+                } catch (pageError) {
+                    console.error(`❌ Error scanning page ${currentUrl}:`, pageError.message);
                 }
             }
+        } else {
+            // Single page scan
+            console.log(`📄 Scanning single page: ${url}`);
+            await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
             
-            // Aggregate results
-            const allViolations = scannedPages.reduce((acc, page) => acc.concat(page.violations || []), []);
-            const scanTime = Date.now() - startTime;
+            const results = await page.evaluate(() => {
+                return axe.run();
+            });
             
-            console.log('✅ Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
-            
-            // Generate AI fixes if enabled and available
-            if (aiEnabled && aiFixEngine && allViolations.length > 0) {
-                try {
-                    console.log('🤖 Generating AI fix suggestions for multi-page scan...');
-                    aiFixes = await aiFixEngine.generateAccessibilityFixes(allViolations, targetUrl);
-                    console.log('✅ AI fixes generated successfully');
-                } catch (aiError) {
-                    console.log('⚠️ AI fix generation failed:', aiError.message);
-                }
-            }
-            
-            // Save to database with AI fixes
-            await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations, aiFixes);
-            
-            scanResults = {
-                success: true,
-                scanType: 'crawl',
-                pages: scannedPages,
-                totalIssues: allViolations.length,
-                scanTime: scanTime,
-                timestamp: new Date().toISOString(),
-                summary: {
-                    critical: allViolations.filter(v => v.impact === 'critical').length,
-                    serious: allViolations.filter(v => v.impact === 'serious').length,
-                    moderate: allViolations.filter(v => v.impact === 'moderate').length,
-                    minor: allViolations.filter(v => v.impact === 'minor').length
-                },
-                aiFixes: aiFixes
-            };
+            allViolations = results.violations;
+            pagesScanned = 1;
         }
         
-        res.json(scanResults);
+        const scanTime = Date.now() - startTime;
+        
+        // Process violations
+        const violationsByImpact = {
+            critical: 0,
+            serious: 0,
+            moderate: 0,
+            minor: 0
+        };
+        
+        allViolations.forEach(violation => {
+            if (violationsByImpact.hasOwnProperty(violation.impact)) {
+                violationsByImpact[violation.impact]++;
+            }
+        });
+        
+        const totalIssues = allViolations.length;
+        
+        // Generate AI fixes if enabled and available
+        let aiFixReport = null;
+        if (enableAI && aiFixEngine && allViolations.length > 0) {
+            try {
+                console.log('🤖 Generating AI fix suggestions...');
+                aiFixReport = await aiFixEngine.generateAccessibilityFixes(allViolations);
+                console.log(`✅ Generated ${aiFixReport.fixes.length} AI fix suggestions`);
+            } catch (aiError) {
+                console.error('❌ AI fix generation failed:', aiError.message);
+            }
+        }
+        
+        // Prepare scan data for database
+        const scanData = {
+            url: url,
+            scan_type: scanType,
+            status: 'completed',
+            total_issues: totalIssues,
+            scan_time_ms: scanTime,
+            pages_scanned: pagesScanned,
+            violations_data: {
+                violations: allViolations,
+                violationsByImpact: violationsByImpact,
+                ai_fixes: aiFixReport
+            }
+        };
+        
+        // Save to database
+        const scanId = await saveScanToDatabase(scanData);
+        
+        // Generate detailed results HTML
+        const detailedResults = generateDetailedResultsHTML(allViolations, url, scanTime, violationsByImpact, aiFixReport);
+        
+        const responseData = {
+            url: url,
+            totalIssues: totalIssues,
+            scanTime: scanTime,
+            timestamp: new Date().toLocaleString(),
+            violations: violationsByImpact,
+            pagesScanned: pagesScanned,
+            detailedResults: detailedResults,
+            scanId: scanId,
+            aiFixReport: aiFixReport
+        };
+        
+        console.log(`✅ Scan completed: ${totalIssues} issues found in ${scanTime}ms`);
+        res.json({ success: true, data: responseData });
         
     } catch (error) {
         console.error('❌ Scan error:', error);
-        const scanTime = Date.now() - startTime;
-        
-        let errorMessage = error.message;
-        if (errorMessage.includes('Navigation timeout')) {
-            errorMessage = 'Website took too long to load. This may be due to slow server response or complex page content. Please try a different URL or try again later.';
-        } else if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED')) {
-            errorMessage = 'Website not found. Please check the URL and try again.';
-        } else if (errorMessage.includes('net::ERR_CONNECTION_REFUSED')) {
-            errorMessage = 'Connection refused. The website may be down or blocking automated access.';
-        }
-        
-        res.status(500).json({
-            success: false,
-            error: errorMessage,
-            scanTime: scanTime,
-            timestamp: new Date().toISOString()
+        res.json({ 
+            success: false, 
+            error: error.message || 'Scan failed'
         });
     } finally {
         if (browser) {
-            try {
-                await browser.close();
-                console.log('🔒 Browser closed successfully');
-            } catch (closeError) {
-                console.error('❌ Error closing browser:', closeError);
-            }
+            await browser.close();
         }
     }
 });
 
+// Helper function to generate detailed results HTML
+function generateDetailedResultsHTML(violations, url, scanTime, violationsByImpact, aiFixReport) {
+    const aiFixesSection = aiFixReport ? `
+        <div style="background: linear-gradient(135deg, #f3f4f6, #e5e7eb); border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 2rem;">
+            <h2 style="color: #374151; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                🤖 AI Fix Suggestions
+                <span style="background: linear-gradient(135deg, #8b5cf6, #3b82f6); color: white; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600;">NEW</span>
+            </h2>
+            <p style="color: #6b7280; margin-bottom: 1rem;">AI has generated ${aiFixReport.fixes.length} specific code fixes for your accessibility issues.</p>
+            <div style="background: white; border-radius: 0.375rem; padding: 1rem;">
+                <h3 style="margin-bottom: 0.5rem;">Summary:</h3>
+                <ul style="margin-left: 1rem; color: #374151;">
+                    <li>Total fixes generated: ${aiFixReport.fixes.length}</li>
+                    <li>High confidence fixes: ${aiFixReport.fixes.filter(f => f.confidence > 0.8).length}</li>
+                    <li>Average confidence: ${Math.round(aiFixReport.averageConfidence * 100)}%</li>
+                </ul>
+            </div>
+        </div>
+    ` : '';
+    
+    return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detailed Accessibility Violations</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8fafc;
+        }
+        .header {
+            background: white;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+        .violation {
+            background: white;
+            margin-bottom: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .violation-header {
+            padding: 1rem 1.5rem;
+            border-left: 4px solid;
+            cursor: pointer;
+        }
+        .violation-header.critical {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+        .violation-header.serious {
+            border-left-color: #f59e0b;
+            background: #fffbeb;
+        }
+        .violation-header.moderate {
+            border-left-color: #3b82f6;
+            background: #eff6ff;
+        }
+        .violation-header.minor {
+            border-left-color: #10b981;
+            background: #f0fdf4;
+        }
+        .violation-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+        .violation-impact {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .impact-critical {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .impact-serious {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .impact-moderate {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+        .impact-minor {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .violation-details {
+            padding: 1.5rem;
+            border-top: 1px solid #e5e7eb;
+            display: none;
+        }
+        .violation-details.show {
+            display: block;
+        }
+        .elements-count {
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+        .show-elements {
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            margin-top: 1rem;
+            display: inline-block;
+        }
+        .elements-list {
+            display: none;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 0.375rem;
+        }
+        .elements-list.show {
+            display: block;
+        }
+        .element-item {
+            margin-bottom: 0.5rem;
+            padding: 0.5rem;
+            background: white;
+            border-radius: 0.25rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Detailed Accessibility Violations</h1>
+        <p><strong>URL:</strong> ${url}</p>
+        <p><strong>Scan Time:</strong> ${scanTime}ms</p>
+        <p><strong>Total Issues:</strong> ${violations.length}</p>
+        <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+            <span class="violation-impact impact-critical">Critical: ${violationsByImpact.critical}</span>
+            <span class="violation-impact impact-serious">Serious: ${violationsByImpact.serious}</span>
+            <span class="violation-impact impact-moderate">Moderate: ${violationsByImpact.moderate}</span>
+            <span class="violation-impact impact-minor">Minor: ${violationsByImpact.minor}</span>
+        </div>
+    </div>
+    
+    ${aiFixesSection}
+    
+    ${violations.map((violation, index) => `
+        <div class="violation">
+            <div class="violation-header ${violation.impact}" onclick="toggleViolation(${index})">
+                <div class="violation-title">${violation.id}</div>
+                <span class="violation-impact impact-${violation.impact}">${violation.impact}</span>
+                <div class="elements-count">Elements affected: ${violation.nodes.length}</div>
+            </div>
+            <div class="violation-details" id="violation-${index}">
+                <p><strong>Description:</strong> ${violation.description}</p>
+                <p><strong>Help:</strong> ${violation.help}</p>
+                <div class="show-elements" onclick="toggleElements(${index})">
+                    ▶ Show affected elements
+                </div>
+                <div class="elements-list" id="elements-${index}">
+                    ${violation.nodes.map(node => `
+                        <div class="element-item">
+                            <strong>Target:</strong> ${node.target.join(', ')}<br>
+                            <strong>HTML:</strong> ${node.html}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+    `).join('')}
+    
+    <script>
+        function toggleViolation(index) {
+            const details = document.getElementById('violation-' + index);
+            details.classList.toggle('show');
+        }
+        
+        function toggleElements(index) {
+            const elements = document.getElementById('elements-' + index);
+            const button = elements.previousElementSibling;
+            
+            elements.classList.toggle('show');
+            button.textContent = elements.classList.contains('show') ? 
+                '▼ Hide affected elements' : '▶ Show affected elements';
+        }
+    </script>
+</body>
+</html>
+    `;
+}
+
+// API endpoint to get recent scans
+app.get('/api/scans/recent', async (req, res) => {
+    try {
+        const recentScans = await getRecentScans(10);
+        res.json({ success: true, data: recentScans });
+    } catch (error) {
+        console.error('Error getting recent scans:', error);
+        res.status(500).json({ success: false, error: 'Failed to get recent scans' });
+    }
+});
+
 // Start server
-app.listen(PORT, () => {
-    console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
-    console.log('📊 Health check: http://localhost:' + PORT + '/health');
-    console.log('🔍 Scanner: http://localhost:' + PORT + '/');
-    console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
-    console.log('🤖 AI Engine: ' + (aiFixEngine ? 'Enabled' : 'Disabled'));
-    console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 SentryPrime Enterprise Dashboard running on port ${PORT}`);
+    console.log(`📊 Scanner: http://localhost:${PORT}/`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+    console.log(`🗄️ Database: ${db ? 'Connected' : 'Disconnected'}`);
+    console.log(`🤖 AI Features: ${aiFixEngine ? 'Enabled' : 'Disabled'}`);
+    console.log(`⏰ Server time: ${new Date().toISOString()}`);
+    
+    // Log environment info
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`☁️ Cloud Run: ${process.env.K_SERVICE ? 'Yes' : 'No'}`);
+    console.log(`🐘 PostgreSQL version: PostgreSQL`);
 });
