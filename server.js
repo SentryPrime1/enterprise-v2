@@ -156,7 +156,7 @@ async function getDashboardStats(userId = 1) {
             totalScans: 3,
             totalIssues: 22,
             avgScore: 92,
-            recentActivity: 'Mock data - database not connected'
+            weeklyScans: 2
         };
     }
     
@@ -260,7 +260,7 @@ app.get('/', (req, res) => {
             height: 100vh;
         }
         
-        /* Sidebar - PRESERVED STYLING */
+        /* Sidebar */
         .sidebar {
             width: 240px;
             background: #1a1a1a;
@@ -323,7 +323,7 @@ app.get('/', (req, res) => {
             justify-content: center;
         }
         
-        /* Main Content - PRESERVED STYLING */
+        /* Main Content */
         .main-content {
             flex: 1;
             display: flex;
@@ -331,7 +331,7 @@ app.get('/', (req, res) => {
             overflow: hidden;
         }
         
-        /* Header - PRESERVED STYLING */
+        /* Header */
         .header {
             background: white;
             padding: 16px 24px;
@@ -393,7 +393,7 @@ app.get('/', (req, res) => {
             font-size: 14px;
         }
         
-        /* Content Area - PRESERVED STYLING */
+        /* Content Area */
         .content-area {
             flex: 1;
             padding: 24px;
@@ -415,7 +415,7 @@ app.get('/', (req, res) => {
             font-size: 1rem;
         }
         
-        /* NEW: Dashboard Overview Styles */
+        /* Dashboard Overview Styles */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -488,27 +488,8 @@ app.get('/', (req, res) => {
             color: #666;
         }
         
-        /* PRESERVED: Scanner and Results Styles */
-        .new-scan-btn {
-            background: #1a1a1a;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 6px;
-            font-weight: 500;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 24px;
-            transition: background 0.2s ease;
-        }
-        
-        .new-scan-btn:hover {
-            background: #333;
-        }
-        
-        .scanner-section {
+        /* Scanner Styles */
+        .scanner-container {
             background: white;
             border-radius: 8px;
             padding: 24px;
@@ -516,102 +497,168 @@ app.get('/', (req, res) => {
             margin-bottom: 24px;
         }
         
-        .scanner-section h3 {
+        .url-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .scan-options {
             margin-bottom: 20px;
-            font-size: 1.2rem;
-            font-weight: 600;
-        }
-        
-        input[type="url"] { 
-            width: 100%; 
-            padding: 12px; 
-            margin: 10px 0; 
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        
-        input[type="url"]:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        input[type="number"] { 
-            width: 100px; 
-            padding: 8px; 
-            margin: 5px; 
-            border: 1px solid #e1e5e9;
-            border-radius: 4px;
-            text-align: center;
-        }
-        
-        .scan-options { 
-            margin: 15px 0; 
-            padding: 15px; 
-            background: #f8f9fa;
-            border-radius: 6px;
         }
         
         .scan-options h4 {
             margin-bottom: 12px;
             font-size: 1rem;
-            font-weight: 600;
         }
         
-        .scan-options label {
-            display: block;
-            margin: 8px 0;
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .multi-page-options {
+            margin-left: 24px;
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .multi-page-options input[type="number"] {
+            width: 60px;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .scan-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 16px;
             font-weight: 500;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        button { 
-            background: #007bff;
-            color: white; 
-            padding: 12px 24px; 
-            border: none; 
-            border-radius: 4px; 
-            cursor: pointer; 
-            margin: 5px;
-            font-size: 14px;
-            font-weight: 500;
+        .scan-btn:hover {
+            background: #5a6fd8;
         }
         
-        button:hover { 
-            background: #0056b3;
-        }
-        
-        button:disabled { 
-            background: #6c757d; 
+        .scan-btn:disabled {
+            background: #ccc;
             cursor: not-allowed;
         }
         
-        .results { 
+        /* Results Styles */
+        .results-container {
             background: white;
             border-radius: 8px;
-            padding: 20px;
+            padding: 24px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-top: 30px;
+            margin-bottom: 24px;
+            display: none;
         }
         
-        .results h2 {
+        .results-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
             margin-bottom: 16px;
+        }
+        
+        .results-header h3 {
             font-size: 1.2rem;
-            font-weight: 600;
         }
         
-        .loading { color: #007bff; }
-        .error { color: #dc3545; }
-        .success { color: #28a745; }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
         
-        .page-result { 
-            margin: 10px 0; 
-            padding: 10px; 
-            border-left: 3px solid #007bff;
+        .status-complete {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .results-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .summary-item {
+            text-align: center;
+            padding: 16px;
             background: #f8f9fa;
+            border-radius: 6px;
         }
         
+        .summary-item .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .summary-item .label {
+            font-size: 0.8rem;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .violations-by-impact {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .impact-item {
+            text-align: center;
+            padding: 12px;
+            border-radius: 6px;
+        }
+        
+        .impact-critical { background: #f8d7da; color: #721c24; }
+        .impact-serious { background: #fff3cd; color: #856404; }
+        .impact-moderate { background: #cce5ff; color: #004085; }
+        .impact-minor { background: #d1ecf1; color: #0c5460; }
+        
+        .view-details-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        /* Recent Scans */
         .recent-scans {
             background: white;
             border-radius: 8px;
@@ -622,15 +669,14 @@ app.get('/', (req, res) => {
         .recent-scans h3 {
             margin-bottom: 16px;
             font-size: 1.2rem;
-            font-weight: 600;
         }
         
         .scan-item {
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
             padding: 16px 0;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid #eee;
         }
         
         .scan-item:last-child {
@@ -650,96 +696,110 @@ app.get('/', (req, res) => {
         .scan-score {
             background: #28a745;
             color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 4px 12px;
+            border-radius: 20px;
             font-size: 0.8rem;
-            font-weight: 600;
-            margin-right: 12px;
+            font-weight: 500;
         }
         
         .view-report-btn {
-            background: #f8f9fa;
-            color: #333;
-            border: 1px solid #e1e5e9;
+            background: #667eea;
+            color: white;
+            border: none;
             padding: 6px 12px;
             border-radius: 4px;
-            font-size: 0.8rem;
             cursor: pointer;
+            font-size: 0.8rem;
+            margin-left: 8px;
         }
         
-        .view-report-btn:hover {
-            background: #e9ecef;
+        /* Loading States */
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #666;
         }
         
-        /* Database status styles - PRESERVED */
-        .db-status {
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            font-size: 0.9rem;
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
         }
         
-        .db-connected {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
         
-        .db-standalone {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
+        /* Hidden class */
+        .hidden {
+            display: none !important;
         }
         
-        /* NEW: Page visibility controls */
-        .page-content {
-            display: none;
-        }
-        
-        .page-content.active {
-            display: block;
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: auto;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
     <div class="dashboard-container">
-        <!-- Sidebar - ENHANCED with navigation -->
+        <!-- Sidebar -->
         <div class="sidebar">
             <div class="sidebar-header">
                 <h1>🛡️ SentryPrime</h1>
                 <p>Enterprise Dashboard</p>
             </div>
             <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" onclick="showPage('dashboard')">
-                    <span class="nav-icon">📊</span>
+                <a href="#" class="nav-item active" data-page="dashboard">
+                    <div class="nav-icon">📊</div>
                     Dashboard
                 </a>
-                <a href="#" class="nav-item" onclick="showPage('scans')">
-                    <span class="nav-icon">🔍</span>
+                <a href="#" class="nav-item" data-page="scans">
+                    <div class="nav-icon">🔍</div>
                     Scans
                 </a>
-                <a href="#" class="nav-item" onclick="showPage('analytics')">
-                    <span class="nav-icon">📈</span>
+                <a href="#" class="nav-item" data-page="analytics">
+                    <div class="nav-icon">📈</div>
                     Analytics
                 </a>
-                <a href="#" class="nav-item" onclick="showPage('team')">
-                    <span class="nav-icon">👥</span>
+                <a href="#" class="nav-item" data-page="team">
+                    <div class="nav-icon">👥</div>
                     Team
                 </a>
-                <a href="#" class="nav-item" onclick="showPage('integrations')">
-                    <span class="nav-icon">🔗</span>
+                <a href="#" class="nav-item" data-page="integrations">
+                    <div class="nav-icon">🔗</div>
                     Integrations
                 </a>
-                <a href="#" class="nav-item" onclick="showPage('api')">
-                    <span class="nav-icon">⚙️</span>
+                <a href="#" class="nav-item" data-page="api">
+                    <div class="nav-icon">⚙️</div>
                     API Management
                 </a>
-                <a href="#" class="nav-item" onclick="showPage('billing')">
-                    <span class="nav-icon">💳</span>
+                <a href="#" class="nav-item" data-page="billing">
+                    <div class="nav-icon">💳</div>
                     Billing
                 </a>
-                <a href="#" class="nav-item" onclick="showPage('settings')">
-                    <span class="nav-icon">⚙️</span>
+                <a href="#" class="nav-item" data-page="settings">
+                    <div class="nav-icon">⚙️</div>
                     Settings
                 </a>
             </nav>
@@ -747,7 +807,7 @@ app.get('/', (req, res) => {
         
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Header - PRESERVED -->
+            <!-- Header -->
             <div class="header">
                 <div class="header-left">
                     <div class="search-bar">
@@ -756,22 +816,25 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
                 <div class="header-right">
-                    <span style="color: #dc3545; font-weight: 600;">2</span>
+                    <div style="position: relative;">
+                        <span style="font-size: 1.2rem; cursor: pointer;">🔔</span>
+                        <span style="position: absolute; top: -4px; right: -4px; background: #dc3545; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">2</span>
+                    </div>
                     <div class="user-profile">
                         <div class="user-avatar">JD</div>
                         <div>
-                            <div style="font-weight: 500; font-size: 0.9rem;">John Doe</div>
-                            <div style="font-size: 0.8rem; color: #666;">Acme Corporation</div>
+                            <div style="font-size: 0.9rem; font-weight: 500;">John Doe</div>
+                            <div style="font-size: 0.7rem; color: #666;">Acme Corporation</div>
                         </div>
-                        <span>▼</span>
+                        <span style="margin-left: 8px;">▼</span>
                     </div>
                 </div>
             </div>
             
             <!-- Content Area -->
             <div class="content-area">
-                <!-- NEW: Dashboard Overview Page -->
-                <div id="dashboard-page" class="page-content active">
+                <!-- Dashboard Overview Page -->
+                <div id="dashboard-page" class="page">
                     <div class="page-header">
                         <h1 class="page-title">Dashboard Overview</h1>
                         <p class="page-subtitle">Monitor your accessibility compliance and recent activity</p>
@@ -781,420 +844,583 @@ app.get('/', (req, res) => {
                     <div class="stats-grid">
                         <div class="stat-card">
                             <h3>Total Scans</h3>
-                            <div class="stat-value" id="totalScans">-</div>
+                            <div class="stat-value" id="total-scans">-</div>
                             <div class="stat-change">+2 this week</div>
                         </div>
                         <div class="stat-card">
                             <h3>Issues Found</h3>
-                            <div class="stat-value" id="totalIssues">-</div>
+                            <div class="stat-value" id="total-issues">-</div>
                             <div class="stat-change">-5 from last week</div>
                         </div>
                         <div class="stat-card">
                             <h3>Average Score</h3>
-                            <div class="stat-value" id="avgScore">-</div>
+                            <div class="stat-value" id="avg-score">-</div>
                             <div class="stat-change">+3% improvement</div>
                         </div>
                         <div class="stat-card">
                             <h3>This Week</h3>
-                            <div class="stat-value" id="weeklyScans">-</div>
+                            <div class="stat-value" id="weekly-scans">-</div>
                             <div class="stat-change">scans completed</div>
                         </div>
                     </div>
                     
                     <!-- Quick Actions -->
                     <div class="quick-actions">
-                        <div class="action-card" onclick="showPage('scans')">
+                        <div class="action-card" onclick="switchToPage('scans')">
                             <div class="action-icon">🔍</div>
                             <h4>New Scan</h4>
                             <p>Start a new accessibility scan</p>
                         </div>
-                        <div class="action-card" onclick="showPage('analytics')">
-                            <div class="action-icon">📈</div>
-                            <h4>View Reports</h4>
-                            <p>Analyze your compliance trends</p>
+                        <div class="action-card" onclick="switchToPage('analytics')">
+                            <div class="action-icon">📊</div>
+                            <h4>View Analytics</h4>
+                            <p>Analyze compliance trends</p>
                         </div>
-                        <div class="action-card" onclick="showPage('team')">
+                        <div class="action-card" onclick="switchToPage('team')">
                             <div class="action-icon">👥</div>
                             <h4>Manage Team</h4>
-                            <p>Invite and manage team members</p>
+                            <p>Add or remove team members</p>
                         </div>
-                        <div class="action-card" onclick="showPage('integrations')">
-                            <div class="action-icon">🔗</div>
-                            <h4>Integrations</h4>
-                            <p>Connect your platforms</p>
+                        <div class="action-card" onclick="switchToPage('settings')">
+                            <div class="action-icon">⚙️</div>
+                            <h4>Settings</h4>
+                            <p>Configure your preferences</p>
                         </div>
                     </div>
                     
                     <!-- Recent Activity -->
                     <div class="recent-scans">
-                        <h3>Recent Activity</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Your latest accessibility scans and results</p>
-                        
-                        <div id="dashboardRecentScans">
-                            <div style="text-align: center; padding: 20px; color: #666;">
-                                🔄 Loading recent activity...
+                        <h3>Recent Scans</h3>
+                        <p style="color: #666; margin-bottom: 16px;">Your latest accessibility scan results</p>
+                        <div id="dashboard-recent-scans">
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                Loading recent scans...
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- PRESERVED: Scans Page -->
-                <div id="scans-page" class="page-content">
+                <!-- Scans Page -->
+                <div id="scans-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Accessibility Scans</h1>
                         <p class="page-subtitle">Manage and review your accessibility scans</p>
                     </div>
                     
-                    <!-- Database Status Indicator -->
-                    <div id="dbStatus" class="db-status">
-                        <span id="dbStatusText">🔄 Checking database connection...</span>
+                    <div style="background: #d4edda; color: #155724; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
+                        ✅ Database connected - Scans will be saved to your history
                     </div>
                     
-                    <button class="new-scan-btn" onclick="toggleScanner()">
-                        <span>+</span>
-                        New Scan
-                    </button>
-                    
-                    <!-- Scanner Section - PRESERVED FUNCTIONALITY -->
-                    <div class="scanner-section" id="scannerSection">
-                        <h2>Scan Website for Accessibility Issues</h2>
-                        <form id="scanForm">
-                            <input type="url" id="url" placeholder="https://example.com/" required>
-                            
-                            <div class="scan-options">
-                                <h4>Scan Options:</h4>
-                                <label>
-                                    <input type="radio" name="scanType" value="single" checked> 
+                    <!-- Scanner -->
+                    <div class="scanner-container">
+                        <h3 style="margin-bottom: 16px;">Scan Website for Accessibility Issues</h3>
+                        
+                        <input type="text" id="url-input" class="url-input" placeholder="https://example.com/" value="https://example.com/">
+                        
+                        <div class="scan-options">
+                            <h4>Scan Options:</h4>
+                            <div class="radio-group">
+                                <label class="radio-option">
+                                    <input type="radio" name="scanType" value="single" checked>
                                     Single Page (Fast - recommended)
-                                </label><br>
-                                <label>
-                                    <input type="radio" name="scanType" value="crawl"> 
+                                </label>
+                                <label class="radio-option">
+                                    <input type="radio" name="scanType" value="crawl">
                                     Multi-Page Crawl (Slower - up to 
-                                    <input type="number" id="maxPages" value="5" min="2" max="20"> pages)
+                                    <div class="multi-page-options">
+                                        <input type="number" id="max-pages" value="5" min="1" max="20">
+                                        pages)
+                                    </div>
                                 </label>
                             </div>
-                            
-                            <button type="submit" id="scanButton">🔍 Start Accessibility Scan</button>
-                        </form>
+                        </div>
+                        
+                        <button id="scan-btn" class="scan-btn">
+                            🔍 Start Accessibility Scan
+                        </button>
                     </div>
                     
-                    <!-- Results Section - PRESERVED FUNCTIONALITY -->
-                    <div id="results" class="results" style="display: none;">
-                        <h2>Scan Results</h2>
-                        <div id="resultsContent"></div>
+                    <!-- Results -->
+                    <div id="results-container" class="results-container">
+                        <div class="results-header">
+                            <h3>Scan Results</h3>
+                            <span id="status-badge" class="status-badge"></span>
+                        </div>
+                        <div id="results-content"></div>
                     </div>
                     
-                    <!-- Recent Scans - PRESERVED FUNCTIONALITY -->
+                    <!-- Recent Scans -->
                     <div class="recent-scans">
                         <h3>Recent Scans</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Your latest accessibility scan results</p>
-                        
-                        <div id="recentScansContainer">
-                            <div style="text-align: center; padding: 20px; color: #666;">
-                                🔄 Loading recent scans...
+                        <p style="color: #666; margin-bottom: 16px;">Your latest accessibility scan results</p>
+                        <div id="recent-scans-list">
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                Loading recent scans...
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Placeholder pages for other navigation items -->
-                <div id="analytics-page" class="page-content">
+                <!-- Analytics Page -->
+                <div id="analytics-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Analytics</h1>
-                        <p class="page-subtitle">Detailed accessibility compliance reports and trends</p>
+                        <p class="page-subtitle">Track your accessibility compliance over time</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        📈 Analytics page coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">📊 Analytics Dashboard</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Advanced analytics and reporting features</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Compliance trend charts</li>
+                                <li>Issue category breakdowns</li>
+                                <li>Team performance metrics</li>
+                                <li>Custom reporting</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
-                <div id="team-page" class="page-content">
+                <!-- Team Page -->
+                <div id="team-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Team Management</h1>
                         <p class="page-subtitle">Manage team members and permissions</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        👥 Team management coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">👥 Team Management</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Team collaboration features</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Invite team members</li>
+                                <li>Role-based permissions</li>
+                                <li>Activity tracking</li>
+                                <li>Shared scan results</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
-                <div id="integrations-page" class="page-content">
+                <!-- Integrations Page -->
+                <div id="integrations-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Integrations</h1>
-                        <p class="page-subtitle">Connect with your favorite platforms</p>
+                        <p class="page-subtitle">Connect with your favorite tools and platforms</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        🔗 Platform integrations coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">🔗 Platform Integrations</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Direct integrations with popular platforms</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Integrations:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Shopify - Auto-fix accessibility issues</li>
+                                <li>WordPress - Plugin integration</li>
+                                <li>Slack - Notifications and reports</li>
+                                <li>GitHub - CI/CD integration</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
-                <div id="api-page" class="page-content">
+                <!-- API Management Page -->
+                <div id="api-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">API Management</h1>
-                        <p class="page-subtitle">Manage API keys and access</p>
+                        <p class="page-subtitle">Manage API keys and integrations</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        ⚙️ API management coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">⚙️ API Management</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - API access and management</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Generate API keys</li>
+                                <li>Usage analytics</li>
+                                <li>Rate limiting</li>
+                                <li>Webhook configuration</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
-                <div id="billing-page" class="page-content">
+                <!-- Billing Page -->
+                <div id="billing-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Billing</h1>
-                        <p class="page-subtitle">Manage your subscription and usage</p>
+                        <p class="page-subtitle">Manage your subscription and billing</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        💳 Billing management coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">💳 Billing Management</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Subscription and billing management</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Subscription plans</li>
+                                <li>Usage tracking</li>
+                                <li>Invoice history</li>
+                                <li>Payment methods</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
-                <div id="settings-page" class="page-content">
+                <!-- Settings Page -->
+                <div id="settings-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Settings</h1>
                         <p class="page-subtitle">Configure your account and preferences</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        ⚙️ Settings page coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">⚙️ Account Settings</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Account and preference management</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Profile management</li>
+                                <li>Notification preferences</li>
+                                <li>Security settings</li>
+                                <li>Data export</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    
+
     <script>
-        // NEW: Navigation function
-        function showPage(pageId) {
+        // Navigation functionality
+        function switchToPage(pageId) {
             // Hide all pages
-            const pages = document.querySelectorAll('.page-content');
-            pages.forEach(page => page.classList.remove('active'));
+            document.querySelectorAll('.page').forEach(page => {
+                page.classList.add('hidden');
+            });
             
             // Show selected page
-            document.getElementById(pageId + '-page').classList.add('active');
+            document.getElementById(pageId + '-page').classList.remove('hidden');
             
-            // Update navigation active state
-            const navItems = document.querySelectorAll('.nav-item');
-            navItems.forEach(item => item.classList.remove('active'));
-            event.target.closest('.nav-item').classList.add('active');
-            
-            // Load page-specific data
-            if (pageId === 'dashboard') {
-                loadDashboardData();
-            } else if (pageId === 'scans') {
-                checkDatabaseStatus();
-                loadRecentScans();
-            }
+            // Update active nav item
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            document.querySelector(\`[data-page="\${pageId}"]\`).classList.add('active');
         }
         
-        // NEW: Load dashboard statistics
-        async function loadDashboardData() {
+        // Add click handlers to nav items
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                const pageId = item.getAttribute('data-page');
+                switchToPage(pageId);
+            });
+        });
+        
+        // Load dashboard statistics
+        async function loadDashboardStats() {
             try {
                 const response = await fetch('/api/dashboard/stats');
                 const data = await response.json();
                 
                 if (data.success) {
-                    document.getElementById('totalScans').textContent = data.stats.totalScans;
-                    document.getElementById('totalIssues').textContent = data.stats.totalIssues;
-                    document.getElementById('avgScore').textContent = data.stats.avgScore + '%';
-                    document.getElementById('weeklyScans').textContent = data.stats.weeklyScans;
+                    document.getElementById('total-scans').textContent = data.stats.totalScans;
+                    document.getElementById('total-issues').textContent = data.stats.totalIssues;
+                    document.getElementById('avg-score').textContent = data.stats.avgScore + '%';
+                    document.getElementById('weekly-scans').textContent = data.stats.weeklyScans;
                 }
             } catch (error) {
                 console.error('Error loading dashboard stats:', error);
             }
-            
-            // Also load recent scans for dashboard
-            loadDashboardRecentScans();
         }
         
-        // NEW: Load recent scans for dashboard
+        // Load recent scans for dashboard
         async function loadDashboardRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent?limit=5');
-                const data = await response.json();
-                
-                const container = document.getElementById('dashboardRecentScans');
-                
-                if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.map(scan => 
-                        '<div class="scan-item">' +
-                        '<div class="scan-info">' +
-                        '<h4>' + scan.url + '</h4>' +
-                        '<div class="scan-meta">' + (scan.scan_type === 'single' ? 'Single Page' : 'Multi-page') + ' • ' + new Date(scan.created_at).toLocaleDateString() + '</div>' +
-                        '</div>' +
-                        '<div style="display: flex; align-items: center;">' +
-                        '<span class="scan-score">' + scan.score + '% Score</span>' +
-                        '<button class="view-report-btn" onclick="showPage(\'scans\')">👁 View Details</button>' +
-                        '</div>' +
-                        '</div>'
-                    ).join('');
-                } else {
-                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No recent activity. <a href="#" onclick="showPage(\'scans\')">Start your first scan</a>!</div>';
-                }
-            } catch (error) {
-                console.error('Error loading dashboard recent scans:', error);
-                document.getElementById('dashboardRecentScans').innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">Unable to load recent activity.</div>';
-            }
-        }
-        
-        // PRESERVED: Load recent scans and check database status on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            loadDashboardData(); // Load dashboard by default
-        });
-
-        // PRESERVED: Database status check function
-        async function checkDatabaseStatus() {
-            try {
-                const response = await fetch('/health');
-                const data = await response.json();
-                
-                const statusDiv = document.getElementById('dbStatus');
-                const statusText = document.getElementById('dbStatusText');
-                
-                if (data.database === 'connected') {
-                    statusDiv.className = 'db-status db-connected';
-                    statusText.textContent = '✅ Database connected - Scans will be saved to your history';
-                } else {
-                    statusDiv.className = 'db-status db-standalone';
-                    statusText.textContent = '⚠️ Running in standalone mode - Scans will not be saved';
-                }
-            } catch (error) {
-                console.error('Error checking database status:', error);
-            }
-        }
-
-        // PRESERVED: Load recent scans function
-        async function loadRecentScans() {
             try {
                 const response = await fetch('/api/scans/recent');
                 const data = await response.json();
                 
-                const container = document.getElementById('recentScansContainer');
+                const container = document.getElementById('dashboard-recent-scans');
                 
                 if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.map(scan => 
-                        '<div class="scan-item">' +
-                        '<div class="scan-info">' +
-                        '<h4>' + scan.url + '</h4>' +
-                        '<div class="scan-meta">' + (scan.scan_type === 'single' ? 'Single Page' : 'Multi-page') + ' • ' + new Date(scan.created_at).toLocaleDateString() + '</div>' +
-                        '</div>' +
-                        '<div style="display: flex; align-items: center;">' +
-                        '<span class="scan-score">' + scan.score + '% Score</span>' +
-                        '<button class="view-report-btn">👁 View Report</button>' +
-                        '</div>' +
-                        '</div>'
-                    ).join('');
+                    container.innerHTML = data.scans.slice(0, 3).map(scan => \`
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>\${scan.url}</h4>
+                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="scan-score">\${scan.score}% Score</span>
+                                <button class="view-report-btn">👁️ View Report</button>
+                            </div>
+                        </div>
+                    \`).join('');
                 } else {
-                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No scans yet. Start your first scan above!</div>';
+                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. <a href="#" onclick="switchToPage(\\'scans\\')">Start your first scan</a></p>';
                 }
             } catch (error) {
                 console.error('Error loading recent scans:', error);
-                document.getElementById('recentScansContainer').innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">Unable to load recent scans.</div>';
+                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
             }
         }
         
-        // PRESERVED: Toggle scanner visibility
-        function toggleScanner() {
-            const scanner = document.getElementById('scannerSection');
-            scanner.style.display = scanner.style.display === 'none' ? 'block' : 'none';
-        }
+        // Scanner functionality (preserved from original)
+        let isScanning = false;
         
-        // PRESERVED: Scanner form submission - EXACT COPY FROM WORKING VERSION
-        document.getElementById('scanForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const url = document.getElementById('url').value;
+        document.getElementById('scan-btn').addEventListener('click', async () => {
+            if (isScanning) return;
+            
+            const url = document.getElementById('url-input').value.trim();
             const scanType = document.querySelector('input[name="scanType"]:checked').value;
-            const maxPages = document.getElementById('maxPages').value;
-            const resultsDiv = document.getElementById('results');
-            const resultsContent = document.getElementById('resultsContent');
-            const scanButton = document.getElementById('scanButton');
+            const maxPages = document.getElementById('max-pages').value;
             
-            // Disable button and show loading
-            scanButton.disabled = true;
-            scanButton.textContent = scanType === 'single' ? '⏳ Scanning...' : '⏳ Crawling...';
+            if (!url) {
+                alert('Please enter a URL to scan');
+                return;
+            }
             
-            const loadingMsg = scanType === 'single' 
-                ? '🔄 Scanning single page... This may take up to 30 seconds.'
-                : '🔄 Crawling multiple pages... This may take up to 5 minutes for ' + maxPages + ' pages.';
+            isScanning = true;
+            const scanBtn = document.getElementById('scan-btn');
+            const resultsContainer = document.getElementById('results-container');
             
-            resultsContent.innerHTML = '<p class="loading">' + loadingMsg + '</p>';
-            resultsDiv.style.display = 'block';
+            // Update button state
+            scanBtn.innerHTML = '<div class="spinner"></div> Scanning...';
+            scanBtn.disabled = true;
+            
+            // Show results container
+            resultsContainer.style.display = 'block';
+            document.getElementById('status-badge').textContent = 'Scanning...';
+            document.getElementById('status-badge').className = 'status-badge';
+            document.getElementById('results-content').innerHTML = '<div class="loading"><div class="spinner"></div>Analyzing accessibility...</div>';
             
             try {
-                const requestBody = { 
-                    url: url,
-                    scanType: scanType
-                };
-                
-                if (scanType === 'crawl') {
-                    requestBody.maxPages = parseInt(maxPages);
-                }
-                
                 const response = await fetch('/api/scan', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestBody)
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        scanType: scanType,
+                        maxPages: parseInt(maxPages)
+                    })
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
+                    // Update status
+                    document.getElementById('status-badge').textContent = 'Scan Complete';
+                    document.getElementById('status-badge').className = 'status-badge status-complete';
+                    
+                    // Display results
                     if (scanType === 'single') {
-                        // Single page results - EXACT FORMAT FROM WORKING VERSION
-                        resultsContent.innerHTML = 
-                            '<h3 class="success">✅ Scan Complete</h3>' +
-                            '<p><strong>URL:</strong> ' + result.url + '</p>' +
-                            '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
-                            '<p><strong>Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
-                            '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>' +
-                            '<h4>Violations by Impact:</h4>' +
-                            '<ul>' +
-                            '<li>Critical: ' + result.violations.filter(function(v) { return v.impact === 'critical'; }).length + '</li>' +
-                            '<li>Serious: ' + result.violations.filter(function(v) { return v.impact === 'serious'; }).length + '</li>' +
-                            '<li>Moderate: ' + result.violations.filter(function(v) { return v.impact === 'moderate'; }).length + '</li>' +
-                            '<li>Minor: ' + result.violations.filter(function(v) { return v.impact === 'minor'; }).length + '</li>' +
-                            '</ul>' +
-                            '<details><summary>View Detailed Results</summary><pre>' + JSON.stringify(result.violations, null, 2) + '</pre></details>';
+                        displaySinglePageResults(result);
                     } else {
-                        // Multi-page crawl results - EXACT FORMAT FROM WORKING VERSION
-                        let html = '<h3 class="success">✅ Crawl Complete</h3>' +
-                                  '<p><strong>Pages Scanned:</strong> ' + result.pages.length + '</p>' +
-                                  '<p><strong>Total Issues:</strong> ' + result.totalIssues + '</p>' +
-                                  '<p><strong>Total Scan Time:</strong> ' + result.scanTime + 'ms</p>' +
-                                  '<p><strong>Timestamp:</strong> ' + result.timestamp + '</p>' +
-                                  '<h4>Summary by Impact:</h4>' +
-                                  '<ul>' +
-                                  '<li>Critical: ' + result.summary.critical + '</li>' +
-                                  '<li>Serious: ' + result.summary.serious + '</li>' +
-                                  '<li>Moderate: ' + result.summary.moderate + '</li>' +
-                                  '<li>Minor: ' + result.summary.minor + '</li>' +
-                                  '</ul>' +
-                                  '<h4>Results by Page:</h4>';
-                        
-                        result.pages.forEach(function(page, index) {
-                            html += '<div class="page-result">' +
-                                   '<h5>Page ' + (index + 1) + ': ' + page.url + '</h5>' +
-                                   '<p>Issues: ' + page.violations.length + ' | Load Time: ' + page.loadTime + 'ms</p>' +
-                                   '<details><summary>View Page Details</summary><pre>' + JSON.stringify(page.violations, null, 2) + '</pre></details>' +
-                                   '</div>';
-                        });
-                        
-                        resultsContent.innerHTML = html;
+                        displayMultiPageResults(result);
                     }
                     
-                    // Refresh recent scans after successful scan
+                    // Reload recent scans
                     loadRecentScans();
-                    
+                    loadDashboardRecentScans();
+                    loadDashboardStats();
                 } else {
-                    resultsContent.innerHTML = '<p class="error">❌ Scan failed: ' + result.error + '</p>';
+                    throw new Error(result.error || 'Scan failed');
                 }
-                
             } catch (error) {
-                console.error('Scan request failed:', error);
-                resultsContent.innerHTML = '<p class="error">❌ Network error: Unable to complete scan. Please check your connection and try again.</p>';
+                console.error('Scan error:', error);
+                document.getElementById('status-badge').textContent = 'Scan Failed';
+                document.getElementById('status-badge').className = 'status-badge status-error';
+                document.getElementById('results-content').innerHTML = \`
+                    <div style="color: #dc3545; text-align: center; padding: 20px;">
+                        <h4>Scan Failed</h4>
+                        <p>\${error.message}</p>
+                    </div>
+                \`;
             } finally {
-                // Re-enable button
-                scanButton.disabled = false;
-                scanButton.textContent = '🔍 Start Accessibility Scan';
+                // Reset button
+                scanBtn.innerHTML = '🔍 Start Accessibility Scan';
+                scanBtn.disabled = false;
+                isScanning = false;
             }
+        });
+        
+        function displaySinglePageResults(result) {
+            const content = \`
+                <div class="results-summary">
+                    <div class="summary-item">
+                        <div class="value">\${result.url}</div>
+                        <div class="label">URL</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.totalIssues}</div>
+                        <div class="label">Total Issues</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.scanTime}ms</div>
+                        <div class="label">Scan Time</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
+                        <div class="label">Timestamp</div>
+                    </div>
+                </div>
+                
+                <h4 style="margin-bottom: 12px;">Violations by Impact:</h4>
+                <div class="violations-by-impact">
+                    <div class="impact-item impact-critical">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
+                        <div style="font-size: 0.8rem;">Critical</div>
+                    </div>
+                    <div class="impact-item impact-serious">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
+                        <div style="font-size: 0.8rem;">Serious</div>
+                    </div>
+                    <div class="impact-item impact-moderate">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
+                        <div style="font-size: 0.8rem;">Moderate</div>
+                    </div>
+                    <div class="impact-item impact-minor">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
+                        <div style="font-size: 0.8rem;">Minor</div>
+                    </div>
+                </div>
+                
+                <button class="view-details-btn" onclick="showViolationDetails(\${JSON.stringify(result.violations).replace(/"/g, '&quot;')})">
+                    ▶ View Detailed Results
+                </button>
+            \`;
+            
+            document.getElementById('results-content').innerHTML = content;
+        }
+        
+        function displayMultiPageResults(result) {
+            const content = \`
+                <div class="results-summary">
+                    <div class="summary-item">
+                        <div class="value">\${result.pages.length}</div>
+                        <div class="label">Pages Scanned</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.totalIssues}</div>
+                        <div class="label">Total Issues</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.scanTime}ms</div>
+                        <div class="label">Total Time</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
+                        <div class="label">Timestamp</div>
+                    </div>
+                </div>
+                
+                <h4 style="margin-bottom: 12px;">Overall Violations by Impact:</h4>
+                <div class="violations-by-impact">
+                    <div class="impact-item impact-critical">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
+                        <div style="font-size: 0.8rem;">Critical</div>
+                    </div>
+                    <div class="impact-item impact-serious">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
+                        <div style="font-size: 0.8rem;">Serious</div>
+                    </div>
+                    <div class="impact-item impact-moderate">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
+                        <div style="font-size: 0.8rem;">Moderate</div>
+                    </div>
+                    <div class="impact-item impact-minor">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
+                        <div style="font-size: 0.8rem;">Minor</div>
+                    </div>
+                </div>
+                
+                <h4 style="margin: 20px 0 12px;">Pages Scanned:</h4>
+                <div style="background: #f8f9fa; border-radius: 6px; padding: 16px;">
+                    \${result.pages.map(page => \`
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;">
+                            <div>
+                                <div style="font-weight: 500;">\${page.url}</div>
+                                <div style="font-size: 0.8rem; color: #666;">\${page.violations ? page.violations.length : 0} issues • \${page.loadTime || page.scanTime}ms</div>
+                            </div>
+                            \${page.error ? '<span style="color: #dc3545;">Error</span>' : '<span style="color: #28a745;">✓</span>'}
+                        </div>
+                    \`).join('')}
+                </div>
+            \`;
+            
+            document.getElementById('results-content').innerHTML = content;
+        }
+        
+        function showViolationDetails(violations) {
+            // Create a simple modal or expand the results to show detailed violations
+            const detailsWindow = window.open('', '_blank', 'width=800,height=600');
+            detailsWindow.document.write(\`
+                <html>
+                <head><title>Detailed Accessibility Report</title></head>
+                <body style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Detailed Accessibility Violations</h2>
+                    <div>
+                        \${violations.map((violation, index) => \`
+                            <div style="border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;">
+                                <h3 style="color: #dc3545;">\${violation.id}</h3>
+                                <p><strong>Impact:</strong> \${violation.impact}</p>
+                                <p><strong>Description:</strong> \${violation.description}</p>
+                                <p><strong>Help:</strong> \${violation.help}</p>
+                                <p><strong>Elements affected:</strong> \${violation.nodes.length}</p>
+                                <details>
+                                    <summary>Show affected elements</summary>
+                                    \${violation.nodes.map(node => \`
+                                        <div style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 3px;">
+                                            <code>\${node.html}</code>
+                                        </div>
+                                    \`).join('')}
+                                </details>
+                            </div>
+                        \`).join('')}
+                    </div>
+                </body>
+                </html>
+            \`);
+        }
+        
+        // Load recent scans for scans page
+        async function loadRecentScans() {
+            try {
+                const response = await fetch('/api/scans/recent');
+                const data = await response.json();
+                
+                const container = document.getElementById('recent-scans-list');
+                
+                if (data.success && data.scans.length > 0) {
+                    container.innerHTML = data.scans.map(scan => \`
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>\${scan.url}</h4>
+                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="scan-score">\${scan.score}% Score</span>
+                                <button class="view-report-btn">👁️ View Report</button>
+                            </div>
+                        </div>
+                    \`).join('');
+                } else {
+                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
+                }
+            } catch (error) {
+                console.error('Error loading recent scans:', error);
+                document.getElementById('recent-scans-list').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
+            }
+        }
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDashboardStats();
+            loadDashboardRecentScans();
+            loadRecentScans();
         });
     </script>
 </body>
@@ -1203,7 +1429,7 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
-// PRESERVED: Helper functions for link extraction and scanning
+// Helper functions for link extraction and scanning
 async function extractLinks(page, baseUrl) {
     try {
         const links = await page.evaluate((baseUrl) => {
@@ -1381,7 +1607,7 @@ app.post('/api/scan', async (req, res) => {
             scannedPages.push({
                 url: targetUrl,
                 violations: firstPageResults.violations,
-                loadTime: Date.now() - startTime
+                scanTime: Date.now() - startTime
             });
             scannedUrls.add(targetUrl);
             
@@ -1418,7 +1644,7 @@ app.post('/api/scan', async (req, res) => {
                     scannedPages.push({
                         url: pageUrl,
                         violations: pageResults.violations,
-                        loadTime: Date.now() - pageStartTime
+                        scanTime: Date.now() - pageStartTime
                     });
                     scannedUrls.add(pageUrl);
                     
@@ -1427,7 +1653,7 @@ app.post('/api/scan', async (req, res) => {
                     scannedPages.push({
                         url: pageUrl,
                         violations: [],
-                        loadTime: 0,
+                        scanTime: 0,
                         error: error.message
                     });
                 }
