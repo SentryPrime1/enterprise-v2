@@ -2126,21 +2126,33 @@ Focus on practical, implementable solutions. Return valid JSON only.`;
         
         // Try to parse JSON response
         try {
-            const suggestions = JSON.parse(aiResponse);
+            // Clean the response - remove markdown code blocks if present
+            let cleanResponse = aiResponse.trim();
+            if (cleanResponse.startsWith('```json')) {
+                cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+            } else if (cleanResponse.startsWith('```')) {
+                cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+            }
+            
+            console.log('🧹 Cleaned AI response, length:', cleanResponse.length);
+            
+            const suggestions = JSON.parse(cleanResponse);
             console.log('✅ Successfully parsed AI response as JSON');
             return Array.isArray(suggestions) ? suggestions : [suggestions];
         } catch (parseError) {
             console.warn('⚠️ Failed to parse AI response as JSON, creating fallback response');
-            console.log('Raw AI response:', aiResponse.substring(0, 200) + '...');
+            console.log('Parse error:', parseError.message);
+            console.log('Raw AI response:', aiResponse.substring(0, 300) + '...');
             
             // Create structured fallback based on AI response
             return violations.map((violation, index) => ({
-                explanation: `AI Analysis: ${aiResponse.substring(index * 200, (index + 1) * 200)}...`,
-                codeExample: `<!-- Fix for ${violation.id} -->\n<!-- Please refer to WCAG guidelines -->`,
+                explanation: `AI Analysis: This ${violation.impact} impact violation "${violation.id}" affects user accessibility. ${violation.description || 'No description available'}`,
+                codeExample: `<!-- Fix for ${violation.id} -->\n<!-- Please refer to WCAG guidelines for specific implementation -->`,
                 steps: [
                     'Review the violation details carefully',
-                    'Implement the suggested accessibility fixes',
-                    'Test with accessibility tools'
+                    'Consult WCAG guidelines for best practices',
+                    'Implement the recommended accessibility fixes',
+                    'Test with screen readers and accessibility tools'
                 ],
                 priority: violation.impact === 'critical' ? 'high' : 
                          violation.impact === 'serious' ? 'high' :
