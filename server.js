@@ -267,12 +267,6 @@ app.post('/api/ai-fixes', async (req, res) => {
 
 // ENHANCED: Main dashboard with navigation routing
 app.get('/', (req, res) => {
-    // Generate AI button HTML if OpenAI API key is available
-    const aiButtonHtml = process.env.OPENAI_API_KEY ? `
-                <button class="ai-suggestions-btn" onclick="getAIFixSuggestions(currentViolations)">
-                    🤖 Get AI Fix Suggestions
-                </button>` : '';
-    
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -1354,7 +1348,9 @@ app.get('/', (req, res) => {
                 </button>
                 
                 <div id="ai-button-container">
-                    ${aiButtonHtml}
+                    <button class="ai-suggestions-btn" onclick="getAIFixSuggestions(\${JSON.stringify(result.violations).replace(/"/g, '&quot;')})">
+                        🤖 Get AI Fix Suggestions
+                    </button>
                 </div>
             \`;
             
@@ -1420,7 +1416,9 @@ app.get('/', (req, res) => {
                 </button>
                 
                 <div id="ai-button-container-multi">
-                    ${aiButtonHtml}
+                    <button class="ai-suggestions-btn" onclick="getAIFixSuggestionsMultiPage(\${JSON.stringify(result.pages).replace(/"/g, '&quot;')})">
+                        🤖 Get AI Fix Suggestions
+                    </button>
                 </div>
             \`;
             
@@ -1675,6 +1673,55 @@ app.get('/', (req, res) => {
                 </body>
                 </html>
             \`);
+        }
+        
+        // AI Fix Suggestions Function for Multi-Page Results
+        async function getAIFixSuggestionsMultiPage(pages) {
+            const button = event.target;
+            const originalText = button.innerHTML;
+            
+            // Disable button and show loading
+            button.disabled = true;
+            button.innerHTML = '🤖 Getting AI Suggestions...';
+            
+            try {
+                // Collect all violations from all pages
+                const allViolations = [];
+                pages.forEach(page => {
+                    if (page.violations && Array.isArray(page.violations)) {
+                        allViolations.push(...page.violations);
+                    }
+                });
+                
+                if (allViolations.length === 0) {
+                    alert('No violations found to analyze.');
+                    return;
+                }
+                
+                const response = await fetch('/api/ai-fixes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ violations: allViolations })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Show AI suggestions in a new window
+                    showAISuggestions(allViolations, data.suggestions);
+                } else {
+                    alert('Failed to get AI suggestions: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error getting AI suggestions:', error);
+                alert('Failed to get AI suggestions. Please try again.');
+            } finally {
+                // Re-enable button
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
         }
         
         // Load recent scans for scans page
