@@ -236,16 +236,6 @@ app.get('/api/dashboard/stats', async (req, res) => {
 
 // ENHANCED: Main dashboard with navigation routing
 app.get('/', (req, res) => {
-    // Generate AI checkbox HTML if OpenAI API key is available
-    const aiCheckboxHtml = process.env.OPENAI_API_KEY ? `
-                            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e5e9;">
-                                <label class="radio-option ai-option">
-                                    <input type="checkbox" id="enableAI" checked>
-                                    Enable AI Fix Suggestions
-                                    <span class="ai-badge">NEW</span>
-                                </label>
-                            </div>` : '';
-    
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -550,24 +540,6 @@ app.get('/', (req, res) => {
             padding: 4px 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
-        }
-        
-        .ai-option {
-            position: relative;
-            color: #667eea;
-            font-weight: 500;
-        }
-        
-        .ai-badge {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            font-size: 0.7rem;
-            padding: 2px 6px;
-            border-radius: 10px;
-            margin-left: 8px;
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
         
         .scan-btn {
@@ -962,7 +934,7 @@ app.get('/', (req, res) => {
                                     </div>
                                 </label>
                             </div>
-                            \${aiCheckboxHtml}
+                            ${aiCheckboxHtml}
                         </div>
                         
                         <button id="scan-btn" class="scan-btn">
