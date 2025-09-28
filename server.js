@@ -234,8 +234,45 @@ app.get('/api/dashboard/stats', async (req, res) => {
     }
 });
 
+// NEW: AI Fix Suggestions API endpoint
+app.post('/api/ai-fixes', async (req, res) => {
+    try {
+        const { violations } = req.body;
+        
+        if (!violations || !Array.isArray(violations)) {
+            return res.status(400).json({ error: 'Invalid violations data' });
+        }
+        
+        if (!process.env.OPENAI_API_KEY) {
+            return res.status(503).json({ error: 'AI service not available' });
+        }
+        
+        // Generate AI fix suggestions
+        const suggestions = await generateAIFixSuggestions(violations);
+        
+        res.json({ 
+            success: true, 
+            suggestions,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Error generating AI suggestions:', error);
+        res.status(500).json({ 
+            error: 'Failed to generate AI suggestions',
+            details: error.message 
+        });
+    }
+});
+
 // ENHANCED: Main dashboard with navigation routing
 app.get('/', (req, res) => {
+    // Generate AI button HTML if OpenAI API key is available
+    const aiButtonHtml = process.env.OPENAI_API_KEY ? `
+                <button class="ai-suggestions-btn" onclick="getAIFixSuggestions(currentViolations)">
+                    🤖 Get AI Fix Suggestions
+                </button>` : '';
+    
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -658,6 +695,30 @@ app.get('/', (req, res) => {
             font-size: 0.9rem;
         }
         
+        .ai-suggestions-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-left: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .ai-suggestions-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        }
+        
+        .ai-suggestions-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
         /* Recent Scans */
         .recent-scans {
             background: white;
@@ -934,7 +995,6 @@ app.get('/', (req, res) => {
                                     </div>
                                 </label>
                             </div>
-                            ${aiCheckboxHtml}
                         </div>
                         
                         <button id="scan-btn" class="scan-btn">
@@ -1292,6 +1352,10 @@ app.get('/', (req, res) => {
                 <button class="view-details-btn" onclick="showViolationDetails(\${JSON.stringify(result.violations).replace(/"/g, '&quot;')})">
                     ▶ View Detailed Results
                 </button>
+                
+                <div id="ai-button-container">
+                    ${aiButtonHtml}
+                </div>
             \`;
             
             document.getElementById('results-content').innerHTML = content;
@@ -1354,6 +1418,10 @@ app.get('/', (req, res) => {
                 <button class="view-details-btn" onclick="showMultiPageViolationDetails(\${JSON.stringify(result.pages).replace(/"/g, '&quot;')})">
                     ▶ View Detailed Results
                 </button>
+                
+                <div id="ai-button-container-multi">
+                    ${aiButtonHtml}
+                </div>
             \`;
             
             document.getElementById('results-content').innerHTML = content;
@@ -1503,6 +1571,106 @@ app.get('/', (req, res) => {
                         <h3>Report Generated</h3>
                         <p>This report was generated on \${new Date().toLocaleString()} by SentryPrime Enterprise Scanner.</p>
                         <p>For more information about accessibility guidelines, visit <a href="https://www.w3.org/WAI/WCAG21/quickref/" target="_blank">WCAG 2.1 Quick Reference</a>.</p>
+                    </div>
+                </body>
+                </html>
+            \`);
+        }
+        
+        // AI Fix Suggestions Function
+        async function getAIFixSuggestions(violations) {
+            const button = event.target;
+            const originalText = button.innerHTML;
+            
+            // Disable button and show loading
+            button.disabled = true;
+            button.innerHTML = '🤖 Getting AI Suggestions...';
+            
+            try {
+                const response = await fetch('/api/ai-fixes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ violations })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Show AI suggestions in a new window
+                    showAISuggestions(violations, data.suggestions);
+                } else {
+                    alert('Failed to get AI suggestions: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error getting AI suggestions:', error);
+                alert('Failed to get AI suggestions. Please try again.');
+            } finally {
+                // Re-enable button
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+        
+        // Show AI Suggestions in a new window
+        function showAISuggestions(violations, suggestions) {
+            const suggestionsWindow = window.open('', '_blank', 'width=1000,height=700');
+            suggestionsWindow.document.write(\`
+                <html>
+                <head>
+                    <title>AI Fix Suggestions - SentryPrime</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }
+                        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; margin: -20px -20px 20px -20px; border-radius: 8px; }
+                        .suggestion { border: 1px solid #ddd; margin: 20px 0; padding: 20px; border-radius: 8px; background: #f8f9fa; }
+                        .violation-title { color: #dc3545; font-weight: bold; margin-bottom: 10px; }
+                        .ai-fix { background: white; padding: 15px; border-radius: 6px; border-left: 4px solid #667eea; margin: 10px 0; }
+                        .code-block { background: #f1f3f4; padding: 10px; border-radius: 4px; font-family: monospace; margin: 10px 0; }
+                        .priority { display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+                        .priority-high { background: #dc3545; color: white; }
+                        .priority-medium { background: #ffc107; color: black; }
+                        .priority-low { background: #28a745; color: white; }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>🤖 AI Fix Suggestions</h1>
+                        <p>Powered by OpenAI - Generated on \${new Date().toLocaleString()}</p>
+                    </div>
+                    
+                    \${suggestions.map((suggestion, index) => \`
+                        <div class="suggestion">
+                            <div class="violation-title">\${violations[index]?.id || 'Violation'} (\${violations[index]?.impact?.toUpperCase() || 'UNKNOWN'})</div>
+                            <p><strong>Issue:</strong> \${violations[index]?.description || 'No description available'}</p>
+                            
+                            <div class="ai-fix">
+                                <h4>🎯 AI Recommended Fix:</h4>
+                                <p>\${suggestion.explanation || 'No explanation provided'}</p>
+                                
+                                \${suggestion.codeExample ? \`
+                                    <h5>Code Example:</h5>
+                                    <div class="code-block">\${suggestion.codeExample}</div>
+                                \` : ''}
+                                
+                                \${suggestion.steps ? \`
+                                    <h5>Implementation Steps:</h5>
+                                    <ol>
+                                        \${suggestion.steps.map(step => \`<li>\${step}</li>\`).join('')}
+                                    </ol>
+                                \` : ''}
+                                
+                                <div style="margin-top: 10px;">
+                                    <span class="priority priority-\${suggestion.priority || 'medium'}">\${(suggestion.priority || 'medium').toUpperCase()} PRIORITY</span>
+                                </div>
+                            </div>
+                        </div>
+                    \`).join('')}
+                    
+                    <div style="margin-top: 30px; padding: 20px; background: #e3f2fd; border-radius: 8px;">
+                        <h3>💡 About These Suggestions</h3>
+                        <p>These AI-generated suggestions are recommendations based on WCAG guidelines and best practices. Always test implementations thoroughly and consider your specific use case.</p>
+                        <p><strong>Need help?</strong> Contact our support team for personalized assistance with implementing these fixes.</p>
                     </div>
                 </body>
                 </html>
@@ -1837,6 +2005,91 @@ app.post('/api/scan', async (req, res) => {
         }
     }
 });
+
+// AI Fix Suggestions Helper Function
+async function generateAIFixSuggestions(violations) {
+    if (!process.env.OPENAI_API_KEY) {
+        throw new Error('OpenAI API key not configured');
+    }
+    
+    try {
+        // Import OpenAI (dynamic import for compatibility)
+        const { OpenAI } = await import('openai');
+        
+        const openai = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY
+        });
+        
+        // Prepare violations for AI analysis
+        const violationsText = violations.map(v => 
+            `Violation: ${v.id}\nImpact: ${v.impact}\nDescription: ${v.description}\nHelp: ${v.help}\nElements affected: ${v.nodes?.length || 0}`
+        ).join('\n\n');
+        
+        const prompt = `You are an accessibility expert. Analyze these WCAG violations and provide specific, actionable fix suggestions for each one.
+
+Violations to fix:
+${violationsText}
+
+For each violation, provide a JSON response with this structure:
+{
+  "explanation": "Clear explanation of what needs to be fixed",
+  "codeExample": "HTML/CSS/JS code example showing the fix",
+  "steps": ["Step 1", "Step 2", "Step 3"],
+  "priority": "high|medium|low"
+}
+
+Respond with a JSON array containing one fix suggestion object for each violation. Focus on practical, implementable solutions.`;
+
+        const response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are an expert web accessibility consultant specializing in WCAG compliance. Provide practical, actionable fix suggestions.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            max_tokens: 2000,
+            temperature: 0.3
+        });
+        
+        const aiResponse = response.choices[0].message.content;
+        
+        // Try to parse JSON response
+        try {
+            const suggestions = JSON.parse(aiResponse);
+            return Array.isArray(suggestions) ? suggestions : [suggestions];
+        } catch (parseError) {
+            // If JSON parsing fails, create a simple response
+            console.warn('Failed to parse AI response as JSON, creating fallback response');
+            return violations.map(() => ({
+                explanation: aiResponse.substring(0, 500) + '...',
+                codeExample: 'Please refer to WCAG guidelines for specific implementation details.',
+                steps: ['Review the violation details', 'Implement the suggested changes', 'Test with accessibility tools'],
+                priority: 'medium'
+            }));
+        }
+        
+    } catch (error) {
+        console.error('Error calling OpenAI API:', error);
+        
+        // Provide fallback suggestions
+        return violations.map(violation => ({
+            explanation: `This ${violation.impact} impact violation needs attention. ${violation.description}`,
+            codeExample: 'Please refer to WCAG guidelines for specific implementation details.',
+            steps: [
+                'Review the violation details carefully',
+                'Consult WCAG guidelines for best practices',
+                'Implement the necessary changes',
+                'Test with accessibility tools'
+            ],
+            priority: violation.impact === 'critical' ? 'high' : violation.impact === 'serious' ? 'medium' : 'low'
+        }));
+    }
+}
 
 // Start server
 app.listen(PORT, () => {
