@@ -1151,35 +1151,35 @@ app.get('/', (req, res) => {
             </div>
             
             <nav class="sidebar-nav">
-                <div class="nav-item active" onclick="showPage('dashboard')">
+                <div class="nav-item active" data-page="dashboard">
                     <div class="nav-icon">📊</div>
                     <span>Dashboard</span>
                 </div>
-                <div class="nav-item" onclick="showPage('scans')">
+                <div class="nav-item" data-page="scans">
                     <div class="nav-icon">🔍</div>
                     <span>Scans</span>
                 </div>
-                <div class="nav-item" onclick="showPage('analytics')">
+                <div class="nav-item" data-page="analytics">
                     <div class="nav-icon">📈</div>
                     <span>Analytics</span>
                 </div>
-                <div class="nav-item" onclick="showPage('team')">
+                <div class="nav-item" data-page="team">
                     <div class="nav-icon">👥</div>
                     <span>Team</span>
                 </div>
-                <div class="nav-item" onclick="showPage('integrations')">
+                <div class="nav-item" data-page="integrations">
                     <div class="nav-icon">🔗</div>
                     <span>Integrations</span>
                 </div>
-                <div class="nav-item" onclick="showPage('api')">
+                <div class="nav-item" data-page="api">
                     <div class="nav-icon">⚙️</div>
                     <span>API</span>
                 </div>
-                <div class="nav-item" onclick="showPage('billing')">
+                <div class="nav-item" data-page="billing">
                     <div class="nav-icon">💳</div>
                     <span>Billing</span>
                 </div>
-                <div class="nav-item" onclick="showPage('settings')">
+                <div class="nav-item" data-page="settings">
                     <div class="nav-icon">⚙️</div>
                     <span>Settings</span>
                 </div>
@@ -1240,22 +1240,22 @@ app.get('/', (req, res) => {
                     
                     <!-- Quick Actions -->
                     <div class="quick-actions">
-                        <div class="action-card" onclick="showPage('scans')">
+                        <div class="action-card" onclick="switchToPage('scans')">
                             <div class="action-icon">🔍</div>
                             <h4>New Scan</h4>
                             <p>Start a new accessibility scan</p>
                         </div>
-                        <div class="action-card" onclick="showPage('analytics')">
+                        <div class="action-card" onclick="switchToPage('analytics')">
                             <div class="action-icon">📈</div>
                             <h4>View Reports</h4>
                             <p>Analyze your compliance trends</p>
                         </div>
-                        <div class="action-card" onclick="showPage('team')">
+                        <div class="action-card" onclick="switchToPage('team')">
                             <div class="action-icon">👥</div>
                             <h4>Manage Team</h4>
                             <p>Invite and manage team members</p>
                         </div>
-                        <div class="action-card" onclick="showPage('integrations')">
+                        <div class="action-card" onclick="switchToPage('integrations')">
                             <div class="action-icon">🔗</div>
                             <h4>Integrations</h4>
                             <p>Connect your platforms</p>
@@ -1417,19 +1417,21 @@ app.get('/', (req, res) => {
     </div>
     
     <script>
-        // Navigation function
-        function showPage(pageId) {
+        // Navigation function - FIXED
+        function switchToPage(pageId) {
             // Hide all pages
-            const pages = document.querySelectorAll('.page-content');
-            pages.forEach(page => page.classList.remove('active'));
+            document.querySelectorAll('.page-content').forEach(page => {
+                page.classList.remove('active');
+            });
             
             // Show selected page
             document.getElementById(pageId + '-page').classList.add('active');
             
-            // Update navigation active state
-            const navItems = document.querySelectorAll('.nav-item');
-            navItems.forEach(item => item.classList.remove('active'));
-            event.target.closest('.nav-item').classList.add('active');
+            // Update active nav item
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            document.querySelector('[data-page="' + pageId + '"]').classList.add('active');
             
             // Load page-specific data
             if (pageId === 'dashboard') {
@@ -1439,6 +1441,20 @@ app.get('/', (req, res) => {
                 loadRecentScans();
             }
         }
+        
+        // Initialize navigation event listeners
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const pageId = item.getAttribute('data-page');
+                    switchToPage(pageId);
+                });
+            });
+            
+            // Load dashboard by default
+            loadDashboardData();
+        });
         
         // Load dashboard statistics
         async function loadDashboardData() {
@@ -1477,12 +1493,12 @@ app.get('/', (req, res) => {
                         '</div>' +
                         '<div style="display: flex; align-items: center;">' +
                         '<span class="scan-score">' + scan.score + '% Score</span>' +
-                        '<button class="view-report-btn" onclick="showPage(\'scans\')">👁 View Details</button>' +
+                        '<button class="view-report-btn" onclick="switchToPage(\'scans\')">👁 View Details</button>' +
                         '</div>' +
                         '</div>'
                     ).join('');
                 } else {
-                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No recent activity. <a href="#" onclick="showPage(\'scans\')">Start your first scan</a>!</div>';
+                    container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No recent activity. <a href="#" onclick="switchToPage(\'scans\')">Start your first scan</a>!</div>';
                 }
             } catch (error) {
                 console.error('Error loading dashboard recent scans:', error);
@@ -1490,10 +1506,7 @@ app.get('/', (req, res) => {
             }
         }
         
-        // Load recent scans and check database status on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            loadDashboardData(); // Load dashboard by default
-        });
+
 
         // Database status check function
         async function checkDatabaseStatus() {
