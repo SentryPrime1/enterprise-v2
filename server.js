@@ -156,7 +156,7 @@ async function getDashboardStats(userId = 1) {
             totalScans: 3,
             totalIssues: 22,
             avgScore: 92,
-            recentActivity: 'Mock data - database not connected'
+            weeklyScans: 2
         };
     }
     
@@ -234,7 +234,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
     }
 });
 
-// NEW: AI Fix Suggestions API Endpoint - MINIMAL VERSION
+// NEW: AI Fix Suggestions API Endpoint
 app.post('/api/ai-fixes', async (req, res) => {
     try {
         console.log('🤖 AI fix suggestions requested');
@@ -247,7 +247,38 @@ app.post('/api/ai-fixes', async (req, res) => {
         
         console.log('📊 Processing', violations.length, 'violations for AI analysis');
         
-        // Simple fallback suggestions for now
+        // Try to use OpenAI if available
+        if (process.env.OPENAI_API_KEY) {
+            try {
+                const { OpenAI } = await import('openai');
+                const openai = new OpenAI({
+                    apiKey: process.env.OPENAI_API_KEY,
+                });
+                
+                const prompt = `As an accessibility expert, provide specific fix suggestions for these WCAG violations:\n\n${violations.map(v => `- ${v.id}: ${v.description} (Impact: ${v.impact})`).join('\n')}\n\nFor each violation, provide:\n1. A clear explanation of the issue\n2. Specific code example to fix it\n3. Step-by-step implementation guide\n4. Priority level\n\nRespond in JSON format with an array of objects containing: explanation, codeExample, steps (array), priority.`;
+                
+                const completion = await openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    messages: [{ role: "user", content: prompt }],
+                    max_tokens: 2000,
+                    temperature: 0.3,
+                });
+                
+                const aiResponse = completion.choices[0].message.content;
+                
+                try {
+                    const suggestions = JSON.parse(aiResponse);
+                    console.log('✅ AI suggestions generated successfully');
+                    return res.json(suggestions);
+                } catch (parseError) {
+                    console.log('⚠️ AI response parsing failed, using fallback');
+                }
+            } catch (aiError) {
+                console.log('⚠️ OpenAI API error:', aiError.message);
+            }
+        }
+        
+        // Fallback suggestions when AI is unavailable
         const suggestions = violations.map(violation => ({
             explanation: `This ${violation.impact} impact violation "${violation.id}" affects user accessibility. ${violation.description || 'No description available'}`,
             codeExample: `<!-- Fix for ${violation.id} -->\n<!-- Please refer to WCAG guidelines for specific implementation -->`,
@@ -262,6 +293,7 @@ app.post('/api/ai-fixes', async (req, res) => {
                      violation.impact === 'moderate' ? 'medium' : 'low'
         }));
         
+        console.log('✅ Fallback suggestions generated');
         res.json(suggestions);
         
     } catch (error) {
@@ -270,7 +302,7 @@ app.post('/api/ai-fixes', async (req, res) => {
     }
 });
 
-// PRESERVED: Main dashboard with navigation routing
+// ENHANCED: Main dashboard with navigation routing
 app.get('/', (req, res) => {
     const html = `<!DOCTYPE html>
 <html>
@@ -639,23 +671,119 @@ app.get('/', (req, res) => {
         }
         
         .violations-by-impact {
-            display: flex;
-            gap: 16px;
-            margin-bottom: 24px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
         }
         
         .impact-item {
-            flex: 1;
-            padding: 16px;
-            border-radius: 6px;
             text-align: center;
-            color: white;
+            padding: 12px;
+            border-radius: 6px;
         }
         
-        .impact-critical { background: #dc3545; }
-        .impact-serious { background: #fd7e14; }
-        .impact-moderate { background: #ffc107; color: #333; }
-        .impact-minor { background: #6c757d; }
+        .impact-critical { background: #f8d7da; color: #721c24; }
+        .impact-serious { background: #fff3cd; color: #856404; }
+        .impact-moderate { background: #cce5ff; color: #004085; }
+        .impact-minor { background: #d1ecf1; color: #0c5460; }
+        
+        .view-details-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .ai-suggestions-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .ai-suggestions-btn:hover {
+            background: #5a6fd8;
+        }
+        
+        /* AI Modal Styles */
+        .ai-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .ai-modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .ai-modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .ai-modal-body {
+            padding: 20px;
+        }
+        
+        .ai-suggestion {
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        
+        .ai-suggestion-header {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e1e5e9;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .ai-suggestion-content {
+            padding: 16px;
+        }
+        
+        .priority-high { border-left: 4px solid #dc3545; }
+        .priority-medium { border-left: 4px solid #ffc107; }
+        .priority-low { border-left: 4px solid #28a745; }
+        
+        .close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            opacity: 0.7;
+        }
         
         /* Recent Scans */
         .recent-scans {
@@ -666,23 +794,25 @@ app.get('/', (req, res) => {
         }
         
         .recent-scans h3 {
-            margin-bottom: 20px;
-            color: #333;
+            margin-bottom: 16px;
+            font-size: 1.2rem;
         }
         
         .scan-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 16px;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            margin-bottom: 12px;
+            padding: 16px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .scan-item:last-child {
+            border-bottom: none;
         }
         
         .scan-info h4 {
             margin-bottom: 4px;
-            color: #333;
+            font-size: 1rem;
         }
         
         .scan-meta {
@@ -1158,12 +1288,13 @@ app.get('/', (req, res) => {
                 '</div>' +
             '</div>' +
             
-            (result.violations.length > 0 ? 
-                '<div style="text-align: center; margin: 20px 0;">' +
-                    '<button onclick="showViolationDetails(' + JSON.stringify(result.violations) + ')" style="background: #667eea; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">📋 View Detailed Report</button>' +
-                '</div>' 
-                : '<div style="text-align: center; padding: 20px; color: #28a745;">✅ No accessibility issues found!</div>'
-            );
+            '<div style="display: flex; gap: 12px; margin-top: 20px;">' +
+                '<button class="view-details-btn" onclick="showViolationDetails(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">📋 View Detailed Results</button>' +
+                (result.violations.length > 0 ? 
+                    '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">🤖 Get AI Fix Suggestions</button>' 
+                    : ''
+                ) +
+            '</div>';
             
             document.getElementById('results-content').innerHTML = content;
         }
@@ -1292,7 +1423,78 @@ app.get('/', (req, res) => {
             loadDashboardRecentScans();
             loadRecentScans();
         });
+        
+        // AI Suggestions Modal Function
+        async function showAISuggestions(violations) {
+            const modal = document.getElementById('ai-modal');
+            const modalBody = document.getElementById('ai-modal-body');
+            
+            // Show modal with loading state
+            modal.style.display = 'block';
+            modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Generating AI fix suggestions...</div>';
+            
+            try {
+                const response = await fetch('/api/ai-fixes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ violations })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to get AI suggestions');
+                }
+                
+                const suggestions = await response.json();
+                
+                modalBody.innerHTML = suggestions.map((suggestion, index) => 
+                    '<div class="ai-suggestion priority-' + suggestion.priority + '">' +
+                        '<div class="ai-suggestion-header">' +
+                            '<strong>Fix Suggestion #' + (index + 1) + '</strong>' +
+                            '<span class="priority-badge priority-' + suggestion.priority + '">' + suggestion.priority.toUpperCase() + '</span>' +
+                        '</div>' +
+                        '<div class="ai-suggestion-content">' +
+                            '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
+                            '<p><strong>Code Example:</strong></p>' +
+                            '<pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + suggestion.codeExample + '</code></pre>' +
+                            '<p><strong>Implementation Steps:</strong></p>' +
+                            '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
+                        '</div>' +
+                    '</div>'
+                ).join('');
+                
+            } catch (error) {
+                console.error('Error getting AI suggestions:', error);
+                modalBody.innerHTML = '<div style="color: #dc3545; text-align: center; padding: 20px;"><h4>Unable to Generate AI Suggestions</h4><p>Please try again later or contact support if the issue persists.</p></div>';
+            }
+        }
+        
+        // Close modal when clicking outside or on close button
+        window.onclick = function(event) {
+            const modal = document.getElementById('ai-modal');
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        function closeAIModal() {
+            document.getElementById('ai-modal').style.display = 'none';
+        }
     </script>
+    
+    <!-- AI Suggestions Modal -->
+    <div id="ai-modal" class="ai-modal">
+        <div class="ai-modal-content">
+            <div class="ai-modal-header">
+                <h2>🤖 AI Fix Suggestions</h2>
+                <span class="close" onclick="closeAIModal()">&times;</span>
+            </div>
+            <div class="ai-modal-body" id="ai-modal-body">
+                <!-- AI suggestions will be loaded here -->
+            </div>
+        </div>
+    </div>
 </body>
 </html>`;
     
@@ -1404,7 +1606,8 @@ app.post('/scan', async (req, res) => {
         
         // Launch browser with optimized settings
         browser = await puppeteer.launch({
-            headless: true,
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -1412,13 +1615,19 @@ app.post('/scan', async (req, res) => {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--disable-gpu'
-            ]
+                '--single-process',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
+            ],
+            timeout: 60000
         });
         
         if (scanType === 'single') {
-            // Single page scan - PRESERVED LOGIC
-            console.log('🔍 Performing single page scan...');
+            // Single page scan (existing working functionality)
             const results = await scanSinglePage(browser, targetUrl);
             const scanTime = Date.now() - startTime;
             
@@ -1429,11 +1638,11 @@ app.post('/scan', async (req, res) => {
             
             res.json({
                 success: true,
-                scanType: 'single',
                 url: targetUrl,
                 violations: results.violations,
-                scanTime: scanTime,
                 timestamp: new Date().toISOString(),
+                totalIssues: results.violations.length,
+                scanTime: scanTime,
                 summary: {
                     critical: results.violations.filter(v => v.impact === 'critical').length,
                     serious: results.violations.filter(v => v.impact === 'serious').length,
@@ -1441,9 +1650,10 @@ app.post('/scan', async (req, res) => {
                     minor: results.violations.filter(v => v.impact === 'minor').length
                 }
             });
-        } else {
-            // Multi-page crawl - PRESERVED LOGIC
-            console.log('🕷️ Performing multi-page crawl (max ' + maxPages + ' pages)...');
+            
+        } else if (scanType === 'crawl') {
+            // Multi-page crawl - EXACT WORKING LOGIC
+            console.log('🕷️ Starting multi-page crawl (max ' + maxPages + ' pages)');
             
             const scannedPages = [];
             const urlsToScan = [targetUrl];
