@@ -2055,11 +2055,39 @@ app.post('/api/scan', async (req, res) => {
 
 // AI Fix Suggestions Helper Function
 async function generateAIFixSuggestions(violations) {
+    console.log('🤖 Starting AI fix suggestions generation...');
+    console.log('📊 Violations count:', violations.length);
+    
     if (!process.env.OPENAI_API_KEY) {
+        console.error('❌ OpenAI API key not configured');
         throw new Error('OpenAI API key not configured');
     }
     
+    console.log('🔑 OpenAI API key found, length:', process.env.OPENAI_API_KEY.length);
+    
     try {
+        // For now, let's return mock suggestions to test the UI
+        console.log('🧪 Returning mock AI suggestions for testing...');
+        
+        return violations.map((violation, index) => ({
+            explanation: `AI Analysis: This ${violation.impact} impact violation "${violation.id}" affects user accessibility. ${violation.description || 'No description available'}`,
+            codeExample: `<!-- Example fix for ${violation.id} -->
+<div role="button" tabindex="0" aria-label="Accessible button">
+    <!-- Your content here -->
+</div>`,
+            steps: [
+                `Identify all instances of "${violation.id}" violations`,
+                'Review the WCAG guidelines for this specific issue',
+                'Implement the recommended accessibility fixes',
+                'Test with screen readers and accessibility tools',
+                'Validate the fixes with automated testing'
+            ],
+            priority: violation.impact === 'critical' ? 'high' : 
+                     violation.impact === 'serious' ? 'high' :
+                     violation.impact === 'moderate' ? 'medium' : 'low'
+        }));
+        
+        /* TODO: Re-enable OpenAI integration after testing
         // Import OpenAI (dynamic import for compatibility)
         const { OpenAI } = await import('openai');
         
@@ -2119,9 +2147,10 @@ Respond with a JSON array containing one fix suggestion object for each violatio
                 priority: 'medium'
             }));
         }
+        */
         
     } catch (error) {
-        console.error('Error calling OpenAI API:', error);
+        console.error('❌ Error in AI suggestions generation:', error);
         
         // Provide fallback suggestions
         return violations.map(violation => ({
