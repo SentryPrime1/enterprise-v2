@@ -1,45 +1,36 @@
-# Use official Node.js image as base
+# Use the official Node.js 18 image
 FROM node:18-slim
 
-# Install Chrome dependencies and Chrome itself
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    ca-certificates \
-    procps \
-    libxss1 \
-    && wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
+# Install necessary packages for Puppeteer
+RUN apt-get update \
+    && apt-get install -y wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
     && apt-get update \
     && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
-    --no-install-recommends \
+      --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Create pptuser for running Puppeteer
-RUN groupadd -r pptuser && useradd -r -g pptuser -G audio,video pptuser \
-    && mkdir -p /home/pptuser/Downloads \
-    && chown -R pptuser:pptuser /home/pptuser
+# Create app directory
+WORKDIR /usr/src/app
 
-# Set working directory
-WORKDIR /app
-
-# Copy package files first for better caching
+# Copy package files
 COPY package*.json ./
 
-# Install dependencies with optimized npm settings
-RUN npm config set fetch-retry-mintimeout 20000 && \
-    npm config set fetch-retry-maxtimeout 120000 && \
-    npm config set fetch-timeout 300000 && \
-    npm install --omit=dev --no-audit --no-fund --verbose
+# Install dependencies
+RUN npm install --only=production
 
 # Copy application code
 COPY server.js ./
 
-# Change ownership of /app to pptuser
-RUN chown -R pptuser:pptuser /app
+# Create a non-privileged user that the app will run under
+RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
+    && mkdir -p /home/pptruser/Downloads \
+    && chown -R pptruser:pptruser /home/pptruser \
+    && chown -R pptruser:pptruser /usr/src/app
 
-# Switch to pptuser for security
-USER pptuser
+# Run everything after as non-privileged user
+USER pptruser
 
 # Expose port
 EXPOSE 8080
