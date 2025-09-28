@@ -2066,46 +2066,32 @@ async function generateAIFixSuggestions(violations) {
     console.log('🔑 OpenAI API key found, length:', process.env.OPENAI_API_KEY.length);
     
     try {
-        // For now, let's return mock suggestions to test the UI
-        console.log('🧪 Returning mock AI suggestions for testing...');
+        console.log('🤖 Attempting real OpenAI integration...');
         
-        return violations.map((violation, index) => ({
-            explanation: `AI Analysis: This ${violation.impact} impact violation "${violation.id}" affects user accessibility. ${violation.description || 'No description available'}`,
-            codeExample: `<!-- Example fix for ${violation.id} -->
-<div role="button" tabindex="0" aria-label="Accessible button">
-    <!-- Your content here -->
-</div>`,
-            steps: [
-                `Identify all instances of "${violation.id}" violations`,
-                'Review the WCAG guidelines for this specific issue',
-                'Implement the recommended accessibility fixes',
-                'Test with screen readers and accessibility tools',
-                'Validate the fixes with automated testing'
-            ],
-            priority: violation.impact === 'critical' ? 'high' : 
-                     violation.impact === 'serious' ? 'high' :
-                     violation.impact === 'moderate' ? 'medium' : 'low'
-        }));
-        
-        /* TODO: Re-enable OpenAI integration after testing
         // Import OpenAI (dynamic import for compatibility)
         const { OpenAI } = await import('openai');
+        
+        console.log('✅ OpenAI imported successfully');
         
         const openai = new OpenAI({
             apiKey: process.env.OPENAI_API_KEY
         });
         
+        console.log('✅ OpenAI client created');
+        
         // Prepare violations for AI analysis
         const violationsText = violations.map(v => 
-            `Violation: ${v.id}\nImpact: ${v.impact}\nDescription: ${v.description}\nHelp: ${v.help}\nElements affected: ${v.nodes?.length || 0}`
+            `Violation: ${v.id}\nImpact: ${v.impact}\nDescription: ${v.description || 'No description'}\nHelp: ${v.help || 'No help text'}\nElements affected: ${v.nodes?.length || 0}`
         ).join('\n\n');
         
-        const prompt = `You are an accessibility expert. Analyze these WCAG violations and provide specific, actionable fix suggestions for each one.
+        console.log('📝 Prepared violations text, length:', violationsText.length);
+        
+        const prompt = `You are an accessibility expert. Analyze these WCAG violations and provide specific, actionable fix suggestions.
 
 Violations to fix:
 ${violationsText}
 
-For each violation, provide a JSON response with this structure:
+Respond with a JSON array where each object has this structure:
 {
   "explanation": "Clear explanation of what needs to be fixed",
   "codeExample": "HTML/CSS/JS code example showing the fix",
@@ -2113,14 +2099,16 @@ For each violation, provide a JSON response with this structure:
   "priority": "high|medium|low"
 }
 
-Respond with a JSON array containing one fix suggestion object for each violation. Focus on practical, implementable solutions.`;
+Focus on practical, implementable solutions. Return valid JSON only.`;
+
+        console.log('🚀 Sending request to OpenAI...');
 
         const response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'system',
-                    content: 'You are an expert web accessibility consultant specializing in WCAG compliance. Provide practical, actionable fix suggestions.'
+                    content: 'You are an expert web accessibility consultant specializing in WCAG compliance. Always respond with valid JSON.'
                 },
                 {
                     role: 'user',
@@ -2131,23 +2119,34 @@ Respond with a JSON array containing one fix suggestion object for each violatio
             temperature: 0.3
         });
         
+        console.log('✅ Received response from OpenAI');
+        
         const aiResponse = response.choices[0].message.content;
+        console.log('📄 AI Response length:', aiResponse.length);
         
         // Try to parse JSON response
         try {
             const suggestions = JSON.parse(aiResponse);
+            console.log('✅ Successfully parsed AI response as JSON');
             return Array.isArray(suggestions) ? suggestions : [suggestions];
         } catch (parseError) {
-            // If JSON parsing fails, create a simple response
-            console.warn('Failed to parse AI response as JSON, creating fallback response');
-            return violations.map(() => ({
-                explanation: aiResponse.substring(0, 500) + '...',
-                codeExample: 'Please refer to WCAG guidelines for specific implementation details.',
-                steps: ['Review the violation details', 'Implement the suggested changes', 'Test with accessibility tools'],
-                priority: 'medium'
+            console.warn('⚠️ Failed to parse AI response as JSON, creating fallback response');
+            console.log('Raw AI response:', aiResponse.substring(0, 200) + '...');
+            
+            // Create structured fallback based on AI response
+            return violations.map((violation, index) => ({
+                explanation: `AI Analysis: ${aiResponse.substring(index * 200, (index + 1) * 200)}...`,
+                codeExample: `<!-- Fix for ${violation.id} -->\n<!-- Please refer to WCAG guidelines -->`,
+                steps: [
+                    'Review the violation details carefully',
+                    'Implement the suggested accessibility fixes',
+                    'Test with accessibility tools'
+                ],
+                priority: violation.impact === 'critical' ? 'high' : 
+                         violation.impact === 'serious' ? 'high' :
+                         violation.impact === 'moderate' ? 'medium' : 'low'
             }));
         }
-        */
         
     } catch (error) {
         console.error('❌ Error in AI suggestions generation:', error);
