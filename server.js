@@ -789,6 +789,20 @@ app.get('/', (req, res) => {
             background: #5a6fd8;
         }
         
+        .guided-fixing-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .guided-fixing-btn:hover {
+            background: #218838;
+        }
+        
         /* AI Modal Styles */
         .ai-modal {
             display: none;
@@ -1500,6 +1514,10 @@ app.get('/', (req, res) => {
                         '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">🤖 Get AI Fix Suggestions</button>' 
                         : ''
                     }
+                    \${result.violations.length > 0 ? 
+                        '<button class="guided-fixing-btn" onclick="startGuidedFixing(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">🛠️ Let\\'s Start Fixing</button>' 
+                        : ''
+                    }
                 </div>
             \`;
             
@@ -1689,6 +1707,13 @@ app.get('/', (req, res) => {
         
         function closeAIModal() {
             document.getElementById('ai-modal').style.display = 'none';
+        }
+        
+        // NEW: Guided Fixing Function
+        function startGuidedFixing(violations) {
+            // For now, just show an alert - we'll build the full modal in the next step
+            alert('Guided fixing workflow coming soon! Found ' + violations.length + ' violations to fix.');
+            console.log('Violations to fix:', violations);
         }
     </script>
     
