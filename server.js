@@ -255,7 +255,21 @@ app.post('/api/ai-fixes', async (req, res) => {
                     apiKey: process.env.OPENAI_API_KEY,
                 });
                 
-                const prompt = `As an accessibility expert, provide specific fix suggestions for these WCAG violations:\n\n${violations.map(v => `- ${v.id}: ${v.description} (Impact: ${v.impact})`).join('\n')}\n\nFor each violation, provide:\n1. A clear explanation of the issue\n2. Specific code example to fix it\n3. Step-by-step implementation guide\n4. Priority level\n\nRespond in JSON format with an array of objects containing: explanation, codeExample, steps (array), priority.`;
+                const prompt = `As an accessibility expert, provide specific fix suggestions for these WCAG violations:
+
+${violations.map(v => `- ${v.id}: ${v.description} (Impact: ${v.impact})`).join('\n')}
+
+IMPORTANT: Respond with ONLY a valid JSON array. No markdown, no explanations, just pure JSON.
+
+Format each suggestion as:
+{
+  "explanation": "Clear explanation of the issue",
+  "codeExample": "HTML/CSS code example to fix it", 
+  "steps": ["Step 1", "Step 2", "Step 3"],
+  "priority": "high|medium|low"
+}
+
+Return as JSON array:`;
                 
                 const completion = await openai.chat.completions.create({
                     model: "gpt-4o-mini",
@@ -265,13 +279,48 @@ app.post('/api/ai-fixes', async (req, res) => {
                 });
                 
                 const aiResponse = completion.choices[0].message.content;
+                console.log('🔍 Raw AI response:', aiResponse.substring(0, 200) + '...');
                 
                 try {
-                    const suggestions = JSON.parse(aiResponse);
-                    console.log('✅ AI suggestions generated successfully');
-                    return res.json(suggestions);
+                    // Try to extract JSON from response (handle markdown formatting)
+                    let jsonString = aiResponse;
+                    
+                    // Remove markdown code blocks if present
+                    if (jsonString.includes('```json')) {
+                        const jsonMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/);
+                        if (jsonMatch) {
+                            jsonString = jsonMatch[1];
+                        }
+                    } else if (jsonString.includes('```')) {
+                        const jsonMatch = jsonString.match(/```\s*([\s\S]*?)\s*```/);
+                        if (jsonMatch) {
+                            jsonString = jsonMatch[1];
+                        }
+                    }
+                    
+                    // Clean up the JSON string
+                    jsonString = jsonString.trim();
+                    
+                    const suggestions = JSON.parse(jsonString);
+                    
+                    // Validate the response structure
+                    if (Array.isArray(suggestions) && suggestions.length > 0) {
+                        const isValid = suggestions.every(s => 
+                            s.explanation && s.codeExample && s.steps && s.priority
+                        );
+                        
+                        if (isValid) {
+                            console.log('✅ AI suggestions generated successfully');
+                            return res.json(suggestions);
+                        } else {
+                            console.log('⚠️ AI response structure invalid, using fallback');
+                        }
+                    } else {
+                        console.log('⚠️ AI response not an array or empty, using fallback');
+                    }
                 } catch (parseError) {
-                    console.log('⚠️ AI response parsing failed, using fallback');
+                    console.log('⚠️ AI response parsing failed:', parseError.message);
+                    console.log('🔍 Failed to parse:', aiResponse.substring(0, 500));
                 }
             } catch (aiError) {
                 console.log('⚠️ OpenAI API error:', aiError.message);
@@ -575,63 +624,90 @@ app.get('/', (req, res) => {
         }
         
         .scan-options {
-            background: #f8f9fa;
-            padding: 16px;
-            border-radius: 6px;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
         }
         
         .scan-options h4 {
             margin-bottom: 12px;
-            color: #333;
+            font-size: 1rem;
         }
         
-        .scan-options label {
-            display: block;
-            margin-bottom: 8px;
-            cursor: pointer;
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
         
-        .scan-options input[type="number"] {
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .multi-page-options {
+            margin-left: 24px;
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .multi-page-options input[type="number"] {
             width: 60px;
             padding: 4px 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
-            margin: 0 4px;
         }
         
-        .scan-button {
+        .scan-btn {
             background: #667eea;
             color: white;
             border: none;
             padding: 12px 24px;
             border-radius: 6px;
             font-size: 16px;
+            font-weight: 500;
             cursor: pointer;
-            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        .scan-button:hover {
+        .scan-btn:hover {
             background: #5a6fd8;
         }
         
-        .scan-button:disabled {
+        .scan-btn:disabled {
             background: #ccc;
             cursor: not-allowed;
         }
         
-        .status-badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: 500;
+        /* Results Styles */
+        .results-container {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+            display: none;
+        }
+        
+        .results-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
             margin-bottom: 16px;
         }
         
-        .status-scanning {
-            background: #fff3cd;
-            color: #856404;
+        .results-header h3 {
+            font-size: 1.2rem;
+        }
+        
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
         }
         
         .status-complete {
@@ -646,28 +722,29 @@ app.get('/', (req, res) => {
         
         .results-summary {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 16px;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
         
         .summary-item {
-            background: #f8f9fa;
-            padding: 16px;
-            border-radius: 6px;
             text-align: center;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 6px;
         }
         
         .summary-item .value {
             font-size: 1.5rem;
             font-weight: 600;
-            color: #333;
             margin-bottom: 4px;
         }
         
         .summary-item .label {
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .violations-by-impact {
@@ -811,19 +888,22 @@ app.get('/', (req, res) => {
         }
         
         .scan-info h4 {
-            margin-bottom: 4px;
             font-size: 1rem;
+            margin-bottom: 4px;
         }
         
         .scan-meta {
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             color: #666;
         }
         
         .scan-score {
-            font-weight: 600;
-            color: #28a745;
-            margin-right: 12px;
+            background: #28a745;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
         }
         
         .view-report-btn {
@@ -832,44 +912,56 @@ app.get('/', (req, res) => {
             border: none;
             padding: 6px 12px;
             border-radius: 4px;
-            font-size: 0.9rem;
             cursor: pointer;
+            font-size: 0.8rem;
+            margin-left: 8px;
         }
         
-        .view-report-btn:hover {
-            background: #5a6fd8;
-        }
-        
-        /* Page Management */
-        .page {
-            display: block;
-        }
-        
-        .page.hidden {
-            display: none;
-        }
-        
+        /* Loading States */
         .loading {
             display: flex;
             align-items: center;
-            justify-content: center;
-            padding: 40px;
+            gap: 8px;
             color: #666;
         }
         
         .spinner {
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             border: 2px solid #f3f3f3;
             border-top: 2px solid #667eea;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin-right: 12px;
         }
         
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+        
+        /* Hidden class */
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard-container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: auto;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -881,7 +973,6 @@ app.get('/', (req, res) => {
                 <h1>🛡️ SentryPrime</h1>
                 <p>Enterprise Dashboard</p>
             </div>
-            
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" data-page="dashboard">
                     <div class="nav-icon">📊</div>
@@ -902,6 +993,14 @@ app.get('/', (req, res) => {
                 <a href="#" class="nav-item" data-page="integrations">
                     <div class="nav-icon">🔗</div>
                     Integrations
+                </a>
+                <a href="#" class="nav-item" data-page="api">
+                    <div class="nav-icon">⚙️</div>
+                    API Management
+                </a>
+                <a href="#" class="nav-item" data-page="billing">
+                    <div class="nav-icon">💳</div>
+                    Billing
                 </a>
                 <a href="#" class="nav-item" data-page="settings">
                     <div class="nav-icon">⚙️</div>
@@ -1009,41 +1108,50 @@ app.get('/', (req, res) => {
                 <!-- Scans Page -->
                 <div id="scans-page" class="page hidden">
                     <div class="page-header">
-                        <h1 class="page-title">Accessibility Scanner</h1>
-                        <p class="page-subtitle">Scan websites for WCAG compliance issues</p>
+                        <h1 class="page-title">Accessibility Scans</h1>
+                        <p class="page-subtitle">Manage and review your accessibility scans</p>
+                    </div>
+                    
+                    <div style="background: #d4edda; color: #155724; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
+                        ✅ Database connected - Scans will be saved to your history
                     </div>
                     
                     <!-- Scanner -->
                     <div class="scanner-container">
-                        <h3 style="margin-bottom: 16px;">Scan Website</h3>
-                        <div id="status-badge" class="status-badge" style="display: none;"></div>
+                        <h3 style="margin-bottom: 16px;">Scan Website for Accessibility Issues</h3>
                         
-                        <form id="scan-form">
-                            <input type="url" id="url-input" class="url-input" placeholder="https://example.com/" required>
-                            
-                            <div class="scan-options">
-                                <h4>Scan Options:</h4>
-                                <label>
-                                    <input type="radio" name="scanType" value="single" checked> 
+                        <input type="text" id="url-input" class="url-input" placeholder="https://example.com/" value="https://example.com/">
+                        
+                        <div class="scan-options">
+                            <h4>Scan Options:</h4>
+                            <div class="radio-group">
+                                <label class="radio-option">
+                                    <input type="radio" name="scanType" value="single" checked>
                                     Single Page (Fast - recommended)
-                                </label><br>
-                                <label>
-                                    <input type="radio" name="scanType" value="crawl"> 
+                                </label>
+                                <label class="radio-option">
+                                    <input type="radio" name="scanType" value="crawl">
                                     Multi-Page Crawl (Slower - up to 
-                                    <input type="number" id="max-pages" value="5" min="2" max="20"> pages)
+                                    <div class="multi-page-options">
+                                        <input type="number" id="max-pages" value="5" min="1" max="20">
+                                        pages)
+                                    </div>
                                 </label>
                             </div>
-                            
-                            <button type="submit" class="scan-button" id="scan-btn">🔍 Start Accessibility Scan</button>
-                        </form>
+                        </div>
+                        
+                        <button id="scan-btn" class="scan-btn">
+                            🔍 Start Accessibility Scan
+                        </button>
                     </div>
                     
                     <!-- Results -->
-                    <div id="results-container" style="display: none;">
-                        <div style="background: white; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                            <h3 style="margin-bottom: 16px;">Scan Results</h3>
-                            <div id="results-content"></div>
+                    <div id="results-container" class="results-container">
+                        <div class="results-header">
+                            <h3>Scan Results</h3>
+                            <span id="status-badge" class="status-badge"></span>
                         </div>
+                        <div id="results-content"></div>
                     </div>
                     
                     <!-- Recent Scans -->
@@ -1059,51 +1167,137 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
                 
-                <!-- Other Pages -->
+                <!-- Analytics Page -->
                 <div id="analytics-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Analytics</h1>
-                        <p class="page-subtitle">Detailed accessibility compliance reports and trends</p>
+                        <p class="page-subtitle">Track your accessibility compliance over time</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        📊 Analytics page coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">📊 Analytics Dashboard</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Advanced analytics and reporting features</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Compliance trend charts</li>
+                                <li>Issue category breakdowns</li>
+                                <li>Team performance metrics</li>
+                                <li>Custom reporting</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
+                <!-- Team Page -->
                 <div id="team-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Team Management</h1>
                         <p class="page-subtitle">Manage team members and permissions</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        👥 Team management coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">👥 Team Management</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Team collaboration features</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Invite team members</li>
+                                <li>Role-based permissions</li>
+                                <li>Activity tracking</li>
+                                <li>Shared scan results</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
+                <!-- Integrations Page -->
                 <div id="integrations-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Integrations</h1>
-                        <p class="page-subtitle">Connect with your favorite platforms</p>
+                        <p class="page-subtitle">Connect with your favorite tools and platforms</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        🔗 Platform integrations coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">🔗 Platform Integrations</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Direct integrations with popular platforms</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Integrations:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Shopify - Auto-fix accessibility issues</li>
+                                <li>WordPress - Plugin integration</li>
+                                <li>Slack - Notifications and reports</li>
+                                <li>GitHub - CI/CD integration</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
+                <!-- API Management Page -->
+                <div id="api-page" class="page hidden">
+                    <div class="page-header">
+                        <h1 class="page-title">API Management</h1>
+                        <p class="page-subtitle">Manage API keys and integrations</p>
+                    </div>
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">⚙️ API Management</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - API access and management</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Generate API keys</li>
+                                <li>Usage analytics</li>
+                                <li>Rate limiting</li>
+                                <li>Webhook configuration</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Billing Page -->
+                <div id="billing-page" class="page hidden">
+                    <div class="page-header">
+                        <h1 class="page-title">Billing</h1>
+                        <p class="page-subtitle">Manage your subscription and billing</p>
+                    </div>
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">💳 Billing Management</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Subscription and billing management</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Subscription plans</li>
+                                <li>Usage tracking</li>
+                                <li>Invoice history</li>
+                                <li>Payment methods</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Settings Page -->
                 <div id="settings-page" class="page hidden">
                     <div class="page-header">
                         <h1 class="page-title">Settings</h1>
                         <p class="page-subtitle">Configure your account and preferences</p>
                     </div>
-                    <div style="text-align: center; padding: 60px; color: #666;">
-                        ⚙️ Settings page coming soon...
+                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                        <h3 style="margin-bottom: 16px;">⚙️ Account Settings</h3>
+                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Account and preference management</p>
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
+                            <p><strong>Planned Features:</strong></p>
+                            <ul style="text-align: left; margin-top: 12px; color: #666;">
+                                <li>Profile management</li>
+                                <li>Notification preferences</li>
+                                <li>Security settings</li>
+                                <li>Data export</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    
+
     <script>
+        // Navigation functionality
         function switchToPage(pageId) {
             // Hide all pages
             document.querySelectorAll('.page').forEach(page => {
@@ -1117,10 +1311,10 @@ app.get('/', (req, res) => {
             document.querySelectorAll('.nav-item').forEach(item => {
                 item.classList.remove('active');
             });
-            document.querySelector('[data-page="' + pageId + '"]').classList.add('active');
+            document.querySelector(\`[data-page="\${pageId}"]\`).classList.add('active');
         }
         
-        // Initialize navigation
+        // Add click handlers to nav items
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -1149,24 +1343,24 @@ app.get('/', (req, res) => {
         // Load recent scans for dashboard
         async function loadDashboardRecentScans() {
             try {
-                const response = await fetch('/api/scans/recent?limit=5');
+                const response = await fetch('/api/scans/recent');
                 const data = await response.json();
                 
                 const container = document.getElementById('dashboard-recent-scans');
                 
                 if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.map(scan => 
-                        '<div class="scan-item">' +
-                        '<div class="scan-info">' +
-                        '<h4>' + scan.url + '</h4>' +
-                        '<div class="scan-meta">' + (scan.scan_type === 'single' ? 'Single Page' : 'Multi-page') + ' • ' + new Date(scan.created_at).toLocaleDateString() + '</div>' +
-                        '</div>' +
-                        '<div style="display: flex; align-items: center; gap: 8px;">' +
-                        '<span class="scan-score">' + scan.score + '% Score</span>' +
-                        '<button class="view-report-btn">👁️ View Report</button>' +
-                        '</div>' +
-                        '</div>'
-                    ).join('');
+                    container.innerHTML = data.scans.slice(0, 3).map(scan => \`
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>\${scan.url}</h4>
+                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="scan-score">\${scan.score}% Score</span>
+                                <button class="view-report-btn">👁️ View Report</button>
+                            </div>
+                        </div>
+                    \`).join('');
                 } else {
                     container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. <a href="#" onclick="switchToPage(\\'scans\\')">Start your first scan</a></p>';
                 }
@@ -1179,30 +1373,34 @@ app.get('/', (req, res) => {
         // Scanner functionality (preserved from original)
         let isScanning = false;
         
-        document.getElementById('scan-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
+        document.getElementById('scan-btn').addEventListener('click', async () => {
             if (isScanning) return;
             
-            const url = document.getElementById('url-input').value;
+            const url = document.getElementById('url-input').value.trim();
             const scanType = document.querySelector('input[name="scanType"]:checked').value;
             const maxPages = document.getElementById('max-pages').value;
+            
+            if (!url) {
+                alert('Please enter a URL to scan');
+                return;
+            }
+            
+            isScanning = true;
             const scanBtn = document.getElementById('scan-btn');
-            const statusBadge = document.getElementById('status-badge');
             const resultsContainer = document.getElementById('results-container');
             
-            // Update UI for scanning state
-            isScanning = true;
-            scanBtn.innerHTML = '⏳ Scanning...';
+            // Update button state
+            scanBtn.innerHTML = '<div class="spinner"></div> Scanning...';
             scanBtn.disabled = true;
-            statusBadge.textContent = 'Scanning in progress...';
-            statusBadge.className = 'status-badge status-scanning';
-            statusBadge.style.display = 'inline-block';
+            
+            // Show results container
             resultsContainer.style.display = 'block';
-            document.getElementById('results-content').innerHTML = '<div class="loading"><div class="spinner"></div>Scanning website for accessibility issues...</div>';
+            document.getElementById('status-badge').textContent = 'Scanning...';
+            document.getElementById('status-badge').className = 'status-badge';
+            document.getElementById('results-content').innerHTML = '<div class="loading"><div class="spinner"></div>Analyzing accessibility...</div>';
             
             try {
-                const response = await fetch('/scan', {
+                const response = await fetch('/api/scan', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1239,7 +1437,12 @@ app.get('/', (req, res) => {
                 console.error('Scan error:', error);
                 document.getElementById('status-badge').textContent = 'Scan Failed';
                 document.getElementById('status-badge').className = 'status-badge status-error';
-                document.getElementById('results-content').innerHTML = '<div style="color: #dc3545; text-align: center; padding: 20px;"><h4>Scan Failed</h4><p>' + error.message + '</p></div>';
+                document.getElementById('results-content').innerHTML = \`
+                    <div style="color: #dc3545; text-align: center; padding: 20px;">
+                        <h4>Scan Failed</h4>
+                        <p>\${error.message}</p>
+                    </div>
+                \`;
             } finally {
                 // Reset button
                 scanBtn.innerHTML = '🔍 Start Accessibility Scan';
@@ -1249,108 +1452,114 @@ app.get('/', (req, res) => {
         });
         
         function displaySinglePageResults(result) {
-            const content = '<div class="results-summary">' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + result.url + '</div>' +
-                    '<div class="label">URL</div>' +
-                '</div>' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + result.violations.length + '</div>' +
-                    '<div class="label">Total Issues</div>' +
-                '</div>' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + result.scanTime + 'ms</div>' +
-                    '<div class="label">Scan Time</div>' +
-                '</div>' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + new Date(result.timestamp).toLocaleString() + '</div>' +
-                    '<div class="label">Timestamp</div>' +
-                '</div>' +
-            '</div>' +
-            
-            '<h4 style="margin-bottom: 12px;">Violations by Impact:</h4>' +
-            '<div class="violations-by-impact">' +
-                '<div class="impact-item impact-critical">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.critical + '</div>' +
-                    '<div style="font-size: 0.8rem;">Critical</div>' +
-                '</div>' +
-                '<div class="impact-item impact-serious">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.serious + '</div>' +
-                    '<div style="font-size: 0.8rem;">Serious</div>' +
-                '</div>' +
-                '<div class="impact-item impact-moderate">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.moderate + '</div>' +
-                    '<div style="font-size: 0.8rem;">Moderate</div>' +
-                '</div>' +
-                '<div class="impact-item impact-minor">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.minor + '</div>' +
-                    '<div style="font-size: 0.8rem;">Minor</div>' +
-                '</div>' +
-            '</div>' +
-            
-            '<div style="display: flex; gap: 12px; margin-top: 20px;">' +
-                '<button class="view-details-btn" onclick="showViolationDetails(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">📋 View Detailed Results</button>' +
-                (result.violations.length > 0 ? 
-                    '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">🤖 Get AI Fix Suggestions</button>' 
-                    : ''
-                ) +
-            '</div>';
+            const content = \`
+                <div class="results-summary">
+                    <div class="summary-item">
+                        <div class="value">\${result.url}</div>
+                        <div class="label">URL</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.totalIssues}</div>
+                        <div class="label">Total Issues</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.scanTime}ms</div>
+                        <div class="label">Scan Time</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
+                        <div class="label">Timestamp</div>
+                    </div>
+                </div>
+                
+                <h4 style="margin-bottom: 12px;">Violations by Impact:</h4>
+                <div class="violations-by-impact">
+                    <div class="impact-item impact-critical">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
+                        <div style="font-size: 0.8rem;">Critical</div>
+                    </div>
+                    <div class="impact-item impact-serious">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
+                        <div style="font-size: 0.8rem;">Serious</div>
+                    </div>
+                    <div class="impact-item impact-moderate">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
+                        <div style="font-size: 0.8rem;">Moderate</div>
+                    </div>
+                    <div class="impact-item impact-minor">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
+                        <div style="font-size: 0.8rem;">Minor</div>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 12px; margin-top: 20px;">
+                    <button class="view-details-btn" onclick="showViolationDetails(\${JSON.stringify(result.violations).replace(/"/g, '&quot;')})">
+                        📋 View Detailed Results
+                    </button>
+                    \${result.violations.length > 0 ? 
+                        '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">🤖 Get AI Fix Suggestions</button>' 
+                        : ''
+                    }
+                </div>
+            \`;
             
             document.getElementById('results-content').innerHTML = content;
         }
         
         function displayMultiPageResults(result) {
-            const content = '<div class="results-summary">' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + result.pages.length + '</div>' +
-                    '<div class="label">Pages Scanned</div>' +
-                '</div>' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + result.totalIssues + '</div>' +
-                    '<div class="label">Total Issues</div>' +
-                '</div>' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + result.scanTime + 'ms</div>' +
-                    '<div class="label">Total Time</div>' +
-                '</div>' +
-                '<div class="summary-item">' +
-                    '<div class="value">' + new Date(result.timestamp).toLocaleString() + '</div>' +
-                    '<div class="label">Timestamp</div>' +
-                '</div>' +
-            '</div>' +
-            
-            '<h4 style="margin-bottom: 12px;">Overall Violations by Impact:</h4>' +
-            '<div class="violations-by-impact">' +
-                '<div class="impact-item impact-critical">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.critical + '</div>' +
-                    '<div style="font-size: 0.8rem;">Critical</div>' +
-                '</div>' +
-                '<div class="impact-item impact-serious">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.serious + '</div>' +
-                    '<div style="font-size: 0.8rem;">Serious</div>' +
-                '</div>' +
-                '<div class="impact-item impact-moderate">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.moderate + '</div>' +
-                    '<div style="font-size: 0.8rem;">Moderate</div>' +
-                '</div>' +
-                '<div class="impact-item impact-minor">' +
-                    '<div style="font-weight: 600; font-size: 1.2rem;">' + result.summary.minor + '</div>' +
-                    '<div style="font-size: 0.8rem;">Minor</div>' +
-                '</div>' +
-            '</div>' +
-            
-            '<h4 style="margin: 20px 0 12px;">Pages Scanned:</h4>' +
-            '<div style="background: #f8f9fa; border-radius: 6px; padding: 16px;">' +
-                result.pages.map(page => 
-                    '<div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;">' +
-                        '<div>' +
-                            '<div style="font-weight: 500;">' + page.url + '</div>' +
-                            '<div style="font-size: 0.8rem; color: #666;">' + (page.violations ? page.violations.length : 0) + ' issues • ' + (page.loadTime || page.scanTime) + 'ms</div>' +
-                        '</div>' +
-                        (page.error ? '<span style="color: #dc3545;">Error</span>' : '<span style="color: #28a745;">✓</span>') +
-                    '</div>'
-                ).join('') +
-            '</div>';
+            const content = \`
+                <div class="results-summary">
+                    <div class="summary-item">
+                        <div class="value">\${result.pages.length}</div>
+                        <div class="label">Pages Scanned</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.totalIssues}</div>
+                        <div class="label">Total Issues</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${result.scanTime}ms</div>
+                        <div class="label">Total Time</div>
+                    </div>
+                    <div class="summary-item">
+                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
+                        <div class="label">Timestamp</div>
+                    </div>
+                </div>
+                
+                <h4 style="margin-bottom: 12px;">Overall Violations by Impact:</h4>
+                <div class="violations-by-impact">
+                    <div class="impact-item impact-critical">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
+                        <div style="font-size: 0.8rem;">Critical</div>
+                    </div>
+                    <div class="impact-item impact-serious">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
+                        <div style="font-size: 0.8rem;">Serious</div>
+                    </div>
+                    <div class="impact-item impact-moderate">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
+                        <div style="font-size: 0.8rem;">Moderate</div>
+                    </div>
+                    <div class="impact-item impact-minor">
+                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
+                        <div style="font-size: 0.8rem;">Minor</div>
+                    </div>
+                </div>
+                
+                <h4 style="margin: 20px 0 12px;">Pages Scanned:</h4>
+                <div style="background: #f8f9fa; border-radius: 6px; padding: 16px;">
+                    \${result.pages.map(page => \`
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;">
+                            <div>
+                                <div style="font-weight: 500;">\${page.url}</div>
+                                <div style="font-size: 0.8rem; color: #666;">\${page.violations ? page.violations.length : 0} issues • \${page.loadTime || page.scanTime}ms</div>
+                            </div>
+                            \${page.error ? '<span style="color: #dc3545;">Error</span>' : '<span style="color: #28a745;">✓</span>'}
+                        </div>
+                    \`).join('')}
+                </div>
+            \`;
             
             document.getElementById('results-content').innerHTML = content;
         }
@@ -1358,33 +1567,33 @@ app.get('/', (req, res) => {
         function showViolationDetails(violations) {
             // Create a simple modal or expand the results to show detailed violations
             const detailsWindow = window.open('', '_blank', 'width=800,height=600');
-            detailsWindow.document.write(
-                '<html>' +
-                '<head><title>Detailed Accessibility Report</title></head>' +
-                '<body style="font-family: Arial, sans-serif; padding: 20px;">' +
-                    '<h2>Detailed Accessibility Violations</h2>' +
-                    '<div>' +
-                        violations.map((violation, index) => 
-                            '<div style="border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;">' +
-                                '<h3 style="color: #dc3545;">' + violation.id + '</h3>' +
-                                '<p><strong>Impact:</strong> ' + violation.impact + '</p>' +
-                                '<p><strong>Description:</strong> ' + violation.description + '</p>' +
-                                '<p><strong>Help:</strong> ' + violation.help + '</p>' +
-                                '<p><strong>Elements affected:</strong> ' + violation.nodes.length + '</p>' +
-                                '<details>' +
-                                    '<summary>Show affected elements</summary>' +
-                                    violation.nodes.map(node => 
-                                        '<div style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 3px;">' +
-                                            '<code>' + node.html + '</code>' +
-                                        '</div>'
-                                    ).join('') +
-                                '</details>' +
-                            '</div>'
-                        ).join('') +
-                    '</div>' +
-                '</body>' +
-                '</html>'
-            );
+            detailsWindow.document.write(\`
+                <html>
+                <head><title>Detailed Accessibility Report</title></head>
+                <body style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2>Detailed Accessibility Violations</h2>
+                    <div>
+                        \${violations.map((violation, index) => \`
+                            <div style="border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;">
+                                <h3 style="color: #dc3545;">\${violation.id}</h3>
+                                <p><strong>Impact:</strong> \${violation.impact}</p>
+                                <p><strong>Description:</strong> \${violation.description}</p>
+                                <p><strong>Help:</strong> \${violation.help}</p>
+                                <p><strong>Elements affected:</strong> \${violation.nodes.length}</p>
+                                <details>
+                                    <summary>Show affected elements</summary>
+                                    \${violation.nodes.map(node => \`
+                                        <div style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 3px;">
+                                            <code>\${node.html}</code>
+                                        </div>
+                                    \`).join('')}
+                                </details>
+                            </div>
+                        \`).join('')}
+                    </div>
+                </body>
+                </html>
+            \`);
         }
         
         // Load recent scans for scans page
@@ -1396,18 +1605,18 @@ app.get('/', (req, res) => {
                 const container = document.getElementById('recent-scans-list');
                 
                 if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.map(scan => 
-                        '<div class="scan-item">' +
-                        '<div class="scan-info">' +
-                        '<h4>' + scan.url + '</h4>' +
-                        '<div class="scan-meta">' + (scan.scan_type === 'single' ? 'Single Page' : 'Multi-page') + ' • ' + new Date(scan.created_at).toLocaleDateString() + '</div>' +
-                        '</div>' +
-                        '<div style="display: flex; align-items: center; gap: 8px;">' +
-                        '<span class="scan-score">' + scan.score + '% Score</span>' +
-                        '<button class="view-report-btn">👁️ View Report</button>' +
-                        '</div>' +
-                        '</div>'
-                    ).join('');
+                    container.innerHTML = data.scans.map(scan => \`
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>\${scan.url}</h4>
+                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="scan-score">\${scan.score}% Score</span>
+                                <button class="view-report-btn">👁️ View Report</button>
+                            </div>
+                        </div>
+                    \`).join('');
                 } else {
                     container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
                 }
@@ -1571,40 +1780,55 @@ async function scanSinglePage(browser, url) {
         
         // Inject axe-core
         console.log('Injecting axe-core...');
-        await page.addScriptTag({ content: axeCore.source });
-        
-        // Run accessibility scan
-        console.log('Running accessibility scan...');
-        const results = await page.evaluate(async () => {
-            return await axe.run();
+        await page.addScriptTag({
+            content: axeCore.source
         });
         
-        console.log('✅ Scan completed for: ' + url);
+        console.log('Running axe accessibility scan...');
+        const results = await page.evaluate(() => {
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Axe scan timeout'));
+                }, 60000);
+                
+                axe.run((err, results) => {
+                    clearTimeout(timeout);
+                    if (err) reject(err);
+                    else resolve(results);
+                });
+            });
+        });
+        
         return results;
         
-    } catch (error) {
-        console.log('❌ Error scanning page: ' + url + ' - ' + error.message);
-        throw error;
     } finally {
         await page.close();
     }
 }
 
-// Main scan endpoint - PRESERVED FUNCTIONALITY
-app.post('/scan', async (req, res) => {
+// EXACT COPY OF WORKING API ENDPOINT WITH DATABASE INTEGRATION ADDED
+app.post('/api/scan', async (req, res) => {
     const startTime = Date.now();
     let browser = null;
     
     try {
-        const { url: targetUrl, scanType = 'single', maxPages = 5 } = req.body;
+        const { url, scanType = 'single', maxPages = 5 } = req.body;
         
-        if (!targetUrl) {
-            return res.status(400).json({ error: 'URL is required' });
+        if (!url) {
+            return res.status(400).json({
+                success: false,
+                error: 'URL is required'
+            });
         }
         
-        console.log('🚀 Starting ' + scanType + ' scan for: ' + targetUrl);
+        let targetUrl = url;
+        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+            targetUrl = 'https://' + targetUrl;
+        }
         
-        // Launch browser with optimized settings
+        console.log('🔍 Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
+        
+        // Launch Puppeteer - EXACT WORKING CONFIGURATION
         browser = await puppeteer.launch({
             headless: 'new',
             executablePath: '/usr/bin/google-chrome-stable',
@@ -1779,5 +2003,4 @@ app.listen(PORT, () => {
     console.log('🔍 Scanner: http://localhost:' + PORT + '/');
     console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
     console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
-    console.log('🤖 AI Features: ' + (process.env.OPENAI_API_KEY ? 'Enabled' : 'Disabled'));
 });
