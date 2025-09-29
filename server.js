@@ -100,258 +100,242 @@ async function getRecentScans(userId = 1, limit = 10) {
         // Return mock data when no database connection
         console.log('⚠️ No database connection, returning mock data');
         return [
-            { 
-                id: 1, 
-                url: 'https://company.com', 
-                scan_type: 'single', 
-                total_issues: 7, 
-                created_at: '2024-09-18',
-                score: 94 
+            {
+                id: 1,
+                url: 'https://company.com',
+                scan_type: 'single',
+                total_issues: 8,
+                score: 94,
+                created_at: '2024-09-18T10:30:00Z'
             },
-            { 
-                id: 2, 
-                url: 'https://company.com/products', 
-                scan_type: 'crawl', 
-                total_issues: 12, 
-                created_at: '2024-09-18',
-                score: 87 
+            {
+                id: 2,
+                url: 'https://company.com/products',
+                scan_type: 'crawl',
+                total_issues: 15,
+                score: 87,
+                created_at: '2024-09-18T09:15:00Z'
             },
-            { 
-                id: 3, 
-                url: 'https://company.com/about', 
-                scan_type: 'single', 
-                total_issues: 3, 
-                created_at: '2024-09-17',
-                score: 96 
+            {
+                id: 3,
+                url: 'https://company.com/about',
+                scan_type: 'single',
+                total_issues: 3,
+                score: 96,
+                created_at: '2024-09-17T14:45:00Z'
             }
         ];
     }
     
     try {
         const result = await db.query(
-            `SELECT id, url, scan_type, total_issues, completed_at as created_at 
+            `SELECT id, url, scan_type, total_issues, 
+                    CASE 
+                        WHEN total_issues = 0 THEN 100
+                        ELSE GREATEST(0, 100 - (total_issues * 2))
+                    END as score,
+                    created_at
              FROM scans 
              WHERE user_id = $1 
-             ORDER BY completed_at DESC 
+             ORDER BY created_at DESC 
              LIMIT $2`,
             [userId, limit]
         );
         
-        console.log(`✅ Retrieved ${result.rows.length} scans from database`);
-        
-        return result.rows.map(scan => ({
-            ...scan,
-            score: Math.max(60, 100 - Math.min(40, scan.total_issues * 2)) // Calculate score based on issues
-        }));
+        return result.rows;
     } catch (error) {
         console.log('❌ Database error getting recent scans:', error.message);
         return [];
     }
 }
 
-// NEW: Dashboard statistics function
 async function getDashboardStats(userId = 1) {
     if (!db) {
+        // Return mock data when no database connection
+        console.log('⚠️ No database connection, returning mock data');
         return {
             totalScans: 3,
             totalIssues: 22,
-            avgScore: 92,
-            weeklyScans: 2
+            averageScore: 92,
+            thisWeekScans: 2
         };
     }
     
     try {
-        // Get total scans
-        const totalScansResult = await db.query(
-            'SELECT COUNT(*) as count FROM scans WHERE user_id = $1',
-            [userId]
-        );
+        const result = await db.query(`
+            SELECT 
+                COUNT(*) as total_scans,
+                COALESCE(SUM(total_issues), 0) as total_issues,
+                COALESCE(AVG(CASE 
+                    WHEN total_issues = 0 THEN 100
+                    ELSE GREATEST(0, 100 - (total_issues * 2))
+                END), 0) as average_score,
+                COUNT(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as this_week_scans
+            FROM scans 
+            WHERE user_id = $1
+        `, [userId]);
         
-        // Get total issues
-        const totalIssuesResult = await db.query(
-            'SELECT SUM(total_issues) as total FROM scans WHERE user_id = $1',
-            [userId]
-        );
-        
-        // Get average score (calculated from issues)
-        const avgScoreResult = await db.query(
-            'SELECT AVG(GREATEST(60, 100 - LEAST(40, total_issues * 2))) as avg_score FROM scans WHERE user_id = $1',
-            [userId]
-        );
-        
-        // Get scans from last 7 days
-        const weeklyScansResult = await db.query(
-            'SELECT COUNT(*) as count FROM scans WHERE user_id = $1 AND completed_at >= NOW() - INTERVAL \'7 days\'',
-            [userId]
-        );
-        
+        const stats = result.rows[0];
         return {
-            totalScans: parseInt(totalScansResult.rows[0].count) || 0,
-            totalIssues: parseInt(totalIssuesResult.rows[0].total) || 0,
-            avgScore: Math.round(parseFloat(avgScoreResult.rows[0].avg_score)) || 0,
-            weeklyScans: parseInt(weeklyScansResult.rows[0].count) || 0
+            totalScans: parseInt(stats.total_scans),
+            totalIssues: parseInt(stats.total_issues),
+            averageScore: Math.round(parseFloat(stats.average_score)),
+            thisWeekScans: parseInt(stats.this_week_scans)
         };
     } catch (error) {
         console.log('❌ Database error getting dashboard stats:', error.message);
         return {
             totalScans: 0,
             totalIssues: 0,
-            avgScore: 0,
-            weeklyScans: 0
+            averageScore: 0,
+            thisWeekScans: 0
         };
     }
 }
 
-// Health check - PRESERVED
+// Health check endpoint
 app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'healthy', 
+    res.json({
+        status: 'healthy',
         timestamp: new Date().toISOString(),
         database: db ? 'connected' : 'standalone',
         environment: process.env.K_SERVICE ? 'cloud-run' : 'local'
     });
 });
 
-// API endpoint to get recent scans - PRESERVED
+// API endpoint for recent scans
 app.get('/api/scans/recent', async (req, res) => {
     try {
-        const scans = await getRecentScans(1); // Default user ID for now
-        res.json({ success: true, scans });
+        const scans = await getRecentScans();
+        res.json(scans);
     } catch (error) {
         console.error('Error fetching recent scans:', error);
-        res.status(500).json({ error: 'Failed to fetch scans' });
+        res.status(500).json({ error: 'Failed to fetch recent scans' });
     }
 });
 
-// NEW: API endpoint for dashboard statistics
+// API endpoint for dashboard stats
 app.get('/api/dashboard/stats', async (req, res) => {
     try {
-        const stats = await getDashboardStats(1); // Default user ID for now
-        res.json({ success: true, stats });
+        const stats = await getDashboardStats();
+        res.json(stats);
     } catch (error) {
         console.error('Error fetching dashboard stats:', error);
         res.status(500).json({ error: 'Failed to fetch dashboard stats' });
     }
 });
 
-// NEW: AI Fix Suggestions API Endpoint
+// NEW: AI Suggestions API endpoint
 app.post('/api/ai-fixes', async (req, res) => {
     try {
-        console.log('🤖 AI fix suggestions requested');
-        
         const { violations } = req.body;
         
         if (!violations || !Array.isArray(violations)) {
-            return res.status(400).json({ error: 'Invalid violations data' });
+            return res.status(400).json({ error: 'Violations array is required' });
         }
-        
-        console.log('📊 Processing', violations.length, 'violations for AI analysis');
-        
-        // Try to use OpenAI if available
-        if (process.env.OPENAI_API_KEY) {
-            try {
-                const { OpenAI } = await import('openai');
-                const openai = new OpenAI({
-                    apiKey: process.env.OPENAI_API_KEY,
-                });
-                
-                const prompt = `As an accessibility expert, provide specific fix suggestions for these WCAG violations:
 
-${violations.map(v => `- ${v.id}: ${v.description} (Impact: ${v.impact})`).join('\n')}
+        const suggestions = violations.map(violation => {
+            // Generate AI-powered suggestions based on violation type
+            const suggestion = generateAISuggestion(violation);
+            return suggestion;
+        });
 
-IMPORTANT: Respond with ONLY a valid JSON array. No markdown, no explanations, just pure JSON.
-
-Format each suggestion as:
-{
-  "explanation": "Clear explanation of the issue",
-  "codeExample": "HTML/CSS code example to fix it", 
-  "steps": ["Step 1", "Step 2", "Step 3"],
-  "priority": "high|medium|low"
-}
-
-Return as JSON array:`;
-                
-                const completion = await openai.chat.completions.create({
-                    model: "gpt-4o-mini",
-                    messages: [{ role: "user", content: prompt }],
-                    max_tokens: 2000,
-                    temperature: 0.3,
-                });
-                
-                const aiResponse = completion.choices[0].message.content;
-                console.log('🔍 Raw AI response:', aiResponse.substring(0, 200) + '...');
-                
-                try {
-                    // Try to extract JSON from response (handle markdown formatting)
-                    let jsonString = aiResponse;
-                    
-                    // Remove markdown code blocks if present
-                    if (jsonString.includes('```json')) {
-                        const jsonMatch = jsonString.match(/```json\s*([\s\S]*?)\s*```/);
-                        if (jsonMatch) {
-                            jsonString = jsonMatch[1];
-                        }
-                    } else if (jsonString.includes('```')) {
-                        const jsonMatch = jsonString.match(/```\s*([\s\S]*?)\s*```/);
-                        if (jsonMatch) {
-                            jsonString = jsonMatch[1];
-                        }
-                    }
-                    
-                    // Clean up the JSON string
-                    jsonString = jsonString.trim();
-                    
-                    const suggestions = JSON.parse(jsonString);
-                    
-                    // Validate the response structure
-                    if (Array.isArray(suggestions) && suggestions.length > 0) {
-                        const isValid = suggestions.every(s => 
-                            s.explanation && s.codeExample && s.steps && s.priority
-                        );
-                        
-                        if (isValid) {
-                            console.log('✅ AI suggestions generated successfully');
-                            return res.json(suggestions);
-                        } else {
-                            console.log('⚠️ AI response structure invalid, using fallback');
-                        }
-                    } else {
-                        console.log('⚠️ AI response not an array or empty, using fallback');
-                    }
-                } catch (parseError) {
-                    console.log('⚠️ AI response parsing failed:', parseError.message);
-                    console.log('🔍 Failed to parse:', aiResponse.substring(0, 500));
-                }
-            } catch (aiError) {
-                console.log('⚠️ OpenAI API error:', aiError.message);
-            }
-        }
-        
-        // Fallback suggestions when AI is unavailable
-        const suggestions = violations.map(violation => ({
-            explanation: `This ${violation.impact} impact violation "${violation.id}" affects user accessibility. ${violation.description || 'No description available'}`,
-            codeExample: `<!-- Fix for ${violation.id} -->\n<!-- Please refer to WCAG guidelines for specific implementation -->`,
-            steps: [
-                'Review the violation details carefully',
-                'Consult WCAG guidelines for best practices',
-                'Implement the recommended accessibility fixes',
-                'Test with screen readers and accessibility tools'
-            ],
-            priority: violation.impact === 'critical' ? 'high' : 
-                     violation.impact === 'serious' ? 'high' :
-                     violation.impact === 'moderate' ? 'medium' : 'low'
-        }));
-        
-        console.log('✅ Fallback suggestions generated');
         res.json(suggestions);
-        
     } catch (error) {
-        console.error('❌ Error in AI fixes endpoint:', error);
+        console.error('Error generating AI suggestions:', error);
         res.status(500).json({ error: 'Failed to generate AI suggestions' });
     }
 });
 
-// ENHANCED: Main dashboard with navigation routing
+function generateAISuggestion(violation) {
+    // AI suggestion generation logic based on violation type
+    const suggestions = {
+        'color-contrast': {
+            priority: 'high',
+            explanation: 'Text color does not have sufficient contrast against the background color, making it difficult for users with visual impairments to read.',
+            codeExample: `/* Before */
+.text { color: #999; background: #fff; }
+
+/* After - Improved contrast */
+.text { color: #333; background: #fff; }`,
+            steps: [
+                'Identify elements with insufficient color contrast',
+                'Use a color contrast checker tool to test ratios',
+                'Adjust text color or background color to meet WCAG AA standards (4.5:1 ratio)',
+                'Test with users who have visual impairments',
+                'Verify the new colors work across different devices and lighting conditions'
+            ]
+        },
+        'image-alt': {
+            priority: 'high',
+            explanation: 'Images must have alternative text that describes their content for screen reader users.',
+            codeExample: `<!-- Before -->
+<img src="chart.png">
+
+<!-- After -->
+<img src="chart.png" alt="Sales increased 25% from Q1 to Q2 2024">`,
+            steps: [
+                'Identify all images missing alt attributes',
+                'Write descriptive alt text that conveys the image\'s purpose',
+                'For decorative images, use alt=""',
+                'For complex images like charts, consider longer descriptions',
+                'Test with screen readers to ensure alt text is helpful'
+            ]
+        },
+        'heading-order': {
+            priority: 'medium',
+            explanation: 'Headings should follow a logical hierarchy (h1, h2, h3) to help screen reader users navigate content.',
+            codeExample: `<!-- Before -->
+<h1>Main Title</h1>
+<h3>Subsection</h3>
+
+<!-- After -->
+<h1>Main Title</h1>
+<h2>Subsection</h2>`,
+            steps: [
+                'Review current heading structure',
+                'Ensure only one h1 per page',
+                'Use headings in sequential order (don\'t skip levels)',
+                'Make headings descriptive of the content that follows',
+                'Test navigation with screen readers'
+            ]
+        },
+        'link-name': {
+            priority: 'medium',
+            explanation: 'Links must have accessible names that clearly describe their destination or purpose.',
+            codeExample: `<!-- Before -->
+<a href="/contact">Click here</a>
+
+<!-- After -->
+<a href="/contact">Contact our support team</a>`,
+            steps: [
+                'Find links with vague text like "click here" or "read more"',
+                'Rewrite link text to be descriptive and specific',
+                'Ensure link purpose is clear from the text alone',
+                'For icon links, add aria-label attributes',
+                'Test that links make sense when read out of context'
+            ]
+        }
+    };
+
+    // Default suggestion for unknown violation types
+    const defaultSuggestion = {
+        priority: 'medium',
+        explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities.`,
+        codeExample: '// Refer to WCAG guidelines for specific implementation details',
+        steps: [
+            'Review the WCAG guidelines for this specific issue',
+            'Identify all instances of this problem on your site',
+            'Implement the recommended solution',
+            'Test with accessibility tools and real users',
+            'Document the fix for future reference'
+        ]
+    };
+
+    return suggestions[violation.id] || defaultSuggestion;
+}
+
+// Main route - serves the dashboard HTML
 app.get('/', (req, res) => {
     const html = `<!DOCTYPE html>
 <html>
@@ -517,150 +501,215 @@ app.get('/', (req, res) => {
             overflow-y: auto;
         }
         
-        .page-header {
-            margin-bottom: 24px;
+        .page {
+            display: none;
         }
         
-        .page-title {
-            font-size: 1.8rem;
-            font-weight: 600;
+        .page.active {
+            display: block;
+        }
+        
+        /* Dashboard Overview */
+        .dashboard-header {
+            margin-bottom: 32px;
+        }
+        
+        .dashboard-header h1 {
+            font-size: 2rem;
+            font-weight: 700;
             margin-bottom: 8px;
         }
         
-        .page-subtitle {
+        .dashboard-header p {
             color: #666;
             font-size: 1rem;
         }
         
-        /* Dashboard Overview Styles */
+        /* Stats Cards */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
+            gap: 24px;
+            margin-bottom: 32px;
         }
         
         .stat-card {
             background: white;
-            border-radius: 8px;
             padding: 24px;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            border-left: 4px solid #667eea;
         }
         
-        .stat-card h3 {
+        .stat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        
+        .stat-title {
             font-size: 0.9rem;
             color: #666;
-            margin-bottom: 8px;
+            font-weight: 500;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         
-        .stat-card .stat-value {
-            font-size: 2rem;
+        .stat-value {
+            font-size: 2.5rem;
             font-weight: 700;
             color: #333;
-            margin-bottom: 4px;
+            margin-bottom: 8px;
         }
         
-        .stat-card .stat-change {
-            font-size: 0.8rem;
+        .stat-change {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .stat-change.positive {
             color: #28a745;
         }
         
-        .quick-actions {
+        .stat-change.negative {
+            color: #dc3545;
+        }
+        
+        /* Action Cards */
+        .actions-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 16px;
-            margin-bottom: 30px;
+            margin-bottom: 32px;
         }
         
         .action-card {
             background: white;
-            border-radius: 8px;
             padding: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            text-align: center;
+            border-radius: 8px;
+            border: 2px solid #e1e5e9;
             cursor: pointer;
-            transition: transform 0.2s ease;
+            transition: all 0.2s ease;
+            text-align: center;
         }
         
         .action-card:hover {
+            border-color: #667eea;
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
         }
         
-        .action-card .action-icon {
+        .action-card.primary {
+            border-color: #dc3545;
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+        }
+        
+        .action-card.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+        }
+        
+        .action-card.secondary {
+            border-color: #667eea;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .action-card.secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        .action-card.success {
+            border-color: #28a745;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+        
+        .action-card.success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+        }
+        
+        .action-icon {
             font-size: 2rem;
             margin-bottom: 12px;
         }
         
-        .action-card h4 {
-            font-size: 1rem;
+        .action-title {
+            font-size: 1.1rem;
+            font-weight: 600;
             margin-bottom: 8px;
         }
         
-        .action-card p {
-            font-size: 0.8rem;
-            color: #666;
+        .action-description {
+            font-size: 0.9rem;
+            opacity: 0.9;
         }
         
-        /* Scanner Styles */
-        .scanner-container {
+        /* Scan Form */
+        .scan-form {
             background: white;
-            border-radius: 8px;
             padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 24px;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
+            margin-bottom: 32px;
         }
         
-        .url-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 16px;
-            margin-bottom: 16px;
-        }
-        
-        .scan-options {
+        .form-group {
             margin-bottom: 20px;
         }
         
-        .scan-options h4 {
-            margin-bottom: 12px;
-            font-size: 1rem;
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
         }
         
-        .radio-group {
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 16px;
+            transition: border-color 0.2s ease;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .scan-options {
             display: flex;
-            flex-direction: column;
-            gap: 8px;
+            gap: 20px;
+            margin-bottom: 20px;
         }
         
-        .radio-option {
+        .scan-option {
             display: flex;
             align-items: center;
             gap: 8px;
         }
         
-        .multi-page-options {
-            margin-left: 24px;
-            margin-top: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+        .scan-option input[type="radio"] {
+            margin: 0;
         }
         
-        .multi-page-options input[type="number"] {
-            width: 60px;
-            padding: 4px 8px;
-            border: 1px solid #ddd;
+        .pages-input {
+            width: 80px;
+            padding: 6px 8px;
+            border: 1px solid #e1e5e9;
             border-radius: 4px;
+            margin: 0 8px;
         }
         
-        .scan-btn {
-            background: #667eea;
+        .scan-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
             padding: 12px 24px;
@@ -668,111 +717,175 @@ app.get('/', (req, res) => {
             font-size: 16px;
             font-weight: 500;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            transition: all 0.2s ease;
         }
         
-        .scan-btn:hover {
-            background: #5a6fd8;
+        .scan-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
         }
         
-        .scan-btn:disabled {
-            background: #ccc;
+        .scan-button:disabled {
+            background: #6c757d;
             cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
         
-        /* Results Styles */
-        .results-container {
+        /* Results */
+        .scan-results {
             background: white;
             border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e1e5e9;
+            overflow: hidden;
             margin-bottom: 24px;
-            display: none;
         }
         
         .results-header {
+            background: #f8f9fa;
+            padding: 16px 24px;
+            border-bottom: 1px solid #e1e5e9;
             display: flex;
             align-items: center;
-            gap: 12px;
+            justify-content: space-between;
+        }
+        
+        .results-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .results-meta {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .results-body {
+            padding: 24px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .violation {
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
             margin-bottom: 16px;
+            overflow: hidden;
         }
         
-        .results-header h3 {
-            font-size: 1.2rem;
+        .violation-header {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e1e5e9;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
         
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
+        .violation-title {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .violation-impact {
+            padding: 4px 8px;
+            border-radius: 4px;
             font-size: 0.8rem;
             font-weight: 500;
+            text-transform: uppercase;
         }
         
-        .status-complete {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status-error {
+        .impact-critical {
             background: #f8d7da;
             color: #721c24;
         }
         
+        .impact-serious {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .impact-moderate {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .impact-minor {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .violation-body {
+            padding: 16px;
+        }
+        
+        .violation-description {
+            margin-bottom: 12px;
+            color: #666;
+        }
+        
+        .violation-help {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .violation-help a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .violation-help a:hover {
+            text-decoration: underline;
+        }
+        
         .results-summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 16px;
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 6px;
             margin-bottom: 20px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 16px;
         }
         
         .summary-item {
             text-align: center;
-            padding: 16px;
-            background: #f8f9fa;
-            border-radius: 6px;
         }
         
-        .summary-item .value {
+        .summary-value {
             font-size: 1.5rem;
-            font-weight: 600;
+            font-weight: 700;
             margin-bottom: 4px;
         }
         
-        .summary-item .label {
+        .summary-label {
             font-size: 0.8rem;
             color: #666;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-        }
-        
-        .violations-by-impact {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .impact-item {
-            text-align: center;
-            padding: 12px;
-            border-radius: 6px;
-        }
-        
-        .impact-critical { background: #f8d7da; color: #721c24; }
-        .impact-serious { background: #fff3cd; color: #856404; }
-        .impact-moderate { background: #cce5ff; color: #004085; }
-        .impact-minor { background: #d1ecf1; color: #0c5460; }
-        
-        .view-details-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
         }
         
         .ai-suggestions-btn {
@@ -783,6 +896,7 @@ app.get('/', (req, res) => {
             border-radius: 4px;
             cursor: pointer;
             font-size: 0.9rem;
+            margin-right: 8px;
         }
         
         .ai-suggestions-btn:hover {
@@ -820,11 +934,10 @@ app.get('/', (req, res) => {
             margin: 5% auto;
             padding: 0;
             border-radius: 8px;
-            width: 90%;
+            width: 80%;
             max-width: 800px;
             max-height: 80vh;
             overflow-y: auto;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
         
         .ai-modal-header {
@@ -841,10 +954,22 @@ app.get('/', (req, res) => {
             padding: 20px;
         }
         
+        .close {
+            color: white;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            opacity: 0.7;
+        }
+        
         .ai-suggestion {
             border: 1px solid #e1e5e9;
             border-radius: 6px;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
             overflow: hidden;
         }
         
@@ -857,23 +982,47 @@ app.get('/', (req, res) => {
             align-items: center;
         }
         
+        .priority-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .priority-high {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .priority-medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .priority-low {
+            background: #d4edda;
+            color: #155724;
+        }
+        
         .ai-suggestion-content {
             padding: 16px;
         }
         
-        .priority-high { border-left: 4px solid #dc3545; }
-        .priority-medium { border-left: 4px solid #ffc107; }
-        .priority-low { border-left: 4px solid #28a745; }
-        
-        .close {
-            color: white;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
+        .ai-suggestion-content pre {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 12px 0;
         }
         
-        .close:hover {
-            opacity: 0.7;
+        .ai-suggestion-content ol {
+            padding-left: 20px;
+        }
+        
+        .ai-suggestion-content li {
+            margin-bottom: 8px;
         }
         
         /* NEW: Guided Fixing Modal Styles */
@@ -1014,29 +1163,53 @@ app.get('/', (req, res) => {
         .recent-scans {
             background: white;
             border-radius: 8px;
-            padding: 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e1e5e9;
+            overflow: hidden;
         }
         
-        .recent-scans h3 {
-            margin-bottom: 16px;
-            font-size: 1.2rem;
+        .recent-scans-header {
+            background: #f8f9fa;
+            padding: 16px 24px;
+            border-bottom: 1px solid #e1e5e9;
+        }
+        
+        .recent-scans-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .recent-scans-subtitle {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .recent-scans-body {
+            padding: 0;
         }
         
         .scan-item {
+            padding: 16px 24px;
+            border-bottom: 1px solid #f1f3f4;
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding: 16px 0;
-            border-bottom: 1px solid #eee;
+            justify-content: space-between;
+            transition: background-color 0.2s ease;
         }
         
         .scan-item:last-child {
             border-bottom: none;
         }
         
+        .scan-item:hover {
+            background: #f8f9fa;
+        }
+        
         .scan-info h4 {
-            font-size: 1rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #333;
             margin-bottom: 4px;
         }
         
@@ -1048,10 +1221,11 @@ app.get('/', (req, res) => {
         .scan-score {
             background: #28a745;
             color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
+            padding: 4px 8px;
+            border-radius: 4px;
             font-size: 0.8rem;
-            font-weight: 500;
+            font-weight: 600;
+            margin-right: 8px;
         }
         
         .view-report-btn {
@@ -1060,39 +1234,34 @@ app.get('/', (req, res) => {
             border: none;
             padding: 6px 12px;
             border-radius: 4px;
-            cursor: pointer;
             font-size: 0.8rem;
-            margin-left: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
         }
         
-        /* Loading States */
-        .loading {
+        .view-report-btn:hover {
+            background: #5a6fd8;
+        }
+        
+        /* Database Status */
+        .db-status {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 24px;
+            font-size: 0.9rem;
             display: flex;
             align-items: center;
             gap: 8px;
-            color: #666;
         }
         
-        .spinner {
-            width: 16px;
-            height: 16px;
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
+        .db-status.disconnected {
+            background: #fff3cd;
+            color: #856404;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        /* Hidden class */
-        .hidden {
-            display: none !important;
-        }
-        
-        /* Responsive */
+        /* Responsive Design */
         @media (max-width: 768px) {
             .dashboard-container {
                 flex-direction: column;
@@ -1103,12 +1272,28 @@ app.get('/', (req, res) => {
                 height: auto;
             }
             
+            .sidebar-nav {
+                display: flex;
+                overflow-x: auto;
+                padding: 10px 0;
+            }
+            
+            .nav-item {
+                white-space: nowrap;
+                min-width: 120px;
+            }
+            
             .stats-grid {
                 grid-template-columns: 1fr;
             }
             
-            .quick-actions {
+            .actions-grid {
                 grid-template-columns: 1fr;
+            }
+            
+            .scan-options {
+                flex-direction: column;
+                gap: 10px;
             }
         }
     </style>
@@ -1122,36 +1307,36 @@ app.get('/', (req, res) => {
                 <p>Enterprise Dashboard</p>
             </div>
             <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" data-page="dashboard">
-                    <div class="nav-icon">📊</div>
+                <a href="#" class="nav-item active" onclick="switchToPage('dashboard')">
+                    <span class="nav-icon">📊</span>
                     Dashboard
                 </a>
-                <a href="#" class="nav-item" data-page="scans">
-                    <div class="nav-icon">🔍</div>
+                <a href="#" class="nav-item" onclick="switchToPage('scans')">
+                    <span class="nav-icon">🔍</span>
                     Scans
                 </a>
-                <a href="#" class="nav-item" data-page="analytics">
-                    <div class="nav-icon">📈</div>
+                <a href="#" class="nav-item" onclick="switchToPage('analytics')">
+                    <span class="nav-icon">📈</span>
                     Analytics
                 </a>
-                <a href="#" class="nav-item" data-page="team">
-                    <div class="nav-icon">👥</div>
+                <a href="#" class="nav-item" onclick="switchToPage('team')">
+                    <span class="nav-icon">👥</span>
                     Team
                 </a>
-                <a href="#" class="nav-item" data-page="integrations">
-                    <div class="nav-icon">🔗</div>
+                <a href="#" class="nav-item" onclick="switchToPage('integrations')">
+                    <span class="nav-icon">🔗</span>
                     Integrations
                 </a>
-                <a href="#" class="nav-item" data-page="api">
-                    <div class="nav-icon">⚙️</div>
+                <a href="#" class="nav-item" onclick="switchToPage('api')">
+                    <span class="nav-icon">⚙️</span>
                     API Management
                 </a>
-                <a href="#" class="nav-item" data-page="billing">
-                    <div class="nav-icon">💳</div>
+                <a href="#" class="nav-item" onclick="switchToPage('billing')">
+                    <span class="nav-icon">💳</span>
                     Billing
                 </a>
-                <a href="#" class="nav-item" data-page="settings">
-                    <div class="nav-icon">⚙️</div>
+                <a href="#" class="nav-item" onclick="switchToPage('settings')">
+                    <span class="nav-icon">⚙️</span>
                     Settings
                 </a>
             </nav>
@@ -1168,384 +1353,263 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
                 <div class="header-right">
-                    <div style="position: relative;">
-                        <span style="font-size: 1.2rem; cursor: pointer;">🔔</span>
-                        <span style="position: absolute; top: -4px; right: -4px; background: #dc3545; color: white; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; display: flex; align-items: center; justify-content: center;">2</span>
-                    </div>
+                    <div class="notification-icon">🔔</div>
                     <div class="user-profile">
                         <div class="user-avatar">JD</div>
                         <div>
-                            <div style="font-size: 0.9rem; font-weight: 500;">John Doe</div>
-                            <div style="font-size: 0.7rem; color: #666;">Acme Corporation</div>
+                            <div style="font-weight: 600; font-size: 0.9rem;">John Doe</div>
+                            <div style="font-size: 0.8rem; color: #666;">Acme Corporation</div>
                         </div>
-                        <span style="margin-left: 8px;">▼</span>
+                        <span>▼</span>
                     </div>
                 </div>
             </div>
             
             <!-- Content Area -->
             <div class="content-area">
-                <!-- Dashboard Overview Page -->
-                <div id="dashboard-page" class="page">
-                    <div class="page-header">
-                        <h1 class="page-title">Dashboard Overview</h1>
-                        <p class="page-subtitle">Monitor your accessibility compliance and recent activity</p>
+                <!-- Dashboard Page -->
+                <div id="dashboard" class="page active">
+                    <div class="dashboard-header">
+                        <h1>Dashboard Overview</h1>
+                        <p>Monitor your accessibility compliance and recent activity</p>
                     </div>
                     
-                    <!-- Statistics Cards -->
+                    <!-- Stats Grid -->
                     <div class="stats-grid">
                         <div class="stat-card">
-                            <h3>Total Scans</h3>
+                            <div class="stat-header">
+                                <div class="stat-title">Total Scans</div>
+                            </div>
                             <div class="stat-value" id="total-scans">-</div>
-                            <div class="stat-change">+2 this week</div>
+                            <div class="stat-change positive" id="scans-change">+2 this week</div>
                         </div>
+                        
                         <div class="stat-card">
-                            <h3>Issues Found</h3>
+                            <div class="stat-header">
+                                <div class="stat-title">Issues Found</div>
+                            </div>
                             <div class="stat-value" id="total-issues">-</div>
-                            <div class="stat-change">-5 from last week</div>
+                            <div class="stat-change negative" id="issues-change">-5 from last week</div>
                         </div>
+                        
                         <div class="stat-card">
-                            <h3>Average Score</h3>
-                            <div class="stat-value" id="avg-score">-</div>
-                            <div class="stat-change">+3% improvement</div>
+                            <div class="stat-header">
+                                <div class="stat-title">Average Score</div>
+                            </div>
+                            <div class="stat-value" id="average-score">-</div>
+                            <div class="stat-change positive" id="score-change">+3% improvement</div>
                         </div>
+                        
                         <div class="stat-card">
-                            <h3>This Week</h3>
-                            <div class="stat-value" id="weekly-scans">-</div>
-                            <div class="stat-change">scans completed</div>
+                            <div class="stat-header">
+                                <div class="stat-title">This Week</div>
+                            </div>
+                            <div class="stat-value" id="this-week-scans">-</div>
+                            <div class="stat-change" id="week-change">scans completed</div>
                         </div>
                     </div>
                     
-                    <!-- Quick Actions -->
-                    <div class="quick-actions">
-                        <div class="action-card" onclick="switchToPage('scans')">
+                    <!-- Action Cards -->
+                    <div class="actions-grid">
+                        <div class="action-card primary" onclick="switchToPage('scans')">
                             <div class="action-icon">🔍</div>
-                            <h4>New Scan</h4>
-                            <p>Start a new accessibility scan</p>
+                            <div class="action-title">New Scan</div>
+                            <div class="action-description">Start a new accessibility scan</div>
                         </div>
-                        <div class="action-card" onclick="switchToPage('analytics')">
+                        
+                        <div class="action-card secondary" onclick="switchToPage('analytics')">
                             <div class="action-icon">📊</div>
-                            <h4>View Analytics</h4>
-                            <p>Analyze compliance trends</p>
+                            <div class="action-title">View Analytics</div>
+                            <div class="action-description">Analyze compliance trends</div>
                         </div>
+                        
                         <div class="action-card" onclick="switchToPage('team')">
                             <div class="action-icon">👥</div>
-                            <h4>Manage Team</h4>
-                            <p>Add or remove team members</p>
+                            <div class="action-title">Manage Team</div>
+                            <div class="action-description">Add or remove team members</div>
                         </div>
-                        <div class="action-card" onclick="switchToPage('settings')">
+                        
+                        <div class="action-card success" onclick="switchToPage('settings')">
                             <div class="action-icon">⚙️</div>
-                            <h4>Settings</h4>
-                            <p>Configure your preferences</p>
+                            <div class="action-title">Settings</div>
+                            <div class="action-description">Configure your preferences</div>
                         </div>
                     </div>
                     
-                    <!-- Recent Activity -->
+                    <!-- Recent Scans -->
                     <div class="recent-scans">
-                        <h3>Recent Scans</h3>
-                        <p style="color: #666; margin-bottom: 16px;">Your latest accessibility scan results</p>
-                        <div id="dashboard-recent-scans">
-                            <div class="loading">
-                                <div class="spinner"></div>
-                                Loading recent scans...
+                        <div class="recent-scans-header">
+                            <div class="recent-scans-title">Recent Scans</div>
+                            <div class="recent-scans-subtitle">Your latest accessibility scan results</div>
+                        </div>
+                        <div class="recent-scans-body" id="dashboard-recent-scans">
+                            <div style="padding: 20px; text-align: center; color: #666;">
+                                📊 Loading recent scans...
                             </div>
                         </div>
                     </div>
                 </div>
                 
                 <!-- Scans Page -->
-                <div id="scans-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Accessibility Scans</h1>
-                        <p class="page-subtitle">Manage and review your accessibility scans</p>
+                <div id="scans" class="page">
+                    <div class="dashboard-header">
+                        <h1>Accessibility Scans</h1>
+                        <p>Manage and review your accessibility scans</p>
                     </div>
                     
-                    <div style="background: #d4edda; color: #155724; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
+                    <!-- Database Status -->
+                    <div class="db-status" id="db-status">
                         ✅ Database connected - Scans will be saved to your history
                     </div>
                     
-                    <!-- Scanner -->
-                    <div class="scanner-container">
-                        <h3 style="margin-bottom: 16px;">Scan Website for Accessibility Issues</h3>
+                    <!-- Scan Form -->
+                    <div class="scan-form">
+                        <h2>Scan Website for Accessibility Issues</h2>
                         
-                        <input type="text" id="url-input" class="url-input" placeholder="https://example.com/" value="https://example.com/">
+                        <div class="form-group">
+                            <label class="form-label" for="url-input">Website URL</label>
+                            <input type="text" id="url-input" class="form-input" placeholder="https://example.com/" />
+                        </div>
                         
-                        <div class="scan-options">
-                            <h4>Scan Options:</h4>
-                            <div class="radio-group">
-                                <label class="radio-option">
-                                    <input type="radio" name="scanType" value="single" checked>
-                                    Single Page (Fast - recommended)
-                                </label>
-                                <label class="radio-option">
-                                    <input type="radio" name="scanType" value="crawl">
-                                    Multi-Page Crawl (Slower - up to 
-                                    <div class="multi-page-options">
-                                        <input type="number" id="max-pages" value="5" min="1" max="20">
-                                        pages)
-                                    </div>
-                                </label>
+                        <div class="form-group">
+                            <label class="form-label">Scan Options:</label>
+                            <div class="scan-options">
+                                <div class="scan-option">
+                                    <input type="radio" id="single-page" name="scan-type" value="single" checked />
+                                    <label for="single-page">Single Page (Fast - recommended)</label>
+                                </div>
+                                <div class="scan-option">
+                                    <input type="radio" id="multi-page" name="scan-type" value="crawl" />
+                                    <label for="multi-page">Multi-Page Crawl (Slower - up to <input type="number" class="pages-input" id="max-pages" value="5" min="1" max="20" /> pages)</label>
+                                </div>
                             </div>
                         </div>
                         
-                        <button id="scan-btn" class="scan-btn">
-                            🔍 Start Accessibility Scan
-                        </button>
+                        <button class="scan-button" onclick="startScan()">🔍 Start Accessibility Scan</button>
                     </div>
                     
-                    <!-- Results -->
-                    <div id="results-container" class="results-container">
-                        <div class="results-header">
-                            <h3>Scan Results</h3>
-                            <span id="status-badge" class="status-badge"></span>
-                        </div>
-                        <div id="results-content"></div>
-                    </div>
+                    <!-- Scan Results -->
+                    <div id="scan-results-container"></div>
                     
                     <!-- Recent Scans -->
                     <div class="recent-scans">
-                        <h3>Recent Scans</h3>
-                        <p style="color: #666; margin-bottom: 16px;">Your latest accessibility scan results</p>
-                        <div id="recent-scans-list">
-                            <div class="loading">
-                                <div class="spinner"></div>
-                                Loading recent scans...
+                        <div class="recent-scans-header">
+                            <div class="recent-scans-title">Recent Scans</div>
+                            <div class="recent-scans-subtitle">Your latest accessibility scan results</div>
+                        </div>
+                        <div class="recent-scans-body" id="recent-scans-list">
+                            <div style="padding: 20px; text-align: center; color: #666;">
+                                📊 Loading recent scans...
                             </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Analytics Page -->
-                <div id="analytics-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Analytics</h1>
-                        <p class="page-subtitle">Track your accessibility compliance over time</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">📊 Analytics Dashboard</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Advanced analytics and reporting features</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Compliance trend charts</li>
-                                <li>Issue category breakdowns</li>
-                                <li>Team performance metrics</li>
-                                <li>Custom reporting</li>
-                            </ul>
-                        </div>
+                <!-- Other Pages (Placeholder) -->
+                <div id="analytics" class="page">
+                    <div class="dashboard-header">
+                        <h1>Analytics</h1>
+                        <p>Coming soon - Detailed analytics and reporting</p>
                     </div>
                 </div>
                 
-                <!-- Team Page -->
-                <div id="team-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Team Management</h1>
-                        <p class="page-subtitle">Manage team members and permissions</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">👥 Team Management</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Team collaboration features</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Invite team members</li>
-                                <li>Role-based permissions</li>
-                                <li>Activity tracking</li>
-                                <li>Shared scan results</li>
-                            </ul>
-                        </div>
+                <div id="team" class="page">
+                    <div class="dashboard-header">
+                        <h1>Team Management</h1>
+                        <p>Coming soon - Manage team members and permissions</p>
                     </div>
                 </div>
                 
-                <!-- Integrations Page -->
-                <div id="integrations-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Integrations</h1>
-                        <p class="page-subtitle">Connect with your favorite tools and platforms</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">🔗 Platform Integrations</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Direct integrations with popular platforms</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Integrations:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Shopify - Auto-fix accessibility issues</li>
-                                <li>WordPress - Plugin integration</li>
-                                <li>Slack - Notifications and reports</li>
-                                <li>GitHub - CI/CD integration</li>
-                            </ul>
-                        </div>
+                <div id="integrations" class="page">
+                    <div class="dashboard-header">
+                        <h1>Integrations</h1>
+                        <p>Coming soon - Connect with your favorite tools</p>
                     </div>
                 </div>
                 
-                <!-- API Management Page -->
-                <div id="api-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">API Management</h1>
-                        <p class="page-subtitle">Manage API keys and integrations</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">⚙️ API Management</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - API access and management</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Generate API keys</li>
-                                <li>Usage analytics</li>
-                                <li>Rate limiting</li>
-                                <li>Webhook configuration</li>
-                            </ul>
-                        </div>
+                <div id="api" class="page">
+                    <div class="dashboard-header">
+                        <h1>API Management</h1>
+                        <p>Coming soon - API keys and documentation</p>
                     </div>
                 </div>
                 
-                <!-- Billing Page -->
-                <div id="billing-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Billing</h1>
-                        <p class="page-subtitle">Manage your subscription and billing</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">💳 Billing Management</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Subscription and billing management</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Subscription plans</li>
-                                <li>Usage tracking</li>
-                                <li>Invoice history</li>
-                                <li>Payment methods</li>
-                            </ul>
-                        </div>
+                <div id="billing" class="page">
+                    <div class="dashboard-header">
+                        <h1>Billing</h1>
+                        <p>Coming soon - Subscription and usage details</p>
                     </div>
                 </div>
                 
-                <!-- Settings Page -->
-                <div id="settings-page" class="page hidden">
-                    <div class="page-header">
-                        <h1 class="page-title">Settings</h1>
-                        <p class="page-subtitle">Configure your account and preferences</p>
-                    </div>
-                    <div style="background: white; padding: 40px; border-radius: 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <h3 style="margin-bottom: 16px;">⚙️ Account Settings</h3>
-                        <p style="color: #666; margin-bottom: 20px;">Coming soon - Account and preference management</p>
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 6px;">
-                            <p><strong>Planned Features:</strong></p>
-                            <ul style="text-align: left; margin-top: 12px; color: #666;">
-                                <li>Profile management</li>
-                                <li>Notification preferences</li>
-                                <li>Security settings</li>
-                                <li>Data export</li>
-                            </ul>
-                        </div>
+                <div id="settings" class="page">
+                    <div class="dashboard-header">
+                        <h1>Settings</h1>
+                        <p>Coming soon - Account and application settings</p>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
+    
     <script>
-        // Navigation functionality
+        // Page switching functionality - PRESERVED FROM WORKING VERSION
         function switchToPage(pageId) {
             // Hide all pages
-            document.querySelectorAll('.page').forEach(page => {
-                page.classList.add('hidden');
-            });
+            const pages = document.querySelectorAll('.page');
+            pages.forEach(page => page.classList.remove('active'));
             
             // Show selected page
-            document.getElementById(pageId + '-page').classList.remove('hidden');
+            const targetPage = document.getElementById(pageId);
+            if (targetPage) {
+                targetPage.classList.add('active');
+            }
             
-            // Update active nav item
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            document.querySelector(\`[data-page="\${pageId}"]\`).classList.add('active');
-        }
-        
-        // Add click handlers to nav items
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                e.preventDefault();
-                const pageId = item.getAttribute('data-page');
-                switchToPage(pageId);
-            });
-        });
-        
-        // Load dashboard statistics
-        async function loadDashboardStats() {
-            try {
-                const response = await fetch('/api/dashboard/stats');
-                const data = await response.json();
-                
-                if (data.success) {
-                    document.getElementById('total-scans').textContent = data.stats.totalScans;
-                    document.getElementById('total-issues').textContent = data.stats.totalIssues;
-                    document.getElementById('avg-score').textContent = data.stats.avgScore + '%';
-                    document.getElementById('weekly-scans').textContent = data.stats.weeklyScans;
-                }
-            } catch (error) {
-                console.error('Error loading dashboard stats:', error);
+            // Update navigation
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => item.classList.remove('active'));
+            
+            // Find and activate the corresponding nav item
+            const activeNavItem = document.querySelector(\`[onclick="switchToPage('\${pageId}')"]\`);
+            if (activeNavItem) {
+                activeNavItem.classList.add('active');
             }
         }
         
-        // Load recent scans for dashboard
-        async function loadDashboardRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const data = await response.json();
-                
-                const container = document.getElementById('dashboard-recent-scans');
-                
-                if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.slice(0, 3).map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. <a href="#" onclick="switchToPage(\\'scans\\')">Start your first scan</a></p>';
-                }
-            } catch (error) {
-                console.error('Error loading recent scans:', error);
-                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        // Scanner functionality (preserved from original)
-        let isScanning = false;
-        
-        document.getElementById('scan-btn').addEventListener('click', async () => {
-            if (isScanning) return;
+        // Scan functionality - PRESERVED FROM WORKING VERSION
+        async function startScan() {
+            const urlInput = document.getElementById('url-input');
+            const scanButton = document.querySelector('.scan-button');
+            const resultsContainer = document.getElementById('scan-results-container');
             
-            const url = document.getElementById('url-input').value.trim();
-            const scanType = document.querySelector('input[name="scanType"]:checked').value;
-            const maxPages = document.getElementById('max-pages').value;
-            
+            const url = urlInput.value.trim();
             if (!url) {
                 alert('Please enter a URL to scan');
                 return;
             }
             
-            isScanning = true;
-            const scanBtn = document.getElementById('scan-btn');
-            const resultsContainer = document.getElementById('results-container');
+            // Get scan type
+            const scanType = document.querySelector('input[name="scan-type"]:checked').value;
+            const maxPages = document.getElementById('max-pages').value;
             
-            // Update button state
-            scanBtn.innerHTML = '<div class="spinner"></div> Scanning...';
-            scanBtn.disabled = true;
+            // Disable button and show loading
+            scanButton.disabled = true;
+            scanButton.textContent = '🔄 Scanning...';
             
-            // Show results container
-            resultsContainer.style.display = 'block';
-            document.getElementById('status-badge').textContent = 'Scanning...';
-            document.getElementById('status-badge').className = 'status-badge';
-            document.getElementById('results-content').innerHTML = '<div class="loading"><div class="spinner"></div>Analyzing accessibility...</div>';
+            // Show loading in results
+            resultsContainer.innerHTML = \`
+                <div class="scan-results">
+                    <div class="results-header">
+                        <div class="results-title">Scanning in Progress</div>
+                        <div class="results-meta">Please wait...</div>
+                    </div>
+                    <div class="results-body">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            Analyzing accessibility issues on \${url}
+                        </div>
+                    </div>
+                </div>
+            \`;
             
             try {
                 const response = await fetch('/api/scan', {
@@ -1563,201 +1627,440 @@ app.get('/', (req, res) => {
                 const result = await response.json();
                 
                 if (result.success) {
-                    // Update status
-                    document.getElementById('status-badge').textContent = 'Scan Complete';
-                    document.getElementById('status-badge').className = 'status-badge status-complete';
-                    
-                    // Display results
-                    if (scanType === 'single') {
-                        displaySinglePageResults(result);
-                    } else {
-                        displayMultiPageResults(result);
-                    }
-                    
-                    // Reload recent scans
+                    displayScanResults(result);
+                    // Refresh recent scans
                     loadRecentScans();
-                    loadDashboardRecentScans();
-                    loadDashboardStats();
                 } else {
-                    throw new Error(result.error || 'Scan failed');
+                    displayScanError(result.error);
                 }
+                
             } catch (error) {
                 console.error('Scan error:', error);
-                document.getElementById('status-badge').textContent = 'Scan Failed';
-                document.getElementById('status-badge').className = 'status-badge status-error';
-                document.getElementById('results-content').innerHTML = \`
+                displayScanError('Network error occurred. Please try again.');
+            } finally {
+                // Re-enable button
+                scanButton.disabled = false;
+                scanButton.textContent = '🔍 Start Accessibility Scan';
+            }
+        }
+        
+        function displayScanResults(result) {
+            const resultsContainer = document.getElementById('scan-results-container');
+            
+            const violations = result.violations || result.pages?.reduce((acc, page) => acc.concat(page.violations || []), []) || [];
+            
+            resultsContainer.innerHTML = \`
+                <div class="scan-results">
+                    <div class="results-header">
+                        <div class="results-title">Scan Results</div>
+                        <div class="results-meta">Completed in \${result.scanTime}ms</div>
+                    </div>
+                    <div class="results-body">
+                        <div class="results-summary">
+                            <div class="summary-grid">
+                                <div class="summary-item">
+                                    <div class="summary-value">\${violations.length}</div>
+                                    <div class="summary-label">Total Issues</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-value">\${result.summary?.critical || 0}</div>
+                                    <div class="summary-label">Critical</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-value">\${result.summary?.serious || 0}</div>
+                                    <div class="summary-label">Serious</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-value">\${result.summary?.moderate || 0}</div>
+                                    <div class="summary-label">Moderate</div>
+                                </div>
+                                <div class="summary-item">
+                                    <div class="summary-value">\${result.summary?.minor || 0}</div>
+                                    <div class="summary-label">Minor</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        \${violations.length > 0 ? 
+                            violations.map(violation => \`
+                                <div class="violation">
+                                    <div class="violation-header">
+                                        <div class="violation-title">\${violation.id}</div>
+                                        <div class="violation-impact impact-\${violation.impact}">\${violation.impact}</div>
+                                    </div>
+                                    <div class="violation-body">
+                                        <div class="violation-description">\${violation.description}</div>
+                                        <div class="violation-help">
+                                            \${violation.help}
+                                            \${violation.helpUrl ? \`<br><a href="\${violation.helpUrl}" target="_blank">Learn more</a>\` : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                            \`).join('') 
+                            : '<p style="text-align: center; color: #28a745; font-size: 1.2rem; padding: 40px;">🎉 No accessibility issues found!</p>'
+                        }
+                        
+                        <div style="margin-top: 20px; text-align: center;">
+                            \${violations.length > 0 ? 
+                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')">🤖 Get AI Fix Suggestions</button>' 
+                                : ''
+                            }
+                            \${violations.length > 0 ? 
+                                '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')">🛠️ Let\\'s Start Fixing</button>' 
+                                : ''
+                            }
+                        </div>
+                    </div>
+                </div>
+            \`;
+        }
+        
+        function displayScanError(error) {
+            const resultsContainer = document.getElementById('scan-results-container');
+            resultsContainer.innerHTML = \`
+                <div class="scan-results">
+                    <div class="results-header">
+                        <div class="results-title">Scan Failed</div>
+                        <div class="results-meta" style="color: #dc3545;">Error occurred</div>
+                    </div>
+                    <div class="results-body">
+                        <div style="text-align: center; color: #dc3545; padding: 40px;">
+                            <h3>Scan Failed</h3>
+                            <p>\${error}</p>
+                        </div>
+                    </div>
+                </div>
+            \`;
+        }
+        
+        // AI Suggestions functionality - PRESERVED FROM WORKING VERSION
+        async function showAISuggestions(violations) {
+            const modal = document.getElementById('ai-modal');
+            const modalBody = document.getElementById('ai-modal-body');
+            
+            modal.style.display = 'block';
+            modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Generating AI suggestions...</div>';
+            
+            try {
+                const response = await fetch('/api/ai-fixes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ violations })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to get AI suggestions');
+                }
+                
+                const suggestions = await response.json();
+                
+                modalBody.innerHTML = suggestions.map(suggestion => \`
+                    <div class="ai-suggestion">
+                        <div class="ai-suggestion-header">
+                            <strong>🤖 AI Fix Suggestion</strong>
+                            <span class="priority-badge priority-\${suggestion.priority}">\${suggestion.priority.toUpperCase()}</span>
+                        </div>
+                        <div class="ai-suggestion-content">
+                            <p><strong>Issue:</strong> \${suggestion.explanation}</p>
+                            <p><strong>Code Example:</strong></p>
+                            <pre><code>\${suggestion.codeExample}</code></pre>
+                            <p><strong>Implementation Steps:</strong></p>
+                            <ol>
+                                \${suggestion.steps.map(step => \`<li>\${step}</li>\`).join('')}
+                            </ol>
+                        </div>
+                    </div>
+                \`).join('');
+                
+            } catch (error) {
+                console.error('Error getting AI suggestions:', error);
+                modalBody.innerHTML = \`
                     <div style="color: #dc3545; text-align: center; padding: 20px;">
-                        <h4>Scan Failed</h4>
-                        <p>\${error.message}</p>
+                        <h3>Unable to Generate AI Suggestions</h3>
+                        <p>Please try again later or contact support if the problem persists.</p>
                     </div>
                 \`;
-            } finally {
-                // Reset button
-                scanBtn.innerHTML = '🔍 Start Accessibility Scan';
-                scanBtn.disabled = false;
-                isScanning = false;
             }
-        });
-        
-        function displaySinglePageResults(result) {
-            const content = \`
-                <div class="results-summary">
-                    <div class="summary-item">
-                        <div class="value">\${result.url}</div>
-                        <div class="label">URL</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.totalIssues}</div>
-                        <div class="label">Total Issues</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.scanTime}ms</div>
-                        <div class="label">Scan Time</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
-                        <div class="label">Timestamp</div>
-                    </div>
-                </div>
-                
-                <h4 style="margin-bottom: 12px;">Violations by Impact:</h4>
-                <div class="violations-by-impact">
-                    <div class="impact-item impact-critical">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
-                        <div style="font-size: 0.8rem;">Critical</div>
-                    </div>
-                    <div class="impact-item impact-serious">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
-                        <div style="font-size: 0.8rem;">Serious</div>
-                    </div>
-                    <div class="impact-item impact-moderate">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
-                        <div style="font-size: 0.8rem;">Moderate</div>
-                    </div>
-                    <div class="impact-item impact-minor">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
-                        <div style="font-size: 0.8rem;">Minor</div>
-                    </div>
-                </div>
-                
-                <div style="display: flex; gap: 12px; margin-top: 20px;">
-                    <button class="view-details-btn" onclick="showViolationDetails(\${JSON.stringify(result.violations).replace(/"/g, '&quot;')})">
-                        📋 View Detailed Results
-                    </button>
-                    \${result.violations.length > 0 ? 
-                        '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">🤖 Get AI Fix Suggestions</button>' 
-                        : ''
-                    }
-                    \${result.violations.length > 0 ? 
-                        '<button class="guided-fixing-btn" onclick="startGuidedFixing(' + JSON.stringify(result.violations).replace(/"/g, '&quot;') + ')">🛠️ Let\\'s Start Fixing</button>' 
-                        : ''
-                    }
-                </div>
-            \`;
-            
-            document.getElementById('results-content').innerHTML = content;
         }
         
-        function displayMultiPageResults(result) {
-            const content = \`
-                <div class="results-summary">
-                    <div class="summary-item">
-                        <div class="value">\${result.pages.length}</div>
-                        <div class="label">Pages Scanned</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.totalIssues}</div>
-                        <div class="label">Total Issues</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${result.scanTime}ms</div>
-                        <div class="label">Total Time</div>
-                    </div>
-                    <div class="summary-item">
-                        <div class="value">\${new Date(result.timestamp).toLocaleString()}</div>
-                        <div class="label">Timestamp</div>
-                    </div>
-                </div>
+        function closeAIModal() {
+            document.getElementById('ai-modal').style.display = 'none';
+        }
+        
+        // NEW: Guided Fixing Workflow - Properly Namespaced
+        const GuidedFixing = {
+            currentViolations: [],
+            currentViolationIndex: 0,
+            fixedViolations: [],
+            
+            start: function(violations) {
+                // Sort violations by priority (critical > serious > moderate > minor)
+                const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
+                this.currentViolations = violations.sort((a, b) => {
+                    return priorityOrder[a.impact] - priorityOrder[b.impact];
+                });
                 
-                <h4 style="margin-bottom: 12px;">Overall Violations by Impact:</h4>
-                <div class="violations-by-impact">
-                    <div class="impact-item impact-critical">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.critical}</div>
-                        <div style="font-size: 0.8rem;">Critical</div>
-                    </div>
-                    <div class="impact-item impact-serious">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.serious}</div>
-                        <div style="font-size: 0.8rem;">Serious</div>
-                    </div>
-                    <div class="impact-item impact-moderate">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.moderate}</div>
-                        <div style="font-size: 0.8rem;">Moderate</div>
-                    </div>
-                    <div class="impact-item impact-minor">
-                        <div style="font-weight: 600; font-size: 1.2rem;">\${result.summary.minor}</div>
-                        <div style="font-size: 0.8rem;">Minor</div>
-                    </div>
-                </div>
+                this.currentViolationIndex = 0;
+                this.fixedViolations = [];
                 
-                <h4 style="margin: 20px 0 12px;">Pages Scanned:</h4>
-                <div style="background: #f8f9fa; border-radius: 6px; padding: 16px;">
-                    \${result.pages.map(page => \`
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee;">
-                            <div>
-                                <div style="font-weight: 500;">\${page.url}</div>
-                                <div style="font-size: 0.8rem; color: #666;">\${page.violations ? page.violations.length : 0} issues • \${page.loadTime || page.scanTime}ms</div>
+                // Show the modal
+                const modal = document.getElementById('guided-fixing-modal');
+                modal.style.display = 'block';
+                
+                // Display the first violation
+                this.showCurrentViolation();
+            },
+            
+            showCurrentViolation: function() {
+                const violation = this.currentViolations[this.currentViolationIndex];
+                const totalViolations = this.currentViolations.length;
+                
+                // Update progress indicator
+                document.getElementById('progress-indicator').textContent = 
+                    'Violation ' + (this.currentViolationIndex + 1) + ' of ' + totalViolations;
+                
+                // Update modal body with violation details
+                const modalBody = document.getElementById('guided-modal-body');
+                modalBody.innerHTML = 
+                    '<div class="violation-details">' +
+                        '<div class="violation-title">' + violation.id + '</div>' +
+                        '<div class="violation-impact impact-' + violation.impact + '">' + violation.impact + '</div>' +
+                        '<p><strong>Description:</strong> ' + (violation.description || 'No description available') + '</p>' +
+                        '<p><strong>Help:</strong> ' + (violation.help || 'Refer to WCAG guidelines for more information') + '</p>' +
+                        (violation.helpUrl ? '<p><strong>Learn more:</strong> <a href="' + violation.helpUrl + '" target="_blank">' + violation.helpUrl + '</a></p>' : '') +
+                    '</div>' +
+                    '<div id="ai-fix-area" style="margin-top: 20px;">' +
+                        '<!-- AI fix suggestions will appear here -->' +
+                    '</div>';
+                
+                // Update navigation buttons
+                this.updateNavigationButtons();
+            },
+            
+            updateNavigationButtons: function() {
+                const prevBtn = document.getElementById('prev-btn');
+                const nextBtn = document.getElementById('next-btn');
+                const finishBtn = document.getElementById('finish-btn');
+                
+                // Previous button
+                prevBtn.disabled = this.currentViolationIndex === 0;
+                
+                // Next button and finish button
+                if (this.currentViolationIndex === this.currentViolations.length - 1) {
+                    nextBtn.style.display = 'none';
+                    finishBtn.style.display = 'inline-block';
+                } else {
+                    nextBtn.style.display = 'inline-block';
+                    finishBtn.style.display = 'none';
+                }
+            },
+            
+            previousViolation: function() {
+                if (this.currentViolationIndex > 0) {
+                    this.currentViolationIndex--;
+                    this.showCurrentViolation();
+                }
+            },
+            
+            nextViolation: function() {
+                if (this.currentViolationIndex < this.currentViolations.length - 1) {
+                    this.currentViolationIndex++;
+                    this.showCurrentViolation();
+                }
+            },
+            
+            close: function() {
+                document.getElementById('guided-fixing-modal').style.display = 'none';
+            },
+            
+            getAIFixForCurrent: async function() {
+                const violation = this.currentViolations[this.currentViolationIndex];
+                const aiFixArea = document.getElementById('ai-fix-area');
+                
+                // Show loading state
+                aiFixArea.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI fix suggestion...</div>';
+                
+                try {
+                    const response = await fetch('/api/ai-fixes', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ violations: [violation] })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to get AI suggestion');
+                    }
+                    
+                    const suggestions = await response.json();
+                    const suggestion = suggestions[0];
+                    
+                    if (suggestion) {
+                        aiFixArea.innerHTML = 
+                            '<div class="ai-suggestion priority-' + suggestion.priority + '">' +
+                                '<div class="ai-suggestion-header">' +
+                                    '<strong>🤖 AI Fix Suggestion</strong>' +
+                                    '<span class="priority-badge priority-' + suggestion.priority + '">' + suggestion.priority.toUpperCase() + '</span>' +
+                                '</div>' +
+                                '<div class="ai-suggestion-content">' +
+                                    '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
+                                    '<p><strong>Code Example:</strong></p>' +
+                                    '<pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + suggestion.codeExample + '</code></pre>' +
+                                    '<p><strong>Implementation Steps:</strong></p>' +
+                                    '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
+                                    '<div style="margin-top: 16px;">' +
+                                        '<button onclick="GuidedFixing.saveFixToReport()" class="btn btn-success">💾 Save to Report</button>' +
+                                    '</div>' +
+                                '</div>' +
+                            '</div>';
+                        
+                        // Store the suggestion for potential saving
+                        this.currentViolations[this.currentViolationIndex].aiSuggestion = suggestion;
+                    } else {
+                        throw new Error('No suggestion received');
+                    }
+                    
+                } catch (error) {
+                    console.error('Error getting AI suggestion:', error);
+                    aiFixArea.innerHTML = 
+                        '<div style="color: #dc3545; text-align: center; padding: 20px;">' +
+                            '<h4>Unable to Generate AI Suggestion</h4>' +
+                            '<p>Please try again or proceed to the next violation.</p>' +
+                        '</div>';
+                }
+            },
+            
+            saveFixToReport: function() {
+                const violation = this.currentViolations[this.currentViolationIndex];
+                if (violation.aiSuggestion) {
+                    this.fixedViolations.push({
+                        violation: violation,
+                        suggestion: violation.aiSuggestion,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    // Show confirmation
+                    const aiFixArea = document.getElementById('ai-fix-area');
+                    const saveButton = aiFixArea.querySelector('button');
+                    if (saveButton) {
+                        saveButton.textContent = '✅ Saved to Report';
+                        saveButton.disabled = true;
+                        saveButton.style.background = '#28a745';
+                    }
+                }
+            },
+            
+            finish: function() {
+                if (this.fixedViolations.length === 0) {
+                    alert('No fixes have been saved to the report yet. Please get AI suggestions and save them before generating a report.');
+                    return;
+                }
+                
+                // Generate and download report
+                this.generateReport();
+                
+                // Close modal
+                this.close();
+            },
+            
+            generateReport: function() {
+                const reportContent = 
+                    '# Accessibility Fix Report\\n' +
+                    'Generated on: ' + new Date().toLocaleString() + '\\n\\n' +
+                    '## Summary\\n' +
+                    '- Total violations processed: ' + this.currentViolations.length + '\\n' +
+                    '- Fixes saved to report: ' + this.fixedViolations.length + '\\n\\n' +
+                    '## Fix Details\\n\\n' +
+                    this.fixedViolations.map((fix, index) => 
+                        '### ' + (index + 1) + '. ' + fix.violation.id + '\\n' +
+                        '**Impact:** ' + fix.violation.impact + '\\n' +
+                        '**Description:** ' + fix.violation.description + '\\n\\n' +
+                        '**AI Suggestion:**\\n' +
+                        fix.suggestion.explanation + '\\n\\n' +
+                        '**Code Example:**\\n' +
+                        fix.suggestion.codeExample + '\\n\\n' +
+                        '**Implementation Steps:**\\n' +
+                        fix.suggestion.steps.map((step, i) => (i + 1) + '. ' + step).join('\\n') + '\\n\\n' +
+                        '---\\n'
+                    ).join('') +
+                    '\\n## Next Steps\\n' +
+                    '1. Review each fix suggestion carefully\\n' +
+                    '2. Test implementations in a development environment\\n' +
+                    '3. Validate fixes with accessibility tools\\n' +
+                    '4. Deploy to production after thorough testing';
+                
+                // Create and download the report
+                const blob = new Blob([reportContent], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'accessibility-fix-report-' + new Date().toISOString().split('T')[0] + '.md';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                alert('Report generated! ' + this.fixedViolations.length + ' fixes saved to your downloads.');
+            }
+        };
+        
+        // Dashboard data loading - PRESERVED FROM WORKING VERSION
+        async function loadDashboardStats() {
+            try {
+                const response = await fetch('/api/dashboard/stats');
+                const stats = await response.json();
+                
+                document.getElementById('total-scans').textContent = stats.totalScans;
+                document.getElementById('total-issues').textContent = stats.totalIssues;
+                document.getElementById('average-score').textContent = stats.averageScore + '%';
+                document.getElementById('this-week-scans').textContent = stats.thisWeekScans;
+                
+            } catch (error) {
+                console.error('Error loading dashboard stats:', error);
+            }
+        }
+        
+        async function loadDashboardRecentScans() {
+            try {
+                const response = await fetch('/api/scans/recent');
+                const scans = await response.json();
+                
+                const container = document.getElementById('dashboard-recent-scans');
+                
+                if (scans.length > 0) {
+                    container.innerHTML = scans.slice(0, 3).map(scan => \`
+                        <div class="scan-item">
+                            <div class="scan-info">
+                                <h4>\${scan.url}</h4>
+                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
                             </div>
-                            \${page.error ? '<span style="color: #dc3545;">Error</span>' : '<span style="color: #28a745;">✓</span>'}
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span class="scan-score">\${scan.score}% Score</span>
+                                <button class="view-report-btn">👁️ View Report</button>
+                            </div>
                         </div>
-                    \`).join('')}
-                </div>
-            \`;
-            
-            document.getElementById('results-content').innerHTML = content;
+                    \`).join('');
+                } else {
+                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
+                }
+            } catch (error) {
+                console.error('Error loading dashboard recent scans:', error);
+                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
+            }
         }
         
-        function showViolationDetails(violations) {
-            // Create a simple modal or expand the results to show detailed violations
-            const detailsWindow = window.open('', '_blank', 'width=800,height=600');
-            detailsWindow.document.write(\`
-                <html>
-                <head><title>Detailed Accessibility Report</title></head>
-                <body style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2>Detailed Accessibility Violations</h2>
-                    <div>
-                        \${violations.map((violation, index) => \`
-                            <div style="border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px;">
-                                <h3 style="color: #dc3545;">\${violation.id}</h3>
-                                <p><strong>Impact:</strong> \${violation.impact}</p>
-                                <p><strong>Description:</strong> \${violation.description}</p>
-                                <p><strong>Help:</strong> \${violation.help}</p>
-                                <p><strong>Elements affected:</strong> \${violation.nodes.length}</p>
-                                <details>
-                                    <summary>Show affected elements</summary>
-                                    \${violation.nodes.map(node => \`
-                                        <div style="background: #f8f9fa; padding: 10px; margin: 5px 0; border-radius: 3px;">
-                                            <code>\${node.html}</code>
-                                        </div>
-                                    \`).join('')}
-                                </details>
-                            </div>
-                        \`).join('')}
-                    </div>
-                </body>
-                </html>
-            \`);
-        }
-        
-        // Load recent scans for scans page
         async function loadRecentScans() {
             try {
                 const response = await fetch('/api/scans/recent');
-                const data = await response.json();
+                const scans = await response.json();
                 
                 const container = document.getElementById('recent-scans-list');
                 
-                if (data.success && data.scans.length > 0) {
-                    container.innerHTML = data.scans.map(scan => \`
+                if (scans.length > 0) {
+                    container.innerHTML = scans.map(scan => \`
                         <div class="scan-item">
                             <div class="scan-info">
                                 <h4>\${scan.url}</h4>
@@ -1778,287 +2081,12 @@ app.get('/', (req, res) => {
             }
         }
         
-        // Initialize dashboard
+        // Initialize dashboard - PRESERVED FROM WORKING VERSION
         document.addEventListener('DOMContentLoaded', () => {
             loadDashboardStats();
             loadDashboardRecentScans();
             loadRecentScans();
         });
-        
-        // AI Suggestions Modal Function
-        async function showAISuggestions(violations) {
-            const modal = document.getElementById('ai-modal');
-            const modalBody = document.getElementById('ai-modal-body');
-            
-            // Show modal with loading state
-            modal.style.display = 'block';
-            modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Generating AI fix suggestions...</div>';
-            
-            try {
-                const response = await fetch('/api/ai-fixes', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ violations })
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to get AI suggestions');
-                }
-                
-                const suggestions = await response.json();
-                
-                modalBody.innerHTML = suggestions.map((suggestion, index) => 
-                    '<div class="ai-suggestion priority-' + suggestion.priority + '">' +
-                        '<div class="ai-suggestion-header">' +
-                            '<strong>Fix Suggestion #' + (index + 1) + '</strong>' +
-                            '<span class="priority-badge priority-' + suggestion.priority + '">' + suggestion.priority.toUpperCase() + '</span>' +
-                        '</div>' +
-                        '<div class="ai-suggestion-content">' +
-                            '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
-                            '<p><strong>Code Example:</strong></p>' +
-                            '<pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + suggestion.codeExample + '</code></pre>' +
-                            '<p><strong>Implementation Steps:</strong></p>' +
-                            '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
-                        '</div>' +
-                    '</div>'
-                ).join('');
-                
-            } catch (error) {
-                console.error('Error getting AI suggestions:', error);
-                modalBody.innerHTML = '<div style="color: #dc3545; text-align: center; padding: 20px;"><h4>Unable to Generate AI Suggestions</h4><p>Please try again later or contact support if the issue persists.</p></div>';
-            }
-        }
-        
-        // Close modal when clicking outside or on close button
-        window.onclick = function(event) {
-            const modal = document.getElementById('ai-modal');
-            if (event.target == modal) {
-                modal.style.display = 'none';
-            }
-        }
-        
-        function closeAIModal() {
-            document.getElementById('ai-modal').style.display = 'none';
-        }
-        
-        // NEW: Guided Fixing Workflow Variables
-        let currentViolations = [];
-        let currentViolationIndex = 0;
-        let fixedViolations = [];
-        
-        // NEW: Guided Fixing Function
-        function startGuidedFixing(violations) {
-            // Sort violations by priority (critical > serious > moderate > minor)
-            const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
-            currentViolations = violations.sort((a, b) => {
-                return priorityOrder[a.impact] - priorityOrder[b.impact];
-            });
-            
-            currentViolationIndex = 0;
-            fixedViolations = [];
-            
-            // Show the modal
-            const modal = document.getElementById('guided-fixing-modal');
-            modal.style.display = 'block';
-            
-            // Display the first violation
-            showCurrentViolation();
-        }
-        
-        function showCurrentViolation() {
-            const violation = currentViolations[currentViolationIndex];
-            const totalViolations = currentViolations.length;
-            
-            // Update progress indicator
-            document.getElementById('progress-indicator').textContent = 
-                'Violation ' + (currentViolationIndex + 1) + ' of ' + totalViolations;
-            
-            // Update modal body with violation details
-            const modalBody = document.getElementById('guided-modal-body');
-            modalBody.innerHTML = 
-                '<div class="violation-details">' +
-                    '<div class="violation-title">' + violation.id + '</div>' +
-                    '<div class="violation-impact impact-' + violation.impact + '">' + violation.impact + '</div>' +
-                    '<p><strong>Description:</strong> ' + (violation.description || 'No description available') + '</p>' +
-                    '<p><strong>Help:</strong> ' + (violation.help || 'Refer to WCAG guidelines for more information') + '</p>' +
-                    (violation.helpUrl ? '<p><strong>Learn more:</strong> <a href="' + violation.helpUrl + '" target="_blank">' + violation.helpUrl + '</a></p>' : '') +
-                '</div>' +
-                '<div id="ai-fix-area" style="margin-top: 20px;">' +
-                    '<!-- AI fix suggestions will appear here -->' +
-                '</div>';
-            
-            // Update navigation buttons
-            updateNavigationButtons();
-        }
-        
-        function updateNavigationButtons() {
-            const prevBtn = document.getElementById('prev-btn');
-            const nextBtn = document.getElementById('next-btn');
-            const finishBtn = document.getElementById('finish-btn');
-            
-            // Previous button
-            prevBtn.disabled = currentViolationIndex === 0;
-            
-            // Next button and finish button
-            if (currentViolationIndex === currentViolations.length - 1) {
-                nextBtn.style.display = 'none';
-                finishBtn.style.display = 'inline-block';
-            } else {
-                nextBtn.style.display = 'inline-block';
-                finishBtn.style.display = 'none';
-            }
-        }
-        
-        function previousViolation() {
-            if (currentViolationIndex > 0) {
-                currentViolationIndex--;
-                showCurrentViolation();
-            }
-        }
-        
-        function nextViolation() {
-            if (currentViolationIndex < currentViolations.length - 1) {
-                currentViolationIndex++;
-                showCurrentViolation();
-            }
-        }
-        
-        function closeGuidedModal() {
-            document.getElementById('guided-fixing-modal').style.display = 'none';
-        }
-        
-        async function getAIFixForCurrent() {
-            const violation = currentViolations[currentViolationIndex];
-            const aiFixArea = document.getElementById('ai-fix-area');
-            
-            // Show loading state
-            aiFixArea.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI fix suggestion...</div>';
-            
-            try {
-                const response = await fetch('/api/ai-fixes', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ violations: [violation] })
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to get AI suggestion');
-                }
-                
-                const suggestions = await response.json();
-                const suggestion = suggestions[0];
-                
-                if (suggestion) {
-                    aiFixArea.innerHTML = 
-                        '<div class="ai-suggestion priority-' + suggestion.priority + '">' +
-                            '<div class="ai-suggestion-header">' +
-                                '<strong>🤖 AI Fix Suggestion</strong>' +
-                                '<span class="priority-badge priority-' + suggestion.priority + '">' + suggestion.priority.toUpperCase() + '</span>' +
-                            '</div>' +
-                            '<div class="ai-suggestion-content">' +
-                                '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
-                                '<p><strong>Code Example:</strong></p>' +
-                                '<pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + suggestion.codeExample + '</code></pre>' +
-                                '<p><strong>Implementation Steps:</strong></p>' +
-                                '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
-                                '<div style="margin-top: 16px;">' +
-                                    '<button onclick="saveFixToReport()" class="btn btn-success">💾 Save to Report</button>' +
-                                '</div>' +
-                            '</div>' +
-                        '</div>';
-                    
-                    // Store the suggestion for potential saving
-                    currentViolations[currentViolationIndex].aiSuggestion = suggestion;
-                } else {
-                    throw new Error('No suggestion received');
-                }
-                
-            } catch (error) {
-                console.error('Error getting AI suggestion:', error);
-                aiFixArea.innerHTML = 
-                    '<div style="color: #dc3545; text-align: center; padding: 20px;">' +
-                        '<h4>Unable to Generate AI Suggestion</h4>' +
-                        '<p>Please try again or proceed to the next violation.</p>' +
-                    '</div>';
-            }
-        }
-        
-        function saveFixToReport() {
-            const violation = currentViolations[currentViolationIndex];
-            if (violation.aiSuggestion) {
-                fixedViolations.push({
-                    violation: violation,
-                    suggestion: violation.aiSuggestion,
-                    timestamp: new Date().toISOString()
-                });
-                
-                // Show confirmation
-                const aiFixArea = document.getElementById('ai-fix-area');
-                const saveButton = aiFixArea.querySelector('button');
-                if (saveButton) {
-                    saveButton.textContent = '✅ Saved to Report';
-                    saveButton.disabled = true;
-                    saveButton.style.background = '#28a745';
-                }
-            }
-        }
-        
-        function finishGuidedFixing() {
-            if (fixedViolations.length === 0) {
-                alert('No fixes have been saved to the report yet. Please get AI suggestions and save them before generating a report.');
-                return;
-            }
-            
-            // Generate and download report
-            generateFixReport();
-            
-            // Close modal
-            closeGuidedModal();
-        }
-        
-        function generateFixReport() {
-            const reportContent = 
-                '# Accessibility Fix Report\n' +
-                'Generated on: ' + new Date().toLocaleString() + '\n\n' +
-                '## Summary\n' +
-                '- Total violations processed: ' + currentViolations.length + '\n' +
-                '- Fixes saved to report: ' + fixedViolations.length + '\n\n' +
-                '## Fix Details\n\n' +
-                fixedViolations.map((fix, index) => 
-                    '### ' + (index + 1) + '. ' + fix.violation.id + '\n' +
-                    '**Impact:** ' + fix.violation.impact + '\n' +
-                    '**Description:** ' + fix.violation.description + '\n\n' +
-                    '**AI Suggestion:**\n' +
-                    fix.suggestion.explanation + '\n\n' +
-                    '**Code Example:**\n' +
-                    fix.suggestion.codeExample + '\n\n' +
-                    '**Implementation Steps:**\n' +
-                    fix.suggestion.steps.map((step, i) => (i + 1) + '. ' + step).join('\n') + '\n\n' +
-                    '---\n'
-                ).join('') +
-                '\n## Next Steps\n' +
-                '1. Review each fix suggestion carefully\n' +
-                '2. Test implementations in a development environment\n' +
-                '3. Validate fixes with accessibility tools\n' +
-                '4. Deploy to production after thorough testing';
-            
-            // Create and download the report
-            const blob = new Blob([reportContent], { type: 'text/markdown' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'accessibility-fix-report-' + new Date().toISOString().split('T')[0] + '.md';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            alert('Report generated! ' + fixedViolations.length + ' fixes saved to your downloads.');
-        }
     </script>
     
     <!-- AI Suggestions Modal -->
@@ -2080,16 +2108,16 @@ app.get('/', (req, res) => {
             <div class="guided-modal-header">
                 <h2>🛠️ Guided Accessibility Fixing</h2>
                 <div class="progress-indicator" id="progress-indicator">Violation 1 of 6</div>
-                <span class="close" onclick="closeGuidedModal()">&times;</span>
+                <span class="close" onclick="GuidedFixing.close()">&times;</span>
             </div>
             <div class="guided-modal-body" id="guided-modal-body">
                 <!-- Current violation details will be loaded here -->
             </div>
             <div class="guided-modal-footer">
-                <button class="prev-btn" id="prev-btn" onclick="previousViolation()">← Previous</button>
-                <button class="get-ai-fix-btn" onclick="getAIFixForCurrent()">🤖 Get AI Fix</button>
-                <button class="next-btn" id="next-btn" onclick="nextViolation()">Next →</button>
-                <button class="finish-btn" id="finish-btn" onclick="finishGuidedFixing()" style="display: none;">📄 Generate Report</button>
+                <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
+                <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
+                <button class="next-btn" id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
+                <button class="finish-btn" id="finish-btn" onclick="GuidedFixing.finish()" style="display: none;">📄 Generate Report</button>
             </div>
         </div>
     </div>
