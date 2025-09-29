@@ -2041,7 +2041,7 @@ async function scanSinglePage(browser, url) {
         });
         
         console.log('⏳ Waiting for page to stabilize...');
-        await page.waitForTimeout(2000);
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         console.log('💉 Injecting axe-core...');
         await page.addScriptTag({
