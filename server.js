@@ -876,6 +876,140 @@ app.get('/', (req, res) => {
             opacity: 0.7;
         }
         
+        /* NEW: Guided Fixing Modal Styles */
+        .guided-modal {
+            display: none;
+            position: fixed;
+            z-index: 1001;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .guided-modal-content {
+            background-color: white;
+            margin: 3% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 900px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .guided-modal-header {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .progress-indicator {
+            background: rgba(255,255,255,0.2);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .guided-modal-body {
+            padding: 24px;
+            min-height: 300px;
+        }
+        
+        .guided-modal-footer {
+            padding: 20px 24px;
+            border-top: 1px solid #e1e5e9;
+            display: flex;
+            gap: 12px;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .prev-btn, .next-btn {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .prev-btn:hover, .next-btn:hover {
+            background: #5a6268;
+        }
+        
+        .prev-btn:disabled, .next-btn:disabled {
+            background: #e9ecef;
+            color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .get-ai-fix-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .get-ai-fix-btn:hover {
+            background: #5a6fd8;
+        }
+        
+        .finish-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .finish-btn:hover {
+            background: #c82333;
+        }
+        
+        .violation-details {
+            background: #f8f9fa;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .violation-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #495057;
+        }
+        
+        .violation-impact {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 16px;
+        }
+        
+        .impact-critical { background: #f8d7da; color: #721c24; }
+        .impact-serious { background: #fff3cd; color: #856404; }
+        .impact-moderate { background: #d1ecf1; color: #0c5460; }
+        .impact-minor { background: #d4edda; color: #155724; }
+        
         /* Recent Scans */
         .recent-scans {
             background: white;
@@ -1709,11 +1843,221 @@ app.get('/', (req, res) => {
             document.getElementById('ai-modal').style.display = 'none';
         }
         
+        // NEW: Guided Fixing Workflow Variables
+        let currentViolations = [];
+        let currentViolationIndex = 0;
+        let fixedViolations = [];
+        
         // NEW: Guided Fixing Function
         function startGuidedFixing(violations) {
-            // For now, just show an alert - we'll build the full modal in the next step
-            alert('Guided fixing workflow coming soon! Found ' + violations.length + ' violations to fix.');
-            console.log('Violations to fix:', violations);
+            // Sort violations by priority (critical > serious > moderate > minor)
+            const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
+            currentViolations = violations.sort((a, b) => {
+                return priorityOrder[a.impact] - priorityOrder[b.impact];
+            });
+            
+            currentViolationIndex = 0;
+            fixedViolations = [];
+            
+            // Show the modal
+            const modal = document.getElementById('guided-fixing-modal');
+            modal.style.display = 'block';
+            
+            // Display the first violation
+            showCurrentViolation();
+        }
+        
+        function showCurrentViolation() {
+            const violation = currentViolations[currentViolationIndex];
+            const totalViolations = currentViolations.length;
+            
+            // Update progress indicator
+            document.getElementById('progress-indicator').textContent = 
+                'Violation ' + (currentViolationIndex + 1) + ' of ' + totalViolations;
+            
+            // Update modal body with violation details
+            const modalBody = document.getElementById('guided-modal-body');
+            modalBody.innerHTML = 
+                '<div class="violation-details">' +
+                    '<div class="violation-title">' + violation.id + '</div>' +
+                    '<div class="violation-impact impact-' + violation.impact + '">' + violation.impact + '</div>' +
+                    '<p><strong>Description:</strong> ' + (violation.description || 'No description available') + '</p>' +
+                    '<p><strong>Help:</strong> ' + (violation.help || 'Refer to WCAG guidelines for more information') + '</p>' +
+                    (violation.helpUrl ? '<p><strong>Learn more:</strong> <a href="' + violation.helpUrl + '" target="_blank">' + violation.helpUrl + '</a></p>' : '') +
+                '</div>' +
+                '<div id="ai-fix-area" style="margin-top: 20px;">' +
+                    '<!-- AI fix suggestions will appear here -->' +
+                '</div>';
+            
+            // Update navigation buttons
+            updateNavigationButtons();
+        }
+        
+        function updateNavigationButtons() {
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            const finishBtn = document.getElementById('finish-btn');
+            
+            // Previous button
+            prevBtn.disabled = currentViolationIndex === 0;
+            
+            // Next button and finish button
+            if (currentViolationIndex === currentViolations.length - 1) {
+                nextBtn.style.display = 'none';
+                finishBtn.style.display = 'inline-block';
+            } else {
+                nextBtn.style.display = 'inline-block';
+                finishBtn.style.display = 'none';
+            }
+        }
+        
+        function previousViolation() {
+            if (currentViolationIndex > 0) {
+                currentViolationIndex--;
+                showCurrentViolation();
+            }
+        }
+        
+        function nextViolation() {
+            if (currentViolationIndex < currentViolations.length - 1) {
+                currentViolationIndex++;
+                showCurrentViolation();
+            }
+        }
+        
+        function closeGuidedModal() {
+            document.getElementById('guided-fixing-modal').style.display = 'none';
+        }
+        
+        async function getAIFixForCurrent() {
+            const violation = currentViolations[currentViolationIndex];
+            const aiFixArea = document.getElementById('ai-fix-area');
+            
+            // Show loading state
+            aiFixArea.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI fix suggestion...</div>';
+            
+            try {
+                const response = await fetch('/api/ai-fixes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ violations: [violation] })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to get AI suggestion');
+                }
+                
+                const suggestions = await response.json();
+                const suggestion = suggestions[0];
+                
+                if (suggestion) {
+                    aiFixArea.innerHTML = 
+                        '<div class="ai-suggestion priority-' + suggestion.priority + '">' +
+                            '<div class="ai-suggestion-header">' +
+                                '<strong>🤖 AI Fix Suggestion</strong>' +
+                                '<span class="priority-badge priority-' + suggestion.priority + '">' + suggestion.priority.toUpperCase() + '</span>' +
+                            '</div>' +
+                            '<div class="ai-suggestion-content">' +
+                                '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
+                                '<p><strong>Code Example:</strong></p>' +
+                                '<pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + suggestion.codeExample + '</code></pre>' +
+                                '<p><strong>Implementation Steps:</strong></p>' +
+                                '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
+                                '<div style="margin-top: 16px;">' +
+                                    '<button onclick="saveFixToReport()" class="btn btn-success">💾 Save to Report</button>' +
+                                '</div>' +
+                            '</div>' +
+                        '</div>';
+                    
+                    // Store the suggestion for potential saving
+                    currentViolations[currentViolationIndex].aiSuggestion = suggestion;
+                } else {
+                    throw new Error('No suggestion received');
+                }
+                
+            } catch (error) {
+                console.error('Error getting AI suggestion:', error);
+                aiFixArea.innerHTML = 
+                    '<div style="color: #dc3545; text-align: center; padding: 20px;">' +
+                        '<h4>Unable to Generate AI Suggestion</h4>' +
+                        '<p>Please try again or proceed to the next violation.</p>' +
+                    '</div>';
+            }
+        }
+        
+        function saveFixToReport() {
+            const violation = currentViolations[currentViolationIndex];
+            if (violation.aiSuggestion) {
+                fixedViolations.push({
+                    violation: violation,
+                    suggestion: violation.aiSuggestion,
+                    timestamp: new Date().toISOString()
+                });
+                
+                // Show confirmation
+                const aiFixArea = document.getElementById('ai-fix-area');
+                const saveButton = aiFixArea.querySelector('button');
+                if (saveButton) {
+                    saveButton.textContent = '✅ Saved to Report';
+                    saveButton.disabled = true;
+                    saveButton.style.background = '#28a745';
+                }
+            }
+        }
+        
+        function finishGuidedFixing() {
+            if (fixedViolations.length === 0) {
+                alert('No fixes have been saved to the report yet. Please get AI suggestions and save them before generating a report.');
+                return;
+            }
+            
+            // Generate and download report
+            generateFixReport();
+            
+            // Close modal
+            closeGuidedModal();
+        }
+        
+        function generateFixReport() {
+            const reportContent = 
+                '# Accessibility Fix Report\n' +
+                'Generated on: ' + new Date().toLocaleString() + '\n\n' +
+                '## Summary\n' +
+                '- Total violations processed: ' + currentViolations.length + '\n' +
+                '- Fixes saved to report: ' + fixedViolations.length + '\n\n' +
+                '## Fix Details\n\n' +
+                fixedViolations.map((fix, index) => 
+                    '### ' + (index + 1) + '. ' + fix.violation.id + '\n' +
+                    '**Impact:** ' + fix.violation.impact + '\n' +
+                    '**Description:** ' + fix.violation.description + '\n\n' +
+                    '**AI Suggestion:**\n' +
+                    fix.suggestion.explanation + '\n\n' +
+                    '**Code Example:**\n' +
+                    fix.suggestion.codeExample + '\n\n' +
+                    '**Implementation Steps:**\n' +
+                    fix.suggestion.steps.map((step, i) => (i + 1) + '. ' + step).join('\n') + '\n\n' +
+                    '---\n'
+                ).join('') +
+                '\n## Next Steps\n' +
+                '1. Review each fix suggestion carefully\n' +
+                '2. Test implementations in a development environment\n' +
+                '3. Validate fixes with accessibility tools\n' +
+                '4. Deploy to production after thorough testing';
+            
+            // Create and download the report
+            const blob = new Blob([reportContent], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'accessibility-fix-report-' + new Date().toISOString().split('T')[0] + '.md';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('Report generated! ' + fixedViolations.length + ' fixes saved to your downloads.');
         }
     </script>
     
@@ -1726,6 +2070,26 @@ app.get('/', (req, res) => {
             </div>
             <div class="ai-modal-body" id="ai-modal-body">
                 <!-- AI suggestions will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- NEW: Guided Fixing Modal -->
+    <div id="guided-fixing-modal" class="guided-modal">
+        <div class="guided-modal-content">
+            <div class="guided-modal-header">
+                <h2>🛠️ Guided Accessibility Fixing</h2>
+                <div class="progress-indicator" id="progress-indicator">Violation 1 of 6</div>
+                <span class="close" onclick="closeGuidedModal()">&times;</span>
+            </div>
+            <div class="guided-modal-body" id="guided-modal-body">
+                <!-- Current violation details will be loaded here -->
+            </div>
+            <div class="guided-modal-footer">
+                <button class="prev-btn" id="prev-btn" onclick="previousViolation()">← Previous</button>
+                <button class="get-ai-fix-btn" onclick="getAIFixForCurrent()">🤖 Get AI Fix</button>
+                <button class="next-btn" id="next-btn" onclick="nextViolation()">Next →</button>
+                <button class="finish-btn" id="finish-btn" onclick="finishGuidedFixing()" style="display: none;">📄 Generate Report</button>
             </div>
         </div>
     </div>
