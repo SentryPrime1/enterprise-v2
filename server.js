@@ -6,77 +6,42 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(express.json());
+// Middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.static('public'));
 
-// Database connection - PRESERVED FROM WORKING VERSION
+// Database configuration
 let db = null;
 
-// Initialize database connection if environment variables are provided
-if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_NAME) {
-    console.log('🔄 Initializing database connection...');
-    console.log('📍 DB_HOST:', process.env.DB_HOST);
-    console.log('👤 DB_USER:', process.env.DB_USER);
-    console.log('🗄️ DB_NAME:', process.env.DB_NAME);
+// Initialize database connection if environment variables are available
+if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_NAME) {
+    db = new Pool({
+        host: process.env.DB_HOST,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+        port: process.env.DB_PORT || 5432,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    });
     
-    // Detect if we're running in Cloud Run with Cloud SQL connection
-    const isCloudRun = process.env.K_SERVICE && process.env.DB_HOST.includes(':');
-    
-    let dbConfig;
-    
-    if (isCloudRun) {
-        // Cloud Run with Cloud SQL connection - use Unix socket with correct path
-        console.log('☁️ Detected Cloud Run environment, using Unix socket connection');
-        dbConfig = {
-            host: `/cloudsql/${process.env.DB_HOST}`,
-            database: process.env.DB_NAME,
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            connectionTimeoutMillis: 10000,
-            idleTimeoutMillis: 30000,
-            max: 10
-        };
-        console.log('🔌 Unix socket path:', `/cloudsql/${process.env.DB_HOST}`);
-    } else {
-        // Local or other environment - use TCP connection
-        console.log('🌐 Using TCP connection');
-        dbConfig = {
-            host: process.env.DB_HOST,
-            port: process.env.DB_PORT || 5432,
-            database: process.env.DB_NAME,
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-            connectionTimeoutMillis: 10000,
-            idleTimeoutMillis: 30000,
-            max: 10
-        };
-    }
-
-    db = new Pool(dbConfig);
-    
-    // Test database connection with detailed logging
-    db.query('SELECT NOW() as current_time, version() as pg_version')
-        .then((result) => {
-            console.log('✅ Database connected successfully!');
-            console.log('⏰ Server time:', result.rows[0].current_time);
-            console.log('🐘 PostgreSQL version:', result.rows[0].pg_version.split(' ')[0]);
-        })
-        .catch(err => {
-            console.log('❌ Database connection failed, running in standalone mode');
-            console.log('🔍 Error details:', err.message);
-            console.log('🔍 Error code:', err.code);
-            db = null;
-        });
+    console.log('📊 Database: Connected');
 } else {
     console.log('ℹ️ No database configuration found, running in standalone mode');
 }
 
-// Database helper functions - PRESERVED FROM WORKING VERSION
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        database: db ? 'connected' : 'standalone'
+    });
+});
+
+// Database functions
 async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned, violations) {
-    if (!db) {
-        console.log('⚠️ No database connection, skipping scan save');
-        return null;
-    }
+    if (!db) return null;
     
     try {
         const result = await db.query(
@@ -85,74 +50,63 @@ async function saveScan(userId, organizationId, url, scanType, totalIssues, scan
              RETURNING id`,
             [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned || 1, JSON.stringify(violations)]
         );
-        
-        const scanId = result.rows[0].id;
-        console.log('✅ Scan saved to database with ID:', scanId);
-        return scanId;
+        return result.rows[0].id;
     } catch (error) {
-        console.log('❌ Database error saving scan:', error.message);
+        console.error('Database save error:', error);
         return null;
     }
 }
 
 async function getRecentScans(userId = 1, limit = 10) {
     if (!db) {
-        // Return mock data when no database connection
-        console.log('⚠️ No database connection, returning mock data');
+        // Return mock data for standalone mode
         return [
             {
                 id: 1,
                 url: 'https://company.com',
                 scan_type: 'single',
-                total_issues: 8,
-                score: 94,
-                created_at: '2024-09-18T10:30:00Z'
+                total_issues: 12,
+                completed_at: '2024-09-18T10:30:00Z',
+                pages_scanned: 1
             },
             {
                 id: 2,
                 url: 'https://company.com/products',
                 scan_type: 'crawl',
-                total_issues: 15,
-                score: 87,
-                created_at: '2024-09-18T09:15:00Z'
+                total_issues: 8,
+                completed_at: '2024-09-18T09:15:00Z',
+                pages_scanned: 3
             },
             {
                 id: 3,
                 url: 'https://company.com/about',
                 scan_type: 'single',
                 total_issues: 3,
-                score: 96,
-                created_at: '2024-09-17T14:45:00Z'
+                completed_at: '2024-09-17T14:20:00Z',
+                pages_scanned: 1
             }
         ];
     }
     
     try {
         const result = await db.query(
-            `SELECT id, url, scan_type, total_issues, 
-                    CASE 
-                        WHEN total_issues = 0 THEN 100
-                        ELSE GREATEST(0, 100 - (total_issues * 2))
-                    END as score,
-                    created_at
+            `SELECT id, url, scan_type, total_issues, completed_at, pages_scanned 
              FROM scans 
              WHERE user_id = $1 
-             ORDER BY created_at DESC 
+             ORDER BY completed_at DESC 
              LIMIT $2`,
             [userId, limit]
         );
-        
         return result.rows;
     } catch (error) {
-        console.log('❌ Database error getting recent scans:', error.message);
+        console.error('Database query error:', error);
         return [];
     }
 }
 
 async function getDashboardStats(userId = 1) {
     if (!db) {
-        // Return mock data when no database connection
-        console.log('⚠️ No database connection, returning mock data');
+        // Return mock data for standalone mode
         return {
             totalScans: 3,
             totalIssues: 22,
@@ -162,46 +116,30 @@ async function getDashboardStats(userId = 1) {
     }
     
     try {
-        const result = await db.query(`
-            SELECT 
-                COUNT(*) as total_scans,
-                COALESCE(SUM(total_issues), 0) as total_issues,
-                COALESCE(AVG(CASE 
-                    WHEN total_issues = 0 THEN 100
-                    ELSE GREATEST(0, 100 - (total_issues * 2))
-                END), 0) as average_score,
-                COUNT(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as this_week_scans
-            FROM scans 
-            WHERE user_id = $1
-        `, [userId]);
+        const [totalScans, totalIssues, thisWeekScans] = await Promise.all([
+            db.query('SELECT COUNT(*) as count FROM scans WHERE user_id = $1', [userId]),
+            db.query('SELECT SUM(total_issues) as sum FROM scans WHERE user_id = $1', [userId]),
+            db.query(`SELECT COUNT(*) as count FROM scans 
+                     WHERE user_id = $1 AND completed_at >= NOW() - INTERVAL '7 days'`, [userId])
+        ]);
         
-        const stats = result.rows[0];
-        return {
-            totalScans: parseInt(stats.total_scans),
-            totalIssues: parseInt(stats.total_issues),
-            averageScore: Math.round(parseFloat(stats.average_score)),
-            thisWeekScans: parseInt(stats.this_week_scans)
+        const stats = {
+            totalScans: parseInt(totalScans.rows[0].count) || 0,
+            totalIssues: parseInt(totalIssues.rows[0].sum) || 0,
+            thisWeekScans: parseInt(thisWeekScans.rows[0].count) || 0
         };
+        
+        // Calculate average score (simplified: 100 - (issues per scan * 5))
+        stats.averageScore = stats.totalScans > 0 
+            ? Math.max(0, Math.min(100, 100 - ((stats.totalIssues / stats.totalScans) * 5)))
+            : 100;
+        
+        return stats;
     } catch (error) {
-        console.log('❌ Database error getting dashboard stats:', error.message);
-        return {
-            totalScans: 0,
-            totalIssues: 0,
-            averageScore: 0,
-            thisWeekScans: 0
-        };
+        console.error('Database stats error:', error);
+        return { totalScans: 0, totalIssues: 0, averageScore: 100, thisWeekScans: 0 };
     }
 }
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        database: db ? 'connected' : 'standalone',
-        environment: process.env.K_SERVICE ? 'cloud-run' : 'local'
-    });
-});
 
 // API endpoint for recent scans
 app.get('/api/scans/recent', async (req, res) => {
@@ -234,11 +172,32 @@ app.post('/api/ai-fixes', async (req, res) => {
             return res.status(400).json({ error: 'Violations array is required' });
         }
 
-        const suggestions = violations.map(violation => {
-            // Generate AI-powered suggestions based on violation type
-            const suggestion = generateAISuggestion(violation);
-            return suggestion;
-        });
+        // Generate AI suggestions for each violation (now async)
+        const suggestions = await Promise.all(
+            violations.map(async (violation) => {
+                try {
+                    const suggestion = await generateAISuggestion(violation);
+                    return suggestion;
+                } catch (error) {
+                    console.error(`Error generating suggestion for ${violation.id}:`, error);
+                    // Return fallback suggestion for this specific violation
+                    return {
+                        priority: 'medium',
+                        explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities.`,
+                        codeExample: `// Refer to WCAG guidelines for specific implementation details
+// Violation: ${violation.id}
+// Impact: ${violation.impact || 'moderate'}`,
+                        steps: [
+                            'Review the WCAG guidelines for this specific issue',
+                            'Identify all instances of this problem on your site',
+                            'Implement the recommended solution',
+                            'Test with accessibility tools and real users',
+                            'Document the fix for future reference'
+                        ]
+                    };
+                }
+            })
+        );
 
         res.json(suggestions);
     } catch (error) {
@@ -247,9 +206,9 @@ app.post('/api/ai-fixes', async (req, res) => {
     }
 });
 
-function generateAISuggestion(violation) {
-    // AI suggestion generation logic based on violation type
-    const suggestions = {
+async function generateAISuggestion(violation) {
+    // First try predefined suggestions for common violations (for speed)
+    const quickSuggestions = {
         'color-contrast': {
             priority: 'high',
             explanation: 'Text color does not have sufficient contrast against the background color, making it difficult for users with visual impairments to read.',
@@ -282,24 +241,6 @@ function generateAISuggestion(violation) {
                 'Test with screen readers to ensure alt text is helpful'
             ]
         },
-        'heading-order': {
-            priority: 'medium',
-            explanation: 'Headings should follow a logical hierarchy (h1, h2, h3) to help screen reader users navigate content.',
-            codeExample: `<!-- Before -->
-<h1>Main Title</h1>
-<h3>Subsection</h3>
-
-<!-- After -->
-<h1>Main Title</h1>
-<h2>Subsection</h2>`,
-            steps: [
-                'Review current heading structure',
-                'Ensure only one h1 per page',
-                'Use headings in sequential order (don\'t skip levels)',
-                'Make headings descriptive of the content that follows',
-                'Test navigation with screen readers'
-            ]
-        },
         'link-name': {
             priority: 'medium',
             explanation: 'Links must have accessible names that clearly describe their destination or purpose.',
@@ -318,21 +259,96 @@ function generateAISuggestion(violation) {
         }
     };
 
-    // Default suggestion for unknown violation types
-    const defaultSuggestion = {
-        priority: 'medium',
-        explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities.`,
-        codeExample: '// Refer to WCAG guidelines for specific implementation details',
-        steps: [
-            'Review the WCAG guidelines for this specific issue',
-            'Identify all instances of this problem on your site',
-            'Implement the recommended solution',
-            'Test with accessibility tools and real users',
-            'Document the fix for future reference'
-        ]
-    };
+    // Return predefined suggestion if available
+    if (quickSuggestions[violation.id]) {
+        return quickSuggestions[violation.id];
+    }
 
-    return suggestions[violation.id] || defaultSuggestion;
+    // For all other violations, generate dynamic AI suggestions using OpenAI
+    try {
+        if (!process.env.OPENAI_API_KEY) {
+            throw new Error('OpenAI API key not configured');
+        }
+
+        const prompt = `You are an accessibility expert. Generate a specific, actionable fix suggestion for this accessibility violation:
+
+Violation ID: ${violation.id}
+Description: ${violation.description || 'No description provided'}
+Help: ${violation.help || 'No help text provided'}
+Impact Level: ${violation.impact || 'moderate'}
+
+Please provide:
+1. A clear explanation of the issue
+2. A practical code example showing before/after
+3. Step-by-step implementation instructions
+
+Format your response as JSON with these exact fields:
+{
+  "priority": "high|medium|low",
+  "explanation": "Clear explanation of the accessibility issue",
+  "codeExample": "Code example showing before and after",
+  "steps": ["Step 1", "Step 2", "Step 3", "Step 4", "Step 5"]
+}`;
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'gpt-3.5-turbo',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are an expert web accessibility consultant specializing in WCAG compliance. Provide practical, actionable solutions.'
+                    },
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
+                max_tokens: 800,
+                temperature: 0.3
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`OpenAI API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const aiResponse = data.choices[0].message.content;
+        
+        // Parse the JSON response
+        const suggestion = JSON.parse(aiResponse);
+        
+        // Validate the response has required fields
+        if (!suggestion.explanation || !suggestion.codeExample || !suggestion.steps) {
+            throw new Error('Invalid AI response format');
+        }
+
+        return suggestion;
+
+    } catch (error) {
+        console.error('Error generating AI suggestion:', error);
+        
+        // Fallback to enhanced default suggestion
+        return {
+            priority: 'medium',
+            explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities. ${violation.description || ''}`,
+            codeExample: `// Refer to WCAG guidelines for specific implementation details
+// Violation: ${violation.id}
+// Impact: ${violation.impact || 'moderate'}`,
+            steps: [
+                'Review the WCAG guidelines for this specific issue',
+                'Identify all instances of this problem on your site',
+                'Implement the recommended solution',
+                'Test with accessibility tools and real users',
+                'Document the fix for future reference'
+            ]
+        };
+    }
 }
 
 // Main route - serves the dashboard HTML
@@ -348,314 +364,392 @@ app.get('/', (req, res) => {
             box-sizing: border-box;
         }
         
-        body { 
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8f9fa;
-            color: #333;
-            height: 100vh;
-            overflow: hidden;
+            background: #f8fafc;
+            color: #1a202c;
+            line-height: 1.6;
         }
         
-        .dashboard-container {
+        .container {
             display: flex;
-            height: 100vh;
+            min-height: 100vh;
         }
         
-        /* Sidebar */
         .sidebar {
-            width: 240px;
-            background: #1a1a1a;
+            width: 250px;
+            background: #2d3748;
             color: white;
-            padding: 20px 0;
-            flex-shrink: 0;
+            padding: 0;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
         }
         
         .sidebar-header {
-            padding: 0 20px 30px;
-            border-bottom: 1px solid #333;
+            padding: 20px;
+            border-bottom: 1px solid #4a5568;
         }
         
-        .sidebar-header h1 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #63b3ed;
         }
         
-        .sidebar-header p {
-            font-size: 0.8rem;
-            color: #888;
+        .logo-subtitle {
+            font-size: 0.875rem;
+            color: #a0aec0;
             margin-top: 4px;
         }
         
-        .sidebar-nav {
+        .nav-menu {
             padding: 20px 0;
         }
         
         .nav-item {
-            display: flex;
-            align-items: center;
+            display: block;
             padding: 12px 20px;
-            color: #ccc;
+            color: #e2e8f0;
             text-decoration: none;
-            transition: all 0.2s ease;
-            gap: 12px;
-            font-size: 0.9rem;
+            transition: all 0.2s;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
             cursor: pointer;
         }
         
         .nav-item:hover {
-            background: #333;
-            color: white;
+            background: #4a5568;
+            color: #63b3ed;
         }
         
         .nav-item.active {
-            background: #333;
+            background: #3182ce;
             color: white;
-            border-right: 3px solid #667eea;
+            border-right: 3px solid #63b3ed;
         }
         
-        .nav-icon {
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        /* Main Content */
         .main-content {
             flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            margin-left: 250px;
+            padding: 0;
         }
         
-        /* Header */
         .header {
             background: white;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e2e8f0;
             display: flex;
-            align-items: center;
             justify-content: space-between;
-        }
-        
-        .header-left {
-            display: flex;
             align-items: center;
-            gap: 20px;
         }
         
         .search-bar {
-            display: flex;
-            align-items: center;
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 8px 12px;
-            width: 300px;
+            flex: 1;
+            max-width: 400px;
+            margin: 0 20px;
         }
         
-        .search-bar input {
-            border: none;
-            background: none;
-            outline: none;
-            flex: 1;
+        .search-input {
+            width: 100%;
+            padding: 10px 15px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
             font-size: 14px;
         }
         
-        .header-right {
+        .user-menu {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 15px;
         }
         
-        .user-profile {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            border-radius: 6px;
+        .notification-icon {
+            position: relative;
+            padding: 8px;
+            border-radius: 50%;
+            background: #f7fafc;
             cursor: pointer;
         }
         
-        .user-avatar {
-            width: 32px;
-            height: 32px;
+        .notification-badge {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: #e53e3e;
+            color: white;
             border-radius: 50%;
-            background: #667eea;
+            width: 18px;
+            height: 18px;
+            font-size: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #3182ce;
             color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .user-info {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .user-name {
             font-weight: 600;
             font-size: 14px;
         }
         
-        /* Content Area */
-        .content-area {
-            flex: 1;
-            padding: 24px;
-            overflow-y: auto;
+        .user-role {
+            font-size: 12px;
+            color: #718096;
         }
         
         .page {
             display: none;
+            padding: 30px;
         }
         
         .page.active {
             display: block;
         }
         
-        /* Dashboard Overview */
         .dashboard-header {
-            margin-bottom: 32px;
+            margin-bottom: 30px;
         }
         
         .dashboard-header h1 {
             font-size: 2rem;
             font-weight: 700;
+            color: #1a202c;
             margin-bottom: 8px;
         }
         
         .dashboard-header p {
-            color: #666;
-            font-size: 1rem;
+            color: #718096;
+            font-size: 1.1rem;
         }
         
-        /* Stats Cards */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 24px;
-            margin-bottom: 32px;
+            gap: 20px;
+            margin-bottom: 30px;
         }
         
         .stat-card {
             background: white;
             padding: 24px;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
+            border-radius: 12px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e2e8f0;
         }
         
         .stat-header {
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
             margin-bottom: 16px;
         }
         
         .stat-title {
-            font-size: 0.9rem;
-            color: #666;
+            font-size: 0.875rem;
             font-weight: 500;
+            color: #718096;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.05em;
         }
         
         .stat-value {
             font-size: 2.5rem;
             font-weight: 700;
-            color: #333;
+            color: #1a202c;
             margin-bottom: 8px;
         }
         
         .stat-change {
-            font-size: 0.9rem;
-            font-weight: 500;
+            font-size: 0.875rem;
+            color: #38a169;
         }
         
-        .stat-change.positive {
-            color: #28a745;
-        }
-        
-        .stat-change.negative {
-            color: #dc3545;
-        }
-        
-        /* Action Cards */
         .actions-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
         }
         
         .action-card {
             background: white;
-            padding: 20px;
-            border-radius: 8px;
-            border: 2px solid #e1e5e9;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e2e8f0;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.2s;
             text-align: center;
         }
         
         .action-card:hover {
-            border-color: #667eea;
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
         
         .action-card.primary {
-            border-color: #dc3545;
-            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            border-color: #3182ce;
+            background: linear-gradient(135deg, #3182ce 0%, #2c5aa0 100%);
             color: white;
-        }
-        
-        .action-card.primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
         }
         
         .action-card.secondary {
-            border-color: #667eea;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #805ad5;
+            background: linear-gradient(135deg, #805ad5 0%, #6b46c1 100%);
             color: white;
-        }
-        
-        .action-card.secondary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
         }
         
         .action-card.success {
-            border-color: #28a745;
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            border-color: #38a169;
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
             color: white;
         }
         
-        .action-card.success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
-        }
-        
         .action-icon {
-            font-size: 2rem;
+            font-size: 2.5rem;
             margin-bottom: 12px;
         }
         
         .action-title {
-            font-size: 1.1rem;
+            font-size: 1.25rem;
             font-weight: 600;
             margin-bottom: 8px;
         }
         
         .action-description {
-            font-size: 0.9rem;
+            font-size: 0.875rem;
             opacity: 0.9;
         }
         
-        /* Scan Form */
+        .recent-scans {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e2e8f0;
+        }
+        
+        .recent-scans-header {
+            padding: 24px 24px 0 24px;
+            border-bottom: 1px solid #e2e8f0;
+            margin-bottom: 0;
+            padding-bottom: 16px;
+        }
+        
+        .recent-scans-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+        
+        .recent-scans-subtitle {
+            color: #718096;
+            font-size: 0.875rem;
+        }
+        
+        .recent-scans-body {
+            padding: 0;
+        }
+        
+        .scan-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            border-bottom: 1px solid #f7fafc;
+        }
+        
+        .scan-item:last-child {
+            border-bottom: none;
+        }
+        
+        .scan-info {
+            flex: 1;
+        }
+        
+        .scan-url {
+            font-weight: 500;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+        
+        .scan-meta {
+            font-size: 0.875rem;
+            color: #718096;
+        }
+        
+        .scan-score {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-right: 12px;
+        }
+        
+        .score-excellent {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+        
+        .score-good {
+            background: #fef5e7;
+            color: #744210;
+        }
+        
+        .score-needs-work {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+        
+        .view-report-btn {
+            padding: 8px 16px;
+            background: #3182ce;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .view-report-btn:hover {
+            background: #2c5aa0;
+        }
+        
+        /* Scan Form Styles */
         .scan-form {
             background: white;
-            padding: 24px;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            margin-bottom: 32px;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e2e8f0;
+            margin-bottom: 30px;
+        }
+        
+        .scan-form h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 20px;
         }
         
         .form-group {
@@ -664,30 +758,30 @@ app.get('/', (req, res) => {
         
         .form-label {
             display: block;
-            margin-bottom: 8px;
             font-weight: 500;
-            color: #333;
+            color: #374151;
+            margin-bottom: 8px;
         }
         
         .form-input {
             width: 100%;
-            padding: 12px;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
+            padding: 12px 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
             font-size: 16px;
-            transition: border-color 0.2s ease;
+            transition: border-color 0.2s;
         }
         
         .form-input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: #3182ce;
+            box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
         }
         
         .scan-options {
             display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
+            flex-direction: column;
+            gap: 12px;
         }
         
         .scan-option {
@@ -697,160 +791,179 @@ app.get('/', (req, res) => {
         }
         
         .scan-option input[type="radio"] {
-            margin: 0;
+            margin-right: 8px;
         }
         
         .pages-input {
-            width: 80px;
-            padding: 6px 8px;
-            border: 1px solid #e1e5e9;
+            width: 60px;
+            padding: 4px 8px;
+            border: 1px solid #d1d5db;
             border-radius: 4px;
-            margin: 0 8px;
+            margin: 0 4px;
         }
         
         .scan-button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #3182ce 0%, #2c5aa0 100%);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
+            padding: 14px 28px;
+            border-radius: 8px;
             font-size: 16px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.2s;
         }
         
         .scan-button:hover {
             transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 4px 12px rgba(49, 130, 206, 0.3);
         }
         
         .scan-button:disabled {
-            background: #6c757d;
+            opacity: 0.6;
             cursor: not-allowed;
             transform: none;
-            box-shadow: none;
         }
         
-        /* Results */
+        /* Database Status */
+        .db-status {
+            background: #c6f6d5;
+            color: #22543d;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.875rem;
+            border: 1px solid #9ae6b4;
+        }
+        
+        /* Scan Results Styles */
         .scan-results {
             background: white;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            overflow: hidden;
-            margin-bottom: 24px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 1px solid #e2e8f0;
+            margin-bottom: 30px;
         }
         
         .results-header {
-            background: #f8f9fa;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
+            padding: 24px;
+            border-bottom: 1px solid #e2e8f0;
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
         }
         
         .results-title {
-            font-size: 1.1rem;
+            font-size: 1.5rem;
             font-weight: 600;
-            color: #333;
+            color: #1a202c;
         }
         
         .results-meta {
-            font-size: 0.9rem;
-            color: #666;
+            color: #718096;
+            font-size: 0.875rem;
         }
         
         .results-body {
             padding: 24px;
         }
         
-        .loading {
+        .results-summary {
+            margin-bottom: 30px;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .summary-item {
             text-align: center;
-            padding: 40px;
-            color: #666;
+            padding: 16px;
+            background: #f7fafc;
+            border-radius: 8px;
         }
         
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
+        .summary-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 4px;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .summary-label {
+            font-size: 0.875rem;
+            color: #718096;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
         
         .violation {
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
             margin-bottom: 16px;
-            overflow: hidden;
         }
         
         .violation-header {
-            background: #f8f9fa;
-            padding: 12px 16px;
-            border-bottom: 1px solid #e1e5e9;
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
         }
         
         .violation-title {
             font-weight: 600;
-            color: #333;
+            color: #1a202c;
+            font-size: 1.1rem;
         }
         
         .violation-impact {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
             font-weight: 500;
             text-transform: uppercase;
         }
         
         .impact-critical {
-            background: #f8d7da;
-            color: #721c24;
+            background: #fed7d7;
+            color: #742a2a;
         }
         
         .impact-serious {
-            background: #fff3cd;
-            color: #856404;
+            background: #fef5e7;
+            color: #744210;
         }
         
         .impact-moderate {
-            background: #d1ecf1;
-            color: #0c5460;
+            background: #e6fffa;
+            color: #234e52;
         }
         
         .impact-minor {
-            background: #d4edda;
-            color: #155724;
+            background: #ebf8ff;
+            color: #2a4365;
         }
         
         .violation-body {
-            padding: 16px;
+            color: #4a5568;
+            line-height: 1.6;
         }
         
         .violation-description {
-            margin-bottom: 12px;
-            color: #666;
+            margin-bottom: 8px;
         }
         
         .violation-help {
-            font-size: 0.9rem;
-            color: #666;
+            font-size: 0.875rem;
         }
         
         .violation-help a {
-            color: #667eea;
+            color: #3182ce;
             text-decoration: none;
         }
         
@@ -858,67 +971,40 @@ app.get('/', (req, res) => {
             text-decoration: underline;
         }
         
-        .results-summary {
-            background: #f8f9fa;
-            padding: 16px;
-            border-radius: 6px;
-            margin-bottom: 20px;
+        .violation-elements {
+            margin-top: 8px;
+            font-size: 0.875rem;
+            color: #718096;
         }
         
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 16px;
-        }
-        
-        .summary-item {
-            text-align: center;
-        }
-        
-        .summary-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin-bottom: 4px;
-        }
-        
-        .summary-label {
-            font-size: 0.8rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .ai-suggestions-btn {
-            background: #667eea;
+        .ai-suggestions-btn, .guided-fixing-btn {
+            background: linear-gradient(135deg, #805ad5 0%, #6b46c1 100%);
             color: white;
             border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
             cursor: pointer;
-            font-size: 0.9rem;
-            margin-right: 8px;
-        }
-        
-        .ai-suggestions-btn:hover {
-            background: #5a6fd8;
+            transition: all 0.2s;
+            margin-right: 12px;
         }
         
         .guided-fixing-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
+        }
+        
+        .ai-suggestions-btn:hover, .guided-fixing-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(128, 90, 213, 0.3);
         }
         
         .guided-fixing-btn:hover {
-            background: #218838;
+            box-shadow: 0 4px 12px rgba(56, 161, 105, 0.3);
         }
         
-        /* AI Modal Styles */
-        .ai-modal {
+        /* Modal Styles */
+        .modal {
             display: none;
             position: fixed;
             z-index: 1000;
@@ -929,84 +1015,179 @@ app.get('/', (req, res) => {
             background-color: rgba(0,0,0,0.5);
         }
         
-        .ai-modal-content {
+        .modal-content {
             background-color: white;
             margin: 5% auto;
             padding: 0;
-            border-radius: 8px;
-            width: 80%;
+            border-radius: 12px;
+            width: 90%;
             max-width: 800px;
             max-height: 80vh;
             overflow-y: auto;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
         }
         
-        .ai-modal-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .modal-header {
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
             color: white;
-            padding: 20px;
-            border-radius: 8px 8px 0 0;
+            padding: 20px 24px;
+            border-radius: 12px 12px 0 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
         
-        .ai-modal-body {
-            padding: 20px;
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        .close {
+        .progress-indicator {
+            background: rgba(255,255,255,0.2);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.875rem;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
             color: white;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
+            font-size: 1.5rem;
             cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: background 0.2s;
         }
         
-        .close:hover {
-            opacity: 0.7;
+        .close-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .modal-body {
+            padding: 24px;
+        }
+        
+        .modal-footer {
+            padding: 20px 24px;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
+        
+        .btn-primary {
+            background: #3182ce;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2c5aa0;
+        }
+        
+        .btn-success {
+            background: #38a169;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #2f855a;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        /* Guided Fixing Specific Styles */
+        .violation-details {
+            background: #f7fafc;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .violation-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 8px;
+        }
+        
+        .violation-impact {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            margin-bottom: 16px;
         }
         
         .ai-suggestion {
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            overflow: hidden;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
         }
         
         .ai-suggestion-header {
-            background: #f8f9fa;
-            padding: 12px 16px;
-            border-bottom: 1px solid #e1e5e9;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e2e8f0;
         }
         
         .priority-badge {
             padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
             font-weight: 500;
             text-transform: uppercase;
         }
         
         .priority-high {
-            background: #f8d7da;
-            color: #721c24;
+            background: #fed7d7;
+            color: #742a2a;
         }
         
         .priority-medium {
-            background: #fff3cd;
-            color: #856404;
+            background: #fef5e7;
+            color: #744210;
         }
         
         .priority-low {
-            background: #d4edda;
-            color: #155724;
+            background: #e6fffa;
+            color: #234e52;
         }
         
         .ai-suggestion-content {
-            padding: 16px;
+            line-height: 1.6;
         }
         
         .ai-suggestion-content pre {
@@ -1019,326 +1200,52 @@ app.get('/', (req, res) => {
         
         .ai-suggestion-content ol {
             padding-left: 20px;
+            margin: 12px 0;
         }
         
         .ai-suggestion-content li {
             margin-bottom: 8px;
         }
         
-        /* NEW: Guided Fixing Modal Styles */
-        .guided-modal {
-            display: none;
-            position: fixed;
-            z-index: 1001;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #718096;
         }
         
-        .guided-modal-content {
-            background-color: white;
-            margin: 3% auto;
-            padding: 0;
-            border-radius: 8px;
-            width: 90%;
-            max-width: 900px;
-            max-height: 85vh;
-            overflow-y: auto;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        .spinner {
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #3182ce;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
         }
         
-        .guided-modal-header {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px 8px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .progress-indicator {
-            background: rgba(255,255,255,0.2);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-        
-        .guided-modal-body {
-            padding: 24px;
-            min-height: 300px;
-        }
-        
-        .guided-modal-footer {
-            padding: 20px 24px;
-            border-top: 1px solid #e1e5e9;
-            display: flex;
-            gap: 12px;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .prev-btn, .next-btn {
-            background: #6c757d;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .prev-btn:hover, .next-btn:hover {
-            background: #5a6268;
-        }
-        
-        .prev-btn:disabled, .next-btn:disabled {
-            background: #e9ecef;
-            color: #6c757d;
-            cursor: not-allowed;
-        }
-        
-        .get-ai-fix-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .get-ai-fix-btn:hover {
-            background: #5a6fd8;
-        }
-        
-        .finish-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .finish-btn:hover {
-            background: #c82333;
-        }
-        
-        .violation-details {
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .violation-title {
-            font-size: 1.3rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: #495057;
-        }
-        
-        .violation-impact {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            margin-bottom: 16px;
-        }
-        
-        .impact-critical { background: #f8d7da; color: #721c24; }
-        .impact-serious { background: #fff3cd; color: #856404; }
-        .impact-moderate { background: #d1ecf1; color: #0c5460; }
-        .impact-minor { background: #d4edda; color: #155724; }
-        
-        /* Recent Scans */
-        .recent-scans {
-            background: white;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            overflow: hidden;
-        }
-        
-        .recent-scans-header {
-            background: #f8f9fa;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
-        }
-        
-        .recent-scans-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 4px;
-        }
-        
-        .recent-scans-subtitle {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .recent-scans-body {
-            padding: 0;
-        }
-        
-        .scan-item {
-            padding: 16px 24px;
-            border-bottom: 1px solid #f1f3f4;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: background-color 0.2s ease;
-        }
-        
-        .scan-item:last-child {
-            border-bottom: none;
-        }
-        
-        .scan-item:hover {
-            background: #f8f9fa;
-        }
-        
-        .scan-info h4 {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 4px;
-        }
-        
-        .scan-meta {
-            font-size: 0.8rem;
-            color: #666;
-        }
-        
-        .scan-score {
-            background: #28a745;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-right: 8px;
-        }
-        
-        .view-report-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-        }
-        
-        .view-report-btn:hover {
-            background: #5a6fd8;
-        }
-        
-        /* Database Status */
-        .db-status {
-            background: #d4edda;
-            color: #155724;
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 24px;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .db-status.disconnected {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            .dashboard-container {
-                flex-direction: column;
-            }
-            
-            .sidebar {
-                width: 100%;
-                height: auto;
-            }
-            
-            .sidebar-nav {
-                display: flex;
-                overflow-x: auto;
-                padding: 10px 0;
-            }
-            
-            .nav-item {
-                white-space: nowrap;
-                min-width: 120px;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .actions-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .scan-options {
-                flex-direction: column;
-                gap: 10px;
-            }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
-    <div class="dashboard-container">
+    <div class="container">
         <!-- Sidebar -->
         <div class="sidebar">
             <div class="sidebar-header">
-                <h1>🛡️ SentryPrime</h1>
-                <p>Enterprise Dashboard</p>
+                <div class="logo">🛡️ SentryPrime</div>
+                <div class="logo-subtitle">Enterprise Dashboard</div>
             </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" onclick="switchToPage('dashboard')">
-                    <span class="nav-icon">📊</span>
-                    Dashboard
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('scans')">
-                    <span class="nav-icon">🔍</span>
-                    Scans
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('analytics')">
-                    <span class="nav-icon">📈</span>
-                    Analytics
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('team')">
-                    <span class="nav-icon">👥</span>
-                    Team
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('integrations')">
-                    <span class="nav-icon">🔗</span>
-                    Integrations
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('api')">
-                    <span class="nav-icon">⚙️</span>
-                    API Management
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('billing')">
-                    <span class="nav-icon">💳</span>
-                    Billing
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('settings')">
-                    <span class="nav-icon">⚙️</span>
-                    Settings
-                </a>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" onclick="switchToPage('dashboard')">📊 Dashboard</a>
+                <a href="#" class="nav-item" onclick="switchToPage('scans')">🔍 Scans</a>
+                <a href="#" class="nav-item" onclick="switchToPage('analytics')">📈 Analytics</a>
+                <a href="#" class="nav-item" onclick="switchToPage('team')">👥 Team</a>
+                <a href="#" class="nav-item" onclick="switchToPage('integrations')">🔗 Integrations</a>
+                <a href="#" class="nav-item" onclick="switchToPage('api')">⚙️ API Management</a>
+                <a href="#" class="nav-item" onclick="switchToPage('billing')">💳 Billing</a>
+                <a href="#" class="nav-item" onclick="switchToPage('settings')">⚙️ Settings</a>
             </nav>
         </div>
         
@@ -1346,27 +1253,24 @@ app.get('/', (req, res) => {
         <div class="main-content">
             <!-- Header -->
             <div class="header">
-                <div class="header-left">
-                    <div class="search-bar">
-                        <span>🔍</span>
-                        <input type="text" placeholder="Search scans, reports, or settings...">
-                    </div>
+                <div class="search-bar">
+                    <input type="text" class="search-input" placeholder="Search scans, reports, or settings...">
                 </div>
-                <div class="header-right">
-                    <div class="notification-icon">🔔</div>
-                    <div class="user-profile">
-                        <div class="user-avatar">JD</div>
-                        <div>
-                            <div style="font-weight: 600; font-size: 0.9rem;">John Doe</div>
-                            <div style="font-size: 0.8rem; color: #666;">Acme Corporation</div>
-                        </div>
-                        <span>▼</span>
+                <div class="user-menu">
+                    <div class="notification-icon">
+                        🔔
+                        <div class="notification-badge">3</div>
+                    </div>
+                    <div class="user-avatar">JD</div>
+                    <div class="user-info">
+                        <div class="user-name">John Doe</div>
+                        <div class="user-role">Acme Corporation</div>
                     </div>
                 </div>
             </div>
             
-            <!-- Content Area -->
-            <div class="content-area">
+            <!-- Pages -->
+            <div class="pages">
                 <!-- Dashboard Page -->
                 <div id="dashboard" class="page active">
                     <div class="dashboard-header">
@@ -1381,7 +1285,7 @@ app.get('/', (req, res) => {
                                 <div class="stat-title">Total Scans</div>
                             </div>
                             <div class="stat-value" id="total-scans">-</div>
-                            <div class="stat-change positive" id="scans-change">+2 this week</div>
+                            <div class="stat-change" id="scans-change">+2 this week</div>
                         </div>
                         
                         <div class="stat-card">
@@ -1389,7 +1293,7 @@ app.get('/', (req, res) => {
                                 <div class="stat-title">Issues Found</div>
                             </div>
                             <div class="stat-value" id="total-issues">-</div>
-                            <div class="stat-change negative" id="issues-change">-5 from last week</div>
+                            <div class="stat-change" id="issues-change">-5 from last week</div>
                         </div>
                         
                         <div class="stat-card">
@@ -1397,7 +1301,7 @@ app.get('/', (req, res) => {
                                 <div class="stat-title">Average Score</div>
                             </div>
                             <div class="stat-value" id="average-score">-</div>
-                            <div class="stat-change positive" id="score-change">+3% improvement</div>
+                            <div class="stat-change" id="score-change">+3% improvement</div>
                         </div>
                         
                         <div class="stat-card">
@@ -1509,77 +1413,174 @@ app.get('/', (req, res) => {
                 <div id="analytics" class="page">
                     <div class="dashboard-header">
                         <h1>Analytics</h1>
-                        <p>Coming soon - Detailed analytics and reporting</p>
+                        <p>Detailed analytics and reporting</p>
+                    </div>
+                    <div style="text-align: center; padding: 60px; color: #666;">
+                        📈 Analytics dashboard coming soon...
                     </div>
                 </div>
                 
                 <div id="team" class="page">
                     <div class="dashboard-header">
                         <h1>Team Management</h1>
-                        <p>Coming soon - Manage team members and permissions</p>
+                        <p>Manage your team members and permissions</p>
+                    </div>
+                    <div style="text-align: center; padding: 60px; color: #666;">
+                        👥 Team management coming soon...
                     </div>
                 </div>
                 
                 <div id="integrations" class="page">
                     <div class="dashboard-header">
                         <h1>Integrations</h1>
-                        <p>Coming soon - Connect with your favorite tools</p>
+                        <p>Connect with your favorite tools and services</p>
+                    </div>
+                    <div style="text-align: center; padding: 60px; color: #666;">
+                        🔗 Integrations coming soon...
                     </div>
                 </div>
                 
                 <div id="api" class="page">
                     <div class="dashboard-header">
                         <h1>API Management</h1>
-                        <p>Coming soon - API keys and documentation</p>
+                        <p>Manage your API keys and access</p>
+                    </div>
+                    <div style="text-align: center; padding: 60px; color: #666;">
+                        ⚙️ API management coming soon...
                     </div>
                 </div>
                 
                 <div id="billing" class="page">
                     <div class="dashboard-header">
                         <h1>Billing</h1>
-                        <p>Coming soon - Subscription and usage details</p>
+                        <p>Manage your subscription and billing</p>
+                    </div>
+                    <div style="text-align: center; padding: 60px; color: #666;">
+                        💳 Billing management coming soon...
                     </div>
                 </div>
                 
                 <div id="settings" class="page">
                     <div class="dashboard-header">
                         <h1>Settings</h1>
-                        <p>Coming soon - Account and application settings</p>
+                        <p>Configure your account and preferences</p>
+                    </div>
+                    <div style="text-align: center; padding: 60px; color: #666;">
+                        ⚙️ Settings coming soon...
                     </div>
                 </div>
             </div>
         </div>
     </div>
     
+    <!-- AI Suggestions Modal -->
+    <div id="ai-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">🤖 AI Fix Suggestions</div>
+                <button class="close-btn" onclick="closeAIModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="ai-modal-body">
+                <!-- AI suggestions will be populated here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Guided Fixing Modal -->
+    <div id="guided-fixing-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">🛠️ Guided Accessibility Fixing</div>
+                <div class="progress-indicator" id="progress-indicator">Violation 1 of X</div>
+                <button class="close-btn" onclick="GuidedFixing.close()">&times;</button>
+            </div>
+            <div class="modal-body" id="guided-modal-body">
+                <!-- Guided fixing content will be populated here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
+                <div>
+                    <button class="btn btn-primary" id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
+                    <button class="btn btn-success" id="finish-btn" onclick="GuidedFixing.finish()" style="display: none;">🎉 Finish & Generate Report</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
-        // Page switching functionality - PRESERVED FROM WORKING VERSION
+        // Page navigation
         function switchToPage(pageId) {
             // Hide all pages
             const pages = document.querySelectorAll('.page');
             pages.forEach(page => page.classList.remove('active'));
             
             // Show selected page
-            const targetPage = document.getElementById(pageId);
-            if (targetPage) {
-                targetPage.classList.add('active');
-            }
+            document.getElementById(pageId).classList.add('active');
             
             // Update navigation
             const navItems = document.querySelectorAll('.nav-item');
             navItems.forEach(item => item.classList.remove('active'));
-            
-            // Find and activate the corresponding nav item
-            const activeNavItem = document.querySelector(\`[onclick="switchToPage('\${pageId}')"]\`);
-            if (activeNavItem) {
-                activeNavItem.classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        // Load dashboard data
+        async function loadDashboardData() {
+            try {
+                const [statsResponse, scansResponse] = await Promise.all([
+                    fetch('/api/dashboard/stats'),
+                    fetch('/api/scans/recent')
+                ]);
+                
+                if (statsResponse.ok) {
+                    const stats = await statsResponse.json();
+                    document.getElementById('total-scans').textContent = stats.totalScans;
+                    document.getElementById('total-issues').textContent = stats.totalIssues;
+                    document.getElementById('average-score').textContent = Math.round(stats.averageScore) + '%';
+                    document.getElementById('this-week-scans').textContent = stats.thisWeekScans;
+                }
+                
+                if (scansResponse.ok) {
+                    const scans = await scansResponse.json();
+                    displayRecentScans(scans, 'dashboard-recent-scans');
+                    displayRecentScans(scans, 'recent-scans-list');
+                }
+            } catch (error) {
+                console.error('Error loading dashboard data:', error);
             }
         }
         
-        // Scan functionality - PRESERVED FROM WORKING VERSION
+        function displayRecentScans(scans, containerId) {
+            const container = document.getElementById(containerId);
+            
+            if (scans.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">No recent scans found</div>';
+                return;
+            }
+            
+            container.innerHTML = scans.map(scan => {
+                const date = new Date(scan.completed_at).toLocaleDateString();
+                const score = Math.max(0, 100 - (scan.total_issues * 5));
+                const scoreClass = score >= 90 ? 'score-excellent' : score >= 70 ? 'score-good' : 'score-needs-work';
+                
+                return \`
+                    <div class="scan-item">
+                        <div class="scan-info">
+                            <div class="scan-url">\${scan.url}</div>
+                            <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${date}</div>
+                        </div>
+                        <div class="scan-score \${scoreClass}">\${score}% Score</div>
+                        <button class="view-report-btn">👁️ View Report</button>
+                    </div>
+                \`;
+            }).join('');
+        }
+        
+        // Scan functionality
         async function startScan() {
             const urlInput = document.getElementById('url-input');
             const scanButton = document.querySelector('.scan-button');
-            const resultsContainer = document.getElementById('scan-results-container');
+            const scanType = document.querySelector('input[name="scan-type"]:checked').value;
+            const maxPages = document.getElementById('max-pages').value;
             
             const url = urlInput.value.trim();
             if (!url) {
@@ -1587,29 +1588,12 @@ app.get('/', (req, res) => {
                 return;
             }
             
-            // Get scan type
-            const scanType = document.querySelector('input[name="scan-type"]:checked').value;
-            const maxPages = document.getElementById('max-pages').value;
-            
             // Disable button and show loading
             scanButton.disabled = true;
             scanButton.textContent = '🔄 Scanning...';
             
-            // Show loading in results
-            resultsContainer.innerHTML = \`
-                <div class="scan-results">
-                    <div class="results-header">
-                        <div class="results-title">Scanning in Progress</div>
-                        <div class="results-meta">Please wait...</div>
-                    </div>
-                    <div class="results-body">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            Analyzing accessibility issues on \${url}
-                        </div>
-                    </div>
-                </div>
-            \`;
+            // Clear previous results
+            document.getElementById('scan-results-container').innerHTML = '';
             
             try {
                 const response = await fetch('/api/scan', {
@@ -1628,12 +1612,11 @@ app.get('/', (req, res) => {
                 
                 if (result.success) {
                     displayScanResults(result);
-                    // Refresh recent scans
-                    loadRecentScans();
+                    // Reload recent scans
+                    loadDashboardData();
                 } else {
                     displayScanError(result.error);
                 }
-                
             } catch (error) {
                 console.error('Scan error:', error);
                 displayScanError('Network error occurred. Please try again.');
@@ -1682,21 +1665,36 @@ app.get('/', (req, res) => {
                         </div>
                         
                         \${violations.length > 0 ? 
-                            violations.map(violation => \`
+                            violations.map(violation => {
+                                // Clean up violation data for better display
+                                const cleanDescription = violation.description || 'No description available';
+                                const cleanHelp = violation.help || 'Refer to WCAG guidelines for more information';
+                                const cleanId = violation.id || 'unknown-violation';
+                                const cleanImpact = violation.impact || 'moderate';
+                                
+                                return \`
                                 <div class="violation">
                                     <div class="violation-header">
-                                        <div class="violation-title">\${violation.id}</div>
-                                        <div class="violation-impact impact-\${violation.impact}">\${violation.impact}</div>
+                                        <div class="violation-title">\${cleanId}</div>
+                                        <div class="violation-impact impact-\${cleanImpact}">\${cleanImpact.toUpperCase()}</div>
                                     </div>
                                     <div class="violation-body">
-                                        <div class="violation-description">\${violation.description}</div>
-                                        <div class="violation-help">
-                                            \${violation.help}
-                                            \${violation.helpUrl ? \`<br><a href="\${violation.helpUrl}" target="_blank">Learn more</a>\` : ''}
+                                        <div class="violation-description">
+                                            <strong>Description:</strong> \${cleanDescription}
                                         </div>
+                                        <div class="violation-help">
+                                            <strong>Help:</strong> \${cleanHelp}
+                                            \${violation.helpUrl ? \`<br><strong>Learn more:</strong> <a href="\${violation.helpUrl}" target="_blank">\${violation.helpUrl}</a>\` : ''}
+                                        </div>
+                                        \${violation.nodes && violation.nodes.length > 0 ? \`
+                                            <div class="violation-elements">
+                                                <strong>Affected elements:</strong> \${violation.nodes.length} element(s)
+                                            </div>
+                                        \` : ''}
                                     </div>
                                 </div>
-                            \`).join('') 
+                                \`;
+                            }).join('') 
                             : '<p style="text-align: center; color: #28a745; font-size: 1.2rem; padding: 40px;">🎉 No accessibility issues found!</p>'
                         }
                         
@@ -1733,7 +1731,7 @@ app.get('/', (req, res) => {
             \`;
         }
         
-        // AI Suggestions functionality - PRESERVED FROM WORKING VERSION
+        // AI Suggestions functionality
         async function showAISuggestions(violations) {
             const modal = document.getElementById('ai-modal');
             const modalBody = document.getElementById('ai-modal-body');
@@ -1747,7 +1745,7 @@ app.get('/', (req, res) => {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ violations })
+                    body: JSON.stringify({ violations: violations })
                 });
                 
                 if (!response.ok) {
@@ -1756,10 +1754,10 @@ app.get('/', (req, res) => {
                 
                 const suggestions = await response.json();
                 
-                modalBody.innerHTML = suggestions.map(suggestion => \`
-                    <div class="ai-suggestion">
+                modalBody.innerHTML = suggestions.map((suggestion, index) => \`
+                    <div class="ai-suggestion priority-\${suggestion.priority}">
                         <div class="ai-suggestion-header">
-                            <strong>🤖 AI Fix Suggestion</strong>
+                            <strong>Fix for: \${violations[index].id}</strong>
                             <span class="priority-badge priority-\${suggestion.priority}">\${suggestion.priority.toUpperCase()}</span>
                         </div>
                         <div class="ai-suggestion-content">
@@ -1767,21 +1765,14 @@ app.get('/', (req, res) => {
                             <p><strong>Code Example:</strong></p>
                             <pre><code>\${suggestion.codeExample}</code></pre>
                             <p><strong>Implementation Steps:</strong></p>
-                            <ol>
-                                \${suggestion.steps.map(step => \`<li>\${step}</li>\`).join('')}
-                            </ol>
+                            <ol>\${suggestion.steps.map(step => '<li>' + step + '</li>').join('')}</ol>
                         </div>
                     </div>
                 \`).join('');
                 
             } catch (error) {
                 console.error('Error getting AI suggestions:', error);
-                modalBody.innerHTML = \`
-                    <div style="color: #dc3545; text-align: center; padding: 20px;">
-                        <h3>Unable to Generate AI Suggestions</h3>
-                        <p>Please try again later or contact support if the problem persists.</p>
-                    </div>
-                \`;
+                modalBody.innerHTML = '<div style="color: #dc3545; text-align: center; padding: 40px;"><h4>Unable to Generate AI Suggestions</h4><p>Please try again later.</p></div>';
             }
         }
         
@@ -1789,15 +1780,15 @@ app.get('/', (req, res) => {
             document.getElementById('ai-modal').style.display = 'none';
         }
         
-        // NEW: Guided Fixing Workflow - Properly Namespaced
+        // Guided Fixing functionality
         const GuidedFixing = {
             currentViolations: [],
             currentViolationIndex: 0,
             fixedViolations: [],
             
             start: function(violations) {
-                // Sort violations by priority (critical > serious > moderate > minor)
-                const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
+                // Sort violations by priority (Critical > Serious > Moderate > Minor)
+                const priorityOrder = { critical: 0, serious: 1, moderate: 2, minor: 3 };
                 this.currentViolations = violations.sort((a, b) => {
                     return priorityOrder[a.impact] - priorityOrder[b.impact];
                 });
@@ -2003,205 +1994,61 @@ app.get('/', (req, res) => {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
-                alert('Report generated! ' + this.fixedViolations.length + ' fixes saved to your downloads.');
+                alert('Report downloaded successfully! Check your downloads folder.');
             }
         };
         
-        // Dashboard data loading - PRESERVED FROM WORKING VERSION
-        async function loadDashboardStats() {
-            try {
-                const response = await fetch('/api/dashboard/stats');
-                const stats = await response.json();
-                
-                document.getElementById('total-scans').textContent = stats.totalScans;
-                document.getElementById('total-issues').textContent = stats.totalIssues;
-                document.getElementById('average-score').textContent = stats.averageScore + '%';
-                document.getElementById('this-week-scans').textContent = stats.thisWeekScans;
-                
-            } catch (error) {
-                console.error('Error loading dashboard stats:', error);
+        // Add click handler for Get AI Fix button in guided fixing
+        document.addEventListener('click', function(e) {
+            if (e.target && e.target.textContent === '🤖 Get AI Fix') {
+                GuidedFixing.getAIFixForCurrent();
+            }
+        });
+        
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            const aiModal = document.getElementById('ai-modal');
+            const guidedModal = document.getElementById('guided-fixing-modal');
+            
+            if (event.target === aiModal) {
+                aiModal.style.display = 'none';
+            }
+            if (event.target === guidedModal) {
+                guidedModal.style.display = 'none';
             }
         }
         
-        async function loadDashboardRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const scans = await response.json();
-                
-                const container = document.getElementById('dashboard-recent-scans');
-                
-                if (scans.length > 0) {
-                    container.innerHTML = scans.slice(0, 3).map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading dashboard recent scans:', error);
-                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        async function loadRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const scans = await response.json();
-                
-                const container = document.getElementById('recent-scans-list');
-                
-                if (scans.length > 0) {
-                    container.innerHTML = scans.map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading recent scans:', error);
-                document.getElementById('recent-scans-list').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        // Initialize dashboard - PRESERVED FROM WORKING VERSION
-        document.addEventListener('DOMContentLoaded', () => {
-            loadDashboardStats();
-            loadDashboardRecentScans();
-            loadRecentScans();
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboardData();
         });
     </script>
-    
-    <!-- AI Suggestions Modal -->
-    <div id="ai-modal" class="ai-modal">
-        <div class="ai-modal-content">
-            <div class="ai-modal-header">
-                <h2>🤖 AI Fix Suggestions</h2>
-                <span class="close" onclick="closeAIModal()">&times;</span>
-            </div>
-            <div class="ai-modal-body" id="ai-modal-body">
-                <!-- AI suggestions will be loaded here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- NEW: Guided Fixing Modal -->
-    <div id="guided-fixing-modal" class="guided-modal">
-        <div class="guided-modal-content">
-            <div class="guided-modal-header">
-                <h2>🛠️ Guided Accessibility Fixing</h2>
-                <div class="progress-indicator" id="progress-indicator">Violation 1 of 6</div>
-                <span class="close" onclick="GuidedFixing.close()">&times;</span>
-            </div>
-            <div class="guided-modal-body" id="guided-modal-body">
-                <!-- Current violation details will be loaded here -->
-            </div>
-            <div class="guided-modal-footer">
-                <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
-                <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
-                <button class="next-btn" id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
-                <button class="finish-btn" id="finish-btn" onclick="GuidedFixing.finish()" style="display: none;">📄 Generate Report</button>
-            </div>
-        </div>
-    </div>
 </body>
 </html>`;
     
     res.send(html);
 });
 
-// Helper functions for link extraction and scanning
-async function extractLinks(page, baseUrl) {
-    try {
-        const links = await page.evaluate((baseUrl) => {
-            const anchors = Array.from(document.querySelectorAll('a[href]'));
-            const baseUrlObj = new URL(baseUrl);
-            
-            return anchors
-                .map(a => {
-                    try {
-                        const href = a.getAttribute('href');
-                        if (!href) return null;
-                        
-                        // Convert relative URLs to absolute
-                        const url = new URL(href, baseUrl);
-                        
-                        // Only include URLs from the same domain
-                        if (url.hostname !== baseUrlObj.hostname) return null;
-                        
-                        // Exclude common non-page URLs
-                        if (url.pathname.match(/\.(pdf|jpg|jpeg|png|gif|css|js|xml|zip|doc|docx)$/i)) return null;
-                        if (url.pathname.includes('#')) return null;
-                        
-                        return url.href;
-                    } catch (e) {
-                        return null;
-                    }
-                })
-                .filter(url => url !== null)
-                .filter((url, index, self) => self.indexOf(url) === index) // Remove duplicates
-                .slice(0, 20); // Limit to 20 links max
-        }, baseUrl);
-        
-        return links;
-    } catch (error) {
-        console.log('Error extracting links:', error.message);
-        return [];
-    }
-}
-
+// Puppeteer scanning functions
 async function scanSinglePage(browser, url) {
     const page = await browser.newPage();
     
     try {
-        // Set viewport and user agent
-        await page.setViewport({ width: 1280, height: 720 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+        console.log('📄 Navigating to: ' + url);
+        await page.goto(url, { 
+            waitUntil: 'networkidle0',
+            timeout: 30000 
+        });
         
-        console.log('Navigating to: ' + url);
+        console.log('⏳ Waiting for page to stabilize...');
+        await page.waitForTimeout(2000);
         
-        // Try multiple navigation strategies
-        try {
-            await page.goto(url, { 
-                waitUntil: 'networkidle0',
-                timeout: 90000 
-            });
-        } catch (navError) {
-            console.log('Network idle failed, trying domcontentloaded...');
-            await page.goto(url, { 
-                waitUntil: 'domcontentloaded',
-                timeout: 90000 
-            });
-        }
-        
-        // Wait for page to stabilize
-        console.log('Waiting for page to stabilize...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        // Inject axe-core
-        console.log('Injecting axe-core...');
+        console.log('💉 Injecting axe-core...');
         await page.addScriptTag({
             content: axeCore.source
         });
         
-        console.log('Running axe accessibility scan...');
+        console.log('🔍 Running axe accessibility scan...');
         const results = await page.evaluate(() => {
             return new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
@@ -2300,54 +2147,52 @@ app.post('/api/scan', async (req, res) => {
             const urlsToScan = [targetUrl];
             const scannedUrls = new Set();
             
-            // Scan the first page and extract links
-            const firstPageResults = await scanSinglePage(browser, targetUrl);
-            scannedPages.push({
-                url: targetUrl,
-                violations: firstPageResults.violations,
-                scanTime: Date.now() - startTime
-            });
-            scannedUrls.add(targetUrl);
-            
-            // Extract links from the first page for crawling
-            if (maxPages > 1) {
-                const page = await browser.newPage();
-                try {
-                    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    const links = await extractLinks(page, targetUrl);
-                    
-                    // Add unique links to scan queue
-                    for (const link of links) {
-                        if (urlsToScan.length < maxPages && !scannedUrls.has(link)) {
-                            urlsToScan.push(link);
-                        }
-                    }
-                } catch (error) {
-                    console.log('Error extracting links:', error.message);
-                } finally {
-                    await page.close();
+            while (urlsToScan.length > 0 && scannedPages.length < maxPages) {
+                const pageUrl = urlsToScan.shift();
+                
+                if (scannedUrls.has(pageUrl)) {
+                    continue;
                 }
-            }
-            
-            // Scan additional pages
-            for (let i = 1; i < urlsToScan.length && i < maxPages; i++) {
-                const pageUrl = urlsToScan[i];
-                if (scannedUrls.has(pageUrl)) continue;
+                
+                scannedUrls.add(pageUrl);
                 
                 try {
-                    console.log('🔍 Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
-                    const pageStartTime = Date.now();
+                    console.log('📄 Scanning page ' + (scannedPages.length + 1) + ': ' + pageUrl);
                     const pageResults = await scanSinglePage(browser, pageUrl);
+                    const pageTime = Date.now() - startTime;
                     
                     scannedPages.push({
                         url: pageUrl,
                         violations: pageResults.violations,
-                        scanTime: Date.now() - pageStartTime
+                        scanTime: pageTime,
+                        timestamp: new Date().toISOString()
                     });
-                    scannedUrls.add(pageUrl);
+                    
+                    // Extract additional URLs for crawling (simplified)
+                    if (scannedPages.length < maxPages) {
+                        const page = await browser.newPage();
+                        try {
+                            await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+                            const links = await page.evaluate(() => {
+                                const anchors = Array.from(document.querySelectorAll('a[href]'));
+                                return anchors
+                                    .map(a => a.href)
+                                    .filter(href => href.startsWith(window.location.origin))
+                                    .slice(0, 10); // Limit to 10 links per page
+                            });
+                            
+                            links.forEach(link => {
+                                if (!scannedUrls.has(link) && urlsToScan.length < maxPages) {
+                                    urlsToScan.push(link);
+                                }
+                            });
+                        } finally {
+                            await page.close();
+                        }
+                    }
                     
                 } catch (error) {
-                    console.log('❌ Error scanning page ' + pageUrl + ':', error.message);
+                    console.error('❌ Error scanning page ' + pageUrl + ':', error.message);
                     scannedPages.push({
                         url: pageUrl,
                         violations: [],
