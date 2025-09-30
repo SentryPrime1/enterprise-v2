@@ -379,15 +379,15 @@ app.get('/api/dashboard/stats', async (req, res) => {
 // NEW: AI Suggestions API endpoint
 app.post('/api/ai-fixes', async (req, res) => {
     try {
-        const { violations } = req.body;
+        const { violations, platformInfo } = req.body;
         
         if (!violations || !Array.isArray(violations)) {
             return res.status(400).json({ error: 'Violations array is required' });
         }
 
         const suggestions = await Promise.all(violations.map(async (violation) => {
-            // Generate AI-powered suggestions based on violation type
-            const suggestion = await generateAISuggestion(violation);
+            // PHASE 1 ENHANCEMENT: Generate AI-powered suggestions with platform context
+            const suggestion = await generateAISuggestion(violation, platformInfo);
             return suggestion;
         }));
 
@@ -398,7 +398,7 @@ app.post('/api/ai-fixes', async (req, res) => {
     }
 });
 
-async function generateAISuggestion(violation) {
+async function generateAISuggestion(violation, platformInfo = null) {
     // Predefined suggestions for fast response and fallback
     const predefinedSuggestions = {
         'color-contrast': {
@@ -2616,13 +2616,241 @@ async function scanSinglePage(browser, url) {
                 axe.run((err, results) => {
                     clearTimeout(timeout);
                     if (err) reject(err);
-                    else resolve(results);
+                    else {
+                        // PHASE 1 ENHANCEMENT: Collect detailed element information
+                        results.violations = results.violations.map(violation => {
+                            violation.nodes = violation.nodes.map(node => {
+                                const element = document.querySelector(node.target[0]);
+                                if (element) {
+                                    // Enhanced element data collection
+                                    node.enhancedData = {
+                                        // Element targeting
+                                        selector: node.target[0],
+                                        xpath: getXPath(element),
+                                        tagName: element.tagName.toLowerCase(),
+                                        
+                                        // Current element state
+                                        outerHTML: element.outerHTML.substring(0, 500), // Truncate for size
+                                        textContent: element.textContent?.substring(0, 200) || '',
+                                        
+                                        // Computed styles for relevant violations
+                                        computedStyles: getRelevantStyles(element, violation.id),
+                                        
+                                        // Element attributes
+                                        attributes: Array.from(element.attributes).reduce((acc, attr) => {
+                                            acc[attr.name] = attr.value;
+                                            return acc;
+                                        }, {}),
+                                        
+                                        // Position information
+                                        boundingRect: element.getBoundingClientRect(),
+                                        
+                                        // Parent context
+                                        parentInfo: {
+                                            tagName: element.parentElement?.tagName.toLowerCase(),
+                                            className: element.parentElement?.className || '',
+                                            id: element.parentElement?.id || ''
+                                        }
+                                    };
+                                }
+                                return node;
+                            });
+                            return violation;
+                        });
+                        
+                        resolve(results);
+                    }
                 });
+                
+                // Helper function to get XPath
+                function getXPath(element) {
+                    if (element.id) return `//*[@id="${element.id}"]`;
+                    if (element === document.body) return '/html/body';
+                    
+                    let ix = 0;
+                    const siblings = element.parentNode?.childNodes || [];
+                    for (let i = 0; i < siblings.length; i++) {
+                        const sibling = siblings[i];
+                        if (sibling === element) {
+                            return getXPath(element.parentNode) + '/' + element.tagName.toLowerCase() + '[' + (ix + 1) + ']';
+                        }
+                        if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
+                            ix++;
+                        }
+                    }
+                    return '';
+                }
+                
+                // Helper function to get relevant computed styles based on violation type
+                function getRelevantStyles(element, violationId) {
+                    const computedStyle = window.getComputedStyle(element);
+                    const relevantStyles = {};
+                    
+                    // Collect styles relevant to specific violation types
+                    if (violationId === 'color-contrast') {
+                        relevantStyles.color = computedStyle.color;
+                        relevantStyles.backgroundColor = computedStyle.backgroundColor;
+                        relevantStyles.fontSize = computedStyle.fontSize;
+                        relevantStyles.fontWeight = computedStyle.fontWeight;
+                    } else if (violationId.includes('focus')) {
+                        relevantStyles.outline = computedStyle.outline;
+                        relevantStyles.outlineColor = computedStyle.outlineColor;
+                        relevantStyles.outlineWidth = computedStyle.outlineWidth;
+                        relevantStyles.boxShadow = computedStyle.boxShadow;
+                    } else if (violationId.includes('size') || violationId.includes('target')) {
+                        relevantStyles.width = computedStyle.width;
+                        relevantStyles.height = computedStyle.height;
+                        relevantStyles.padding = computedStyle.padding;
+                        relevantStyles.margin = computedStyle.margin;
+                    }
+                    
+                    // Always include basic layout styles
+                    relevantStyles.display = computedStyle.display;
+                    relevantStyles.position = computedStyle.position;
+                    relevantStyles.zIndex = computedStyle.zIndex;
+                    
+                    return relevantStyles;
+                }
             });
         });
         
         return results;
         
+    } finally {
+        await page.close();
+    }
+}
+
+// PHASE 1 ENHANCEMENT: Platform Detection Function
+async function detectPlatform(browser, url) {
+    const page = await browser.newPage();
+    try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        
+        const platformInfo = await page.evaluate(() => {
+            const platform = {
+                type: 'custom',
+                name: 'Unknown',
+                version: null,
+                confidence: 0,
+                indicators: [],
+                capabilities: {
+                    cssInjection: false,
+                    themeEditor: false,
+                    pluginSystem: false,
+                    apiAccess: false
+                }
+            };
+            
+            // WordPress Detection
+            if (document.querySelector('meta[name="generator"][content*="WordPress"]') ||
+                document.querySelector('link[href*="wp-content"]') ||
+                document.querySelector('script[src*="wp-content"]') ||
+                window.wp || document.body.className.includes('wp-')) {
+                platform.type = 'wordpress';
+                platform.name = 'WordPress';
+                platform.confidence = 0.9;
+                platform.indicators.push('wp-content detected', 'WordPress meta tag or scripts');
+                platform.capabilities = {
+                    cssInjection: true,
+                    themeEditor: true,
+                    pluginSystem: true,
+                    apiAccess: true
+                };
+                
+                // Try to detect version
+                const generator = document.querySelector('meta[name="generator"]');
+                if (generator && generator.content.includes('WordPress')) {
+                    const versionMatch = generator.content.match(/WordPress\\s+([\\d.]+)/);
+                    if (versionMatch) platform.version = versionMatch[1];
+                }
+            }
+            
+            // Shopify Detection
+            else if (document.querySelector('script[src*="shopify"]') ||
+                     document.querySelector('link[href*="shopify"]') ||
+                     window.Shopify || document.querySelector('[data-shopify]')) {
+                platform.type = 'shopify';
+                platform.name = 'Shopify';
+                platform.confidence = 0.9;
+                platform.indicators.push('Shopify scripts detected', 'Shopify data attributes');
+                platform.capabilities = {
+                    cssInjection: false,
+                    themeEditor: true,
+                    pluginSystem: false,
+                    apiAccess: true
+                };
+            }
+            
+            // Wix Detection
+            else if (document.querySelector('meta[name="generator"][content*="Wix"]') ||
+                     document.querySelector('script[src*="wix.com"]') ||
+                     window.wixDevelopersAnalytics) {
+                platform.type = 'wix';
+                platform.name = 'Wix';
+                platform.confidence = 0.8;
+                platform.indicators.push('Wix generator meta tag', 'Wix scripts');
+                platform.capabilities = {
+                    cssInjection: false,
+                    themeEditor: false,
+                    pluginSystem: false,
+                    apiAccess: false
+                };
+            }
+            
+            // Squarespace Detection
+            else if (document.querySelector('script[src*="squarespace"]') ||
+                     document.querySelector('link[href*="squarespace"]') ||
+                     document.body.id === 'collection' ||
+                     document.querySelector('.sqs-')) {
+                platform.type = 'squarespace';
+                platform.name = 'Squarespace';
+                platform.confidence = 0.8;
+                platform.indicators.push('Squarespace scripts', 'SQS class names');
+                platform.capabilities = {
+                    cssInjection: true,
+                    themeEditor: false,
+                    pluginSystem: false,
+                    apiAccess: false
+                };
+            }
+            
+            // Webflow Detection
+            else if (document.querySelector('script[src*="webflow"]') ||
+                     document.querySelector('meta[name="generator"][content*="Webflow"]')) {
+                platform.type = 'webflow';
+                platform.name = 'Webflow';
+                platform.confidence = 0.8;
+                platform.indicators.push('Webflow generator meta tag', 'Webflow scripts');
+                platform.capabilities = {
+                    cssInjection: false,
+                    themeEditor: true,
+                    pluginSystem: false,
+                    apiAccess: true
+                };
+            }
+            
+            // Generic CMS Detection
+            else if (document.querySelector('meta[name="generator"]')) {
+                const generator = document.querySelector('meta[name="generator"]').content;
+                platform.name = generator.split(' ')[0];
+                platform.confidence = 0.5;
+                platform.indicators.push('Generic CMS generator tag');
+            }
+            
+            return platform;
+        });
+        
+        return platformInfo;
+        
+    } catch (error) {
+        console.log('❌ Platform detection failed:', error.message);
+        return {
+            type: 'unknown',
+            name: 'Unknown',
+            confidence: 0,
+            error: error.message
+        };
     } finally {
         await page.close();
     }
@@ -2649,6 +2877,9 @@ app.post('/api/scan', async (req, res) => {
         }
         
         console.log('🔍 Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
+        
+        // PHASE 1 ENHANCEMENT: Platform Detection
+        let platformInfo = null;
         
         // Launch Puppeteer - EXACT WORKING CONFIGURATION
         browser = await puppeteer.launch({
@@ -2677,6 +2908,10 @@ app.post('/api/scan', async (req, res) => {
             const results = await scanSinglePage(browser, targetUrl);
             const scanTime = Date.now() - startTime;
             
+            // PHASE 1 ENHANCEMENT: Detect platform for single page scans
+            platformInfo = await detectPlatform(browser, targetUrl);
+            console.log('🔍 Platform detected:', platformInfo);
+            
             console.log('✅ Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
             
             // Save to database - ADDED FOR PERSISTENCE
@@ -2689,6 +2924,7 @@ app.post('/api/scan', async (req, res) => {
                 timestamp: new Date().toISOString(),
                 totalIssues: results.violations.length,
                 scanTime: scanTime,
+                platformInfo: platformInfo, // PHASE 1 ENHANCEMENT
                 summary: {
                     critical: results.violations.filter(v => v.impact === 'critical').length,
                     serious: results.violations.filter(v => v.impact === 'serious').length,
@@ -2707,6 +2943,13 @@ app.post('/api/scan', async (req, res) => {
             
             // Scan the first page and extract links
             const firstPageResults = await scanSinglePage(browser, targetUrl);
+            
+            // PHASE 1 ENHANCEMENT: Detect platform after first page scan
+            if (!platformInfo) {
+                platformInfo = await detectPlatform(browser, targetUrl);
+                console.log('🔍 Platform detected:', platformInfo);
+            }
+            
             scannedPages.push({
                 url: targetUrl,
                 violations: firstPageResults.violations,
