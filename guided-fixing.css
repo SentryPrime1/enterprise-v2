@@ -1,0 +1,520 @@
+/* 🛠️ GUIDED FIXING WORKFLOW - STANDALONE CSS */
+/* This file is completely independent and will not conflict with existing styles */
+
+/* Guided Fixing Button */
+.gf-start-fixing-btn {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+    margin-left: 8px;
+}
+
+.gf-start-fixing-btn:hover {
+    background: linear-gradient(135deg, #218838, #1ea085);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+}
+
+.gf-start-fixing-btn:active {
+    transform: translateY(0);
+}
+
+/* Guided Fixing Modal */
+.gf-modal {
+    display: none;
+    position: fixed;
+    z-index: 10000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
+.gf-modal-content {
+    background-color: #ffffff;
+    margin: 2% auto;
+    padding: 0;
+    border-radius: 16px;
+    width: 90%;
+    max-width: 900px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: gfModalSlideIn 0.3s ease-out;
+}
+
+@keyframes gfModalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-50px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Modal Header */
+.gf-modal-header {
+    background: linear-gradient(135deg, #6f42c1, #8b5cf6);
+    color: white;
+    padding: 24px 32px;
+    border-radius: 16px 16px 0 0;
+    position: relative;
+}
+
+.gf-modal-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.gf-progress-indicator {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    margin-top: 12px;
+    display: inline-block;
+}
+
+.gf-close-btn {
+    position: absolute;
+    top: 20px;
+    right: 24px;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 28px;
+    cursor: pointer;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+}
+
+.gf-close-btn:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Modal Body */
+.gf-modal-body {
+    padding: 32px;
+}
+
+/* Violation Details */
+.gf-violation-details {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    border-left: 4px solid #6f42c1;
+}
+
+.gf-violation-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.gf-violation-impact {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.gf-violation-impact.gf-impact-critical {
+    background-color: #fee;
+    color: #dc3545;
+    border: 1px solid #f5c6cb;
+}
+
+.gf-violation-impact.gf-impact-serious {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+}
+
+.gf-violation-impact.gf-impact-moderate {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+.gf-violation-impact.gf-impact-minor {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.gf-violation-description {
+    margin: 16px 0;
+    line-height: 1.6;
+    color: #4a5568;
+}
+
+.gf-violation-help {
+    margin: 12px 0;
+    color: #6b7280;
+    font-style: italic;
+}
+
+.gf-violation-link {
+    color: #6f42c1;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.gf-violation-link:hover {
+    text-decoration: underline;
+}
+
+/* AI Fix Area */
+.gf-ai-fix-area {
+    margin-top: 24px;
+    min-height: 60px;
+}
+
+.gf-get-ai-fix-btn {
+    background: linear-gradient(135deg, #6f42c1, #8b5cf6);
+    color: white;
+    border: none;
+    padding: 14px 28px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(111, 66, 193, 0.3);
+    width: 100%;
+    margin-bottom: 16px;
+}
+
+.gf-get-ai-fix-btn:hover {
+    background: linear-gradient(135deg, #5a2d91, #7c3aed);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(111, 66, 193, 0.4);
+}
+
+.gf-get-ai-fix-btn:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Loading State */
+.gf-loading {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6b7280;
+}
+
+.gf-spinner {
+    border: 3px solid #f3f4f6;
+    border-top: 3px solid #6f42c1;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: gfSpin 1s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes gfSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* AI Suggestion Display */
+.gf-ai-suggestion {
+    background: #ffffff;
+    border: 2px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 24px;
+    margin-top: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.gf-ai-suggestion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #f3f4f6;
+}
+
+.gf-ai-suggestion-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1f2937;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.gf-priority-badge {
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.gf-priority-badge.gf-priority-high {
+    background-color: #fee2e2;
+    color: #dc2626;
+}
+
+.gf-priority-badge.gf-priority-medium {
+    background-color: #fef3c7;
+    color: #d97706;
+}
+
+.gf-priority-badge.gf-priority-low {
+    background-color: #dcfce7;
+    color: #16a34a;
+}
+
+.gf-ai-suggestion-content {
+    line-height: 1.6;
+}
+
+.gf-ai-suggestion-content p {
+    margin: 16px 0;
+    color: #374151;
+}
+
+.gf-ai-suggestion-content strong {
+    color: #1f2937;
+    font-weight: 600;
+}
+
+.gf-code-example {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow-x: auto;
+    color: #2d3748;
+}
+
+.gf-implementation-steps {
+    margin: 20px 0;
+}
+
+.gf-implementation-steps ol {
+    padding-left: 20px;
+}
+
+.gf-implementation-steps li {
+    margin: 8px 0;
+    color: #4a5568;
+    line-height: 1.5;
+}
+
+/* Save to Report Button */
+.gf-save-to-report-btn {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 16px;
+}
+
+.gf-save-to-report-btn:hover {
+    background: linear-gradient(135deg, #047857, #059669);
+    transform: translateY(-1px);
+}
+
+.gf-save-to-report-btn:disabled {
+    background: #6b7280;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.gf-save-to-report-btn.gf-saved {
+    background: #10b981;
+    cursor: default;
+}
+
+/* Modal Footer */
+.gf-modal-footer {
+    padding: 24px 32px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f9fafb;
+    border-radius: 0 0 16px 16px;
+}
+
+.gf-nav-buttons {
+    display: flex;
+    gap: 12px;
+}
+
+.gf-nav-btn {
+    padding: 10px 20px;
+    border: 2px solid #6f42c1;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: white;
+    color: #6f42c1;
+}
+
+.gf-nav-btn:hover:not(:disabled) {
+    background: #6f42c1;
+    color: white;
+    transform: translateY(-1px);
+}
+
+.gf-nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.gf-finish-btn {
+    background: linear-gradient(135deg, #dc3545, #e74c3c);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.gf-finish-btn:hover {
+    background: linear-gradient(135deg, #c82333, #dc3545);
+    transform: translateY(-1px);
+}
+
+/* Error State */
+.gf-error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    color: #dc2626;
+}
+
+.gf-error h4 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.gf-error p {
+    margin: 0;
+    font-size: 14px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .gf-modal-content {
+        width: 95%;
+        margin: 5% auto;
+        max-height: 90vh;
+    }
+    
+    .gf-modal-header,
+    .gf-modal-body,
+    .gf-modal-footer {
+        padding: 20px;
+    }
+    
+    .gf-modal-title {
+        font-size: 20px;
+    }
+    
+    .gf-nav-buttons {
+        flex-direction: column;
+        width: 100%;
+    }
+    
+    .gf-nav-btn,
+    .gf-finish-btn {
+        width: 100%;
+        margin: 4px 0;
+    }
+}
+
+/* Accessibility Enhancements */
+.gf-modal:focus-within {
+    outline: none;
+}
+
+.gf-modal-content:focus {
+    outline: 2px solid #6f42c1;
+    outline-offset: 2px;
+}
+
+/* High Contrast Mode Support */
+@media (prefers-contrast: high) {
+    .gf-modal-content {
+        border: 2px solid #000;
+    }
+    
+    .gf-violation-details {
+        border: 1px solid #000;
+    }
+    
+    .gf-ai-suggestion {
+        border: 2px solid #000;
+    }
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+    .gf-modal-content {
+        animation: none;
+    }
+    
+    .gf-spinner {
+        animation: none;
+    }
+    
+    * {
+        transition: none !important;
+    }
+}
