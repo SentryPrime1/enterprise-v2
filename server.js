@@ -1754,31 +1754,21 @@ app.get('/', (req, res) => {
                         </div>
                         
                         \${violations.length > 0 ? 
-                            violations.map(violation => \`
-                                <div class="violation">
-                                    <div class="violation-header">
-                                        <div class="violation-title">\${violation.id}</div>
-                                        <div class="violation-impact impact-\${violation.impact}">\${violation.impact}</div>
-                                    </div>
-                                    <div class="violation-body">
-                                        <div class="violation-description">\${violation.description}</div>
-                                        <div class="violation-help">
-                                            \${violation.help}
-                                            \${violation.helpUrl ? \`<br><a href="\${violation.helpUrl}" target="_blank">Learn more</a>\` : ''}
-                                        </div>
-                                    </div>
-                                </div>
-                            \`).join('') 
+                            '<div style="text-align: center; color: #666; padding: 20px; background: #f8f9fa; border-radius: 8px; margin: 20px 0;"><p>📋 <strong>' + violations.length + ' accessibility issues found</strong></p><p>Use the buttons below to view details or start fixing issues.</p></div>'
                             : '<p style="text-align: center; color: #28a745; font-size: 1.2rem; padding: 40px;">🎉 No accessibility issues found!</p>'
                         }
                         
                         <div style="margin-top: 20px; text-align: center;">
                             \${violations.length > 0 ? 
-                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')">🤖 Get AI Fix Suggestions</button>' 
+                                '<button class="view-report-btn" onclick="openDetailedReport(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
                                 : ''
                             }
                             \${violations.length > 0 ? 
-                                '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')">🛠️ Let\\'s Start Fixing</button>' 
+                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
+                                : ''
+                            }
+                            \${violations.length > 0 ? 
+                                '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🛠️ Let\\'s Start Fixing</button>' 
                                 : ''
                             }
                         </div>
@@ -1859,6 +1849,174 @@ app.get('/', (req, res) => {
         
         function closeAIModal() {
             document.getElementById('ai-modal').style.display = 'none';
+        }
+        
+        // NEW: Open detailed report in new tab
+        function openDetailedReport(violations) {
+            const reportWindow = window.open('', '_blank');
+            const reportHtml = \`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Accessibility Scan Report</title>
+                    <style>
+                        body { 
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            margin: 0; 
+                            padding: 20px; 
+                            background: #f8f9fa; 
+                            color: #333;
+                        }
+                        .report-header {
+                            background: white;
+                            padding: 30px;
+                            border-radius: 8px;
+                            margin-bottom: 20px;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                        }
+                        .report-title {
+                            font-size: 2rem;
+                            font-weight: bold;
+                            color: #333;
+                            margin-bottom: 10px;
+                        }
+                        .report-meta {
+                            color: #666;
+                            font-size: 1rem;
+                        }
+                        .violation {
+                            background: white;
+                            border-radius: 8px;
+                            margin-bottom: 20px;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                            overflow: hidden;
+                        }
+                        .violation-header {
+                            padding: 20px;
+                            border-bottom: 1px solid #eee;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                        }
+                        .violation-title {
+                            font-size: 1.25rem;
+                            font-weight: bold;
+                            color: #333;
+                        }
+                        .violation-impact {
+                            padding: 4px 12px;
+                            border-radius: 20px;
+                            font-size: 0.875rem;
+                            font-weight: bold;
+                            text-transform: uppercase;
+                        }
+                        .impact-critical { background: #dc3545; color: white; }
+                        .impact-serious { background: #fd7e14; color: white; }
+                        .impact-moderate { background: #ffc107; color: #333; }
+                        .impact-minor { background: #6c757d; color: white; }
+                        .violation-body {
+                            padding: 20px;
+                        }
+                        .violation-description {
+                            font-size: 1rem;
+                            margin-bottom: 15px;
+                            line-height: 1.5;
+                        }
+                        .violation-help {
+                            color: #666;
+                            font-size: 0.9rem;
+                            line-height: 1.4;
+                        }
+                        .violation-help a {
+                            color: #007bff;
+                            text-decoration: none;
+                        }
+                        .violation-help a:hover {
+                            text-decoration: underline;
+                        }
+                        .summary-stats {
+                            display: grid;
+                            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+                            gap: 15px;
+                            margin: 20px 0;
+                        }
+                        .stat-item {
+                            text-align: center;
+                            padding: 15px;
+                            background: #f8f9fa;
+                            border-radius: 6px;
+                        }
+                        .stat-value {
+                            font-size: 1.5rem;
+                            font-weight: bold;
+                            color: #333;
+                        }
+                        .stat-label {
+                            font-size: 0.875rem;
+                            color: #666;
+                            margin-top: 5px;
+                        }
+                        @media print {
+                            body { background: white; }
+                            .violation { box-shadow: none; border: 1px solid #ddd; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="report-header">
+                        <div class="report-title">🔍 Accessibility Scan Report</div>
+                        <div class="report-meta">Generated on \${new Date().toLocaleString()}</div>
+                        <div class="summary-stats">
+                            <div class="stat-item">
+                                <div class="stat-value">\${violations.length}</div>
+                                <div class="stat-label">Total Issues</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${violations.filter(v => v.impact === 'critical').length}</div>
+                                <div class="stat-label">Critical</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${violations.filter(v => v.impact === 'serious').length}</div>
+                                <div class="stat-label">Serious</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${violations.filter(v => v.impact === 'moderate').length}</div>
+                                <div class="stat-label">Moderate</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-value">\${violations.filter(v => v.impact === 'minor').length}</div>
+                                <div class="stat-label">Minor</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    \${violations.map((violation, index) => \`
+                        <div class="violation">
+                            <div class="violation-header">
+                                <div class="violation-title">\${index + 1}. \${violation.id}</div>
+                                <div class="violation-impact impact-\${violation.impact}">\${violation.impact}</div>
+                            </div>
+                            <div class="violation-body">
+                                <div class="violation-description">
+                                    <strong>Description:</strong> \${violation.description || 'No description available'}
+                                </div>
+                                <div class="violation-help">
+                                    <strong>Help:</strong> \${violation.help || 'Refer to WCAG guidelines for more information'}
+                                    \${violation.helpUrl ? \`<br><br><strong>Learn more:</strong> <a href="\${violation.helpUrl}" target="_blank">\${violation.helpUrl}</a>\` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    \`).join('')}
+                    
+                    <div style="text-align: center; margin: 40px 0; color: #666;">
+                        <p>Report generated by SentryPrime Enterprise Accessibility Scanner</p>
+                    </div>
+                </body>
+                </html>
+            \`;
+            
+            reportWindow.document.write(reportHtml);
+            reportWindow.document.close();
         }
         
         // NEW: Guided Fixing Workflow - Properly Namespaced
