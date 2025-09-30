@@ -1721,6 +1721,9 @@ app.get('/', (req, res) => {
             
             const violations = result.violations || result.pages?.reduce((acc, page) => acc.concat(page.violations || []), []) || [];
             
+            // Store violations globally for detailed report
+            currentViolations = violations;
+            
             resultsContainer.innerHTML = \`
                 <div class="scan-results">
                     <div class="results-header">
@@ -1760,7 +1763,7 @@ app.get('/', (req, res) => {
                         
                         <div style="margin-top: 20px; text-align: center;">
                             \${violations.length > 0 ? 
-                                '<button class="view-report-btn" onclick="openDetailedReport(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
+                                '<button class="view-report-btn" onclick="openDetailedReport()" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
                                 : ''
                             }
                             \${violations.length > 0 ? 
@@ -1851,8 +1854,13 @@ app.get('/', (req, res) => {
             document.getElementById('ai-modal').style.display = 'none';
         }
         
+        // Global variable to store current violations for detailed report
+        let currentViolations = [];
+        
         // NEW: Open detailed report in new tab
         function openDetailedReport(violations) {
+            // Use the stored violations if no parameter passed
+            const violationsToShow = violations || currentViolations;
             const reportWindow = window.open('', '_blank');
             const reportHtml = \`
                 <!DOCTYPE html>
@@ -1968,29 +1976,29 @@ app.get('/', (req, res) => {
                         <div class="report-meta">Generated on \${new Date().toLocaleString()}</div>
                         <div class="summary-stats">
                             <div class="stat-item">
-                                <div class="stat-value">\${violations.length}</div>
+                                <div class="stat-value">\${violationsToShow.length}</div>
                                 <div class="stat-label">Total Issues</div>
                             </div>
                             <div class="stat-item">
-                                <div class="stat-value">\${violations.filter(v => v.impact === 'critical').length}</div>
+                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'critical').length}</div>
                                 <div class="stat-label">Critical</div>
                             </div>
                             <div class="stat-item">
-                                <div class="stat-value">\${violations.filter(v => v.impact === 'serious').length}</div>
+                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'serious').length}</div>
                                 <div class="stat-label">Serious</div>
                             </div>
                             <div class="stat-item">
-                                <div class="stat-value">\${violations.filter(v => v.impact === 'moderate').length}</div>
+                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'moderate').length}</div>
                                 <div class="stat-label">Moderate</div>
                             </div>
                             <div class="stat-item">
-                                <div class="stat-value">\${violations.filter(v => v.impact === 'minor').length}</div>
+                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'minor').length}</div>
                                 <div class="stat-label">Minor</div>
                             </div>
                         </div>
                     </div>
                     
-                    \${violations.map((violation, index) => \`
+                    \${violationsToShow.map((violation, index) => \`
                         <div class="violation">
                             <div class="violation-header">
                                 <div class="violation-title">\${index + 1}. \${violation.id}</div>
