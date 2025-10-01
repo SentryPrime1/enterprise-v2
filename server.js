@@ -85,7 +85,7 @@ if (process.env.OPENAI_API_KEY) {
 }
 
 // Database helper functions - PRESERVED FROM WORKING VERSION
-async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned, violations) {
+async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned, violations, platform = 'unknown') {
     if (!db) {
         console.log('⚠️ No database connection, skipping scan save');
         return null;
@@ -93,10 +93,10 @@ async function saveScan(userId, organizationId, url, scanType, totalIssues, scan
     
     try {
         const result = await db.query(
-            `INSERT INTO scans (user_id, organization_id, url, scan_type, status, total_issues, scan_time_ms, pages_scanned, violations_data, completed_at) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) 
+            `INSERT INTO scans (user_id, organization_id, url, scan_type, status, total_issues, scan_time_ms, pages_scanned, violations_data, platform, completed_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW()) 
              RETURNING id`,
-            [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned || 1, JSON.stringify(violations)]
+            [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned || 1, JSON.stringify(violations), platform]
         );
         
         const scanId = result.rows[0].id;
@@ -430,11 +430,27 @@ function parseAITextResponse(aiResponse, violationId) {
             steps = ['Review the accessibility violation details', 'Apply the suggested code changes', 'Test with screen readers'];
         }
         
+        // PHASE 2 ENHANCEMENT: Extract before/after code for auto-fix
+        const beforeRegex = /(\/\*\s*Before\s*\*\/|<!--\s*Before\s*-->)\s*([\s\S]*?)(\s*\/\*\s*After|\s*<!--\s*After)/;
+        const afterRegex = /(\/\*\s*After\s*\*\/|<!--\s*After\s*-->)\s*([\s\S]*)/;
+
+        const beforeMatch = codeExample.match(beforeRegex);
+        const afterMatch = codeExample.match(afterRegex);
+
+        let fix = null;
+        if (beforeMatch && afterMatch) {
+            fix = {
+                beforeCode: beforeMatch[2].trim(),
+                afterCode: afterMatch[2].trim()
+            };
+        }
+
         return {
             priority: ['high', 'medium', 'low'].includes(priority) ? priority : 'medium',
             explanation: explanation,
             codeExample: codeExample,
-            steps: steps
+            steps: steps,
+            fix: fix // PHASE 2: Add parsed fix for auto-implementation
         };
         
     } catch (error) {
@@ -2334,6 +2350,8 @@ app.get('/', (req, res) => {
                                     '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
                                     '<div style="margin-top: 16px;">' +
                                         '<button onclick="GuidedFixing.saveFixToReport()" class="btn btn-success">💾 Save to Report</button>' +
+                                        (suggestion.fix ? '<button onclick="GuidedFixing.previewFix()" class="btn btn-primary" style="margin-left: 8px;">👁️ Preview Fix</button>' : '') +
+                                        (suggestion.fix ? '<button onclick="GuidedFixing.applyFix()" class="btn btn-warning" style="margin-left: 8px;">⚡ Apply Fix</button>' : '') +
                                     '</div>' +
                                 '</div>' +
                             '</div>';
@@ -2371,6 +2389,101 @@ app.get('/', (req, res) => {
                         saveButton.disabled = true;
                         saveButton.style.background = '#28a745';
                     }
+                }
+            },
+            
+            // PHASE 2: Preview Fix Method
+            previewFix: function() {
+                const violation = this.currentViolations[this.currentViolationIndex];
+                if (!violation.aiSuggestion || !violation.aiSuggestion.fix) {
+                    alert('No parsed fix available for preview. Please ensure the AI suggestion includes before/after code.');
+                    return;
+                }
+                
+                const fix = violation.aiSuggestion.fix;
+                const previewModal = document.createElement('div');
+                previewModal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center;';
+                previewModal.innerHTML = 
+                    '<div style="background: white; padding: 30px; border-radius: 8px; max-width: 80%; max-height: 80%; overflow-y: auto;">' +
+                        '<h3>Fix Preview</h3>' +
+                        '<div style="display: flex; gap: 20px; margin: 20px 0;">' +
+                            '<div style="flex: 1;">' +
+                                '<h4 style="color: #dc3545;">Before (Current Code)</h4>' +
+                                '<pre style="background: #f8d7da; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + fix.beforeCode + '</code></pre>' +
+                            '</div>' +
+                            '<div style="flex: 1;">' +
+                                '<h4 style="color: #28a745;">After (Fixed Code)</h4>' +
+                                '<pre style="background: #d4edda; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + fix.afterCode + '</code></pre>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div style="text-align: center; margin-top: 20px;">' +
+                            '<button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Close Preview</button>' +
+                        '</div>' +
+                    '</div>';
+                
+                document.body.appendChild(previewModal);
+            },
+            
+            // PHASE 2: Apply Fix Method
+            applyFix: async function() {
+                const violation = this.currentViolations[this.currentViolationIndex];
+                if (!violation.aiSuggestion || !violation.aiSuggestion.fix) {
+                    alert('No parsed fix available to apply. Please ensure the AI suggestion includes before/after code.');
+                    return;
+                }
+                
+                // Get the detected platform from the scan results
+                const platform = window.currentPlatformInfo?.type || 'unknown';
+                
+                if (platform === 'unknown') {
+                    alert('Platform not detected. Auto-fix is only available for supported platforms (Shopify, WordPress, etc.).');
+                    return;
+                }
+                
+                if (!confirm('Are you sure you want to apply this fix to your ' + platform + ' website? This will make changes to your live site.')) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/apply-fix', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            platform: platform,
+                            fix: violation.aiSuggestion.fix,
+                            context: {
+                                violationId: violation.id,
+                                url: window.currentPlatformInfo?.url || '',
+                                element: violation.target ? violation.target[0] : null
+                            }
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('Fix applied successfully! ' + result.message);
+                        
+                        // Mark this violation as fixed
+                        violation.fixed = true;
+                        
+                        // Update the UI to show the fix was applied
+                        const aiFixArea = document.getElementById('ai-fix-area');
+                        const applyButton = aiFixArea.querySelector('button[onclick="GuidedFixing.applyFix()"]');
+                        if (applyButton) {
+                            applyButton.textContent = '✅ Fix Applied';
+                            applyButton.disabled = true;
+                            applyButton.style.background = '#28a745';
+                        }
+                    } else {
+                        alert('Failed to apply fix: ' + (result.error || 'Unknown error'));
+                    }
+                    
+                } catch (error) {
+                    console.error('Error applying fix:', error);
+                    alert('Error applying fix. Please try again or apply the fix manually.');
                 }
             },
             
@@ -2947,7 +3060,7 @@ app.post('/api/scan', async (req, res) => {
             console.log('✅ Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
             
             // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, results.violations.length, scanTime, 1, results.violations);
+            await saveScan(1, 1, targetUrl, scanType, results.violations.length, scanTime, 1, results.violations, platformInfo?.type || 'unknown');
             
             res.json({
                 success: true,
@@ -3044,7 +3157,7 @@ app.post('/api/scan', async (req, res) => {
             console.log('✅ Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
             
             // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations);
+            await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations, platformInfo?.type || 'unknown');
             
             res.json({
                 success: true,
@@ -3101,3 +3214,153 @@ app.listen(PORT, () => {
     console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
     console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
 });
+
+// --- PHASE 2 AUTO-FIX BACKEND ---
+
+// Platform Detection Function
+async function detectPlatform(page) {
+    const platformChecks = {
+        shopify: {
+            selectors: ["meta[name='shopify-checkout-api-token']"],
+            scripts: ["Shopify"],
+            urlPatterns: [/cdn\.shopify\.com/]
+        },
+        wordpress: {
+            selectors: ["meta[name='generator'][content*='WordPress']"],
+            scripts: [],
+            urlPatterns: [/\/wp-content\//, /\/wp-includes\//]
+        },
+        wix: {
+            selectors: ["meta[name='generator'][content*='Wix.com']"],
+            scripts: [],
+            urlPatterns: [/static\.wixstatic\.com/]
+        },
+        squarespace: {
+            selectors: [".squarespace-damask"],
+            scripts: ["Squarespace"],
+            urlPatterns: [/static\.squarespace\.com/]
+        }
+    };
+
+    const content = await page.content();
+
+    for (const [platform, checks] of Object.entries(platformChecks)) {
+        for (const selector of checks.selectors) {
+            if (await page.$(selector)) {
+                return platform;
+            }
+        }
+
+        for (const script of checks.scripts) {
+            try {
+                const scriptResult = await page.evaluate((script) => {
+                    return typeof window[script] !== 'undefined';
+                }, script);
+                if (scriptResult) {
+                    return platform;
+                }
+            } catch (error) {
+                // Ignore errors
+            }
+        }
+
+        for (const pattern of checks.urlPatterns) {
+            if (pattern.test(content)) {
+                return platform;
+            }
+        }
+    }
+
+    return 'unknown';
+}
+
+// API endpoint to apply a fix
+app.post('/api/apply-fix', async (req, res) => {
+    const { platform, fix, context } = req.body;
+
+    if (!platform || !fix || !context) {
+        return res.status(400).json({ error: 'Platform, fix, and context are required' });
+    }
+
+    try {
+        let result;
+        if (platform === 'shopify') {
+            result = await applyShopifyFix(fix, context);
+        } else if (platform === 'wordpress') {
+            result = await applyWordPressFix(fix, context);
+        } else if (platform === 'wix') {
+            result = await applyWixFix(fix, context);
+        } else if (platform === 'squarespace') {
+            result = await applySquarespaceFix(fix, context);
+        } else {
+            return res.status(400).json({ error: `Platform '${platform}' not supported for auto-fixing yet` });
+        }
+
+        res.json(result);
+    } catch (error) {
+        console.error('Error applying fix:', error);
+        res.status(500).json({ error: 'Failed to apply fix' });
+    }
+});
+
+// Placeholder for Shopify auto-fix implementation
+async function applyShopifyFix(fix, context) {
+    console.log('Applying Shopify fix:', { fix, context });
+
+    // TODO: Implement Shopify Admin API calls here
+    // 1. Authenticate with Shopify Admin API
+    // 2. Fetch the relevant theme file/asset
+    // 3. Apply the code change (replace 'before' with 'after')
+    // 4. Save the updated file/asset
+
+    // For now, return a mock success response
+    return {
+        success: true,
+        message: 'Shopify fix applied successfully (mocked).',
+        platform: 'shopify'
+    };
+}
+
+// Placeholder for WordPress auto-fix implementation
+async function applyWordPressFix(fix, context) {
+    console.log('Applying WordPress fix:', { fix, context });
+
+    // TODO: Implement WordPress REST API calls here
+    // 1. Authenticate with WordPress REST API (e.g., using Application Passwords)
+    // 2. Fetch the relevant theme file/asset
+    // 3. Apply the code change (replace 'before' with 'after')
+    // 4. Save the updated file/asset
+
+    // For now, return a mock success response
+    return {
+        success: true,
+        message: 'WordPress fix applied successfully (mocked).',
+        platform: 'wordpress'
+    };
+}
+
+// Placeholder for Wix auto-fix implementation
+async function applyWixFix(fix, context) {
+    console.log('Applying Wix fix:', { fix, context });
+
+    // TODO: Implement Wix API calls here
+
+    return {
+        success: true,
+        message: 'Wix fix applied successfully (mocked).',
+        platform: 'wix'
+    };
+}
+
+// Placeholder for Squarespace auto-fix implementation
+async function applySquarespaceFix(fix, context) {
+    console.log('Applying Squarespace fix:', { fix, context });
+
+    // TODO: Implement Squarespace API calls here
+
+    return {
+        success: true,
+        message: 'Squarespace fix applied successfully (mocked).',
+        platform: 'squarespace'
+    };
+}
