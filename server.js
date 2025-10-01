@@ -517,7 +517,21 @@ Format your response as JSON with these fields:
             });
 
             const aiResponse = completion.choices[0].message.content;
-            const suggestion = JSON.parse(aiResponse);
+            
+            // Try to parse JSON, with fallback for non-JSON responses
+            let suggestion;
+            try {
+                suggestion = JSON.parse(aiResponse);
+            } catch (parseError) {
+                console.log(`⚠️ AI response not valid JSON for ${violation.id}, creating structured response`);
+                // Create structured response from text
+                suggestion = {
+                    priority: 'medium',
+                    explanation: aiResponse.substring(0, 200) + '...',
+                    codeExample: '// See full AI response for code examples',
+                    steps: aiResponse.split('\n').filter(line => line.trim().length > 0).slice(0, 5)
+                };
+            }
             
             console.log(`✅ AI suggestion generated for ${violation.id}`);
             return suggestion;
@@ -1855,12 +1869,13 @@ app.get('/', (req, res) => {
         }
         
         function displayScanResults(result) {
+            // Store violations and platform info globally
+            currentViolations = result.violations;
+            window.currentPlatformInfo = result.platformInfo;
+            
             const resultsContainer = document.getElementById('scan-results-container');
             
-            const violations = result.violations || result.pages?.reduce((acc, page) => acc.concat(page.violations || []), []) || [];
-            
-            // Store violations globally for detailed report
-            currentViolations = violations;
+            const violations = result.violations || result.pages?.reduce((acc, page) => acc.concat(page.violations), []) || [];
             
             resultsContainer.innerHTML = \`
                 <div class="scan-results">
@@ -1905,7 +1920,7 @@ app.get('/', (req, res) => {
                                 : ''
                             }
                             \${violations.length > 0 ? 
-                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
+                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ', ' + JSON.stringify(result.platformInfo || {}).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
                                 : ''
                             }
                             \${violations.length > 0 ? 
@@ -1937,7 +1952,7 @@ app.get('/', (req, res) => {
         }
         
         // AI Suggestions functionality - PRESERVED FROM WORKING VERSION
-        async function showAISuggestions(violations) {
+        async function showAISuggestions(violations, platformInfo = null) {
             const modal = document.getElementById('ai-modal');
             const modalBody = document.getElementById('ai-modal-body');
             
@@ -1950,7 +1965,7 @@ app.get('/', (req, res) => {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ violations })
+                    body: JSON.stringify({ violations, platformInfo })
                 });
                 
                 if (!response.ok) {
@@ -2293,7 +2308,7 @@ app.get('/', (req, res) => {
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ violations: [violation] })
+                        body: JSON.stringify({ violations: [violation], platformInfo: window.currentPlatformInfo || null })
                     });
                     
                     if (!response.ok) {
@@ -2742,11 +2757,12 @@ async function detectPlatform(browser, url) {
                 }
             };
             
-            // WordPress Detection
-            if (document.querySelector('meta[name="generator"][content*="WordPress"]') ||
-                document.querySelector('link[href*="wp-content"]') ||
-                document.querySelector('script[src*="wp-content"]') ||
-                window.wp || document.body.className.includes('wp-')) {
+            // WordPress Detection (More Specific)
+            if ((document.querySelector('meta[name="generator"][content*="WordPress"]') ||
+                (document.querySelector('link[href*="wp-content"]') && document.querySelector('script[src*="wp-content"]')) ||
+                (window.wp && document.querySelector('link[href*="wp-content"]')) ||
+                document.body.className.includes('wp-')) &&
+                !document.querySelector('script[src*="shopify"]')) { // Exclude if Shopify detected
                 platform.type = 'wordpress';
                 platform.name = 'WordPress';
                 platform.confidence = 0.9;
@@ -2766,10 +2782,16 @@ async function detectPlatform(browser, url) {
                 }
             }
             
-            // Shopify Detection
+            // Shopify Detection (Enhanced)
             else if (document.querySelector('script[src*="shopify"]') ||
                      document.querySelector('link[href*="shopify"]') ||
-                     window.Shopify || document.querySelector('[data-shopify]')) {
+                     document.querySelector('script[src*="shopifycdn"]') ||
+                     document.querySelector('meta[name="shopify-checkout-api-token"]') ||
+                     document.querySelector('script[src*="monorail-edge.shopifysvc.com"]') ||
+                     window.Shopify || 
+                     document.querySelector('[data-shopify]') ||
+                     document.querySelector('script').textContent?.includes('Shopify') ||
+                     document.querySelector('script').textContent?.includes('shop_money_format')) {
                 platform.type = 'shopify';
                 platform.name = 'Shopify';
                 platform.confidence = 0.9;
