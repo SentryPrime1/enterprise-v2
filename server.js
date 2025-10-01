@@ -3028,8 +3028,8 @@ app.post('/api/scan', async (req, res) => {
         
         // Launch Puppeteer - EXACT WORKING CONFIGURATION
         browser = await puppeteer.launch({
+            executablePath: '/usr/bin/chromium-browser',
             headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -3216,63 +3216,6 @@ app.listen(PORT, () => {
 });
 
 // --- PHASE 2 AUTO-FIX BACKEND ---
-
-// Platform Detection Function
-async function detectPlatform(page) {
-    const platformChecks = {
-        shopify: {
-            selectors: ["meta[name='shopify-checkout-api-token']"],
-            scripts: ["Shopify"],
-            urlPatterns: [/cdn\.shopify\.com/]
-        },
-        wordpress: {
-            selectors: ["meta[name='generator'][content*='WordPress']"],
-            scripts: [],
-            urlPatterns: [/\/wp-content\//, /\/wp-includes\//]
-        },
-        wix: {
-            selectors: ["meta[name='generator'][content*='Wix.com']"],
-            scripts: [],
-            urlPatterns: [/static\.wixstatic\.com/]
-        },
-        squarespace: {
-            selectors: [".squarespace-damask"],
-            scripts: ["Squarespace"],
-            urlPatterns: [/static\.squarespace\.com/]
-        }
-    };
-
-    const content = await page.content();
-
-    for (const [platform, checks] of Object.entries(platformChecks)) {
-        for (const selector of checks.selectors) {
-            if (await page.$(selector)) {
-                return platform;
-            }
-        }
-
-        for (const script of checks.scripts) {
-            try {
-                const scriptResult = await page.evaluate((script) => {
-                    return typeof window[script] !== 'undefined';
-                }, script);
-                if (scriptResult) {
-                    return platform;
-                }
-            } catch (error) {
-                // Ignore errors
-            }
-        }
-
-        for (const pattern of checks.urlPatterns) {
-            if (pattern.test(content)) {
-                return platform;
-            }
-        }
-    }
-
-    return 'unknown';
-}
 
 // API endpoint to apply a fix
 app.post('/api/apply-fix', async (req, res) => {
