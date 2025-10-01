@@ -399,105 +399,56 @@ app.post('/api/ai-fixes', async (req, res) => {
 });
 
 async function generateAISuggestion(violation, platformInfo = null) {
-    // Predefined suggestions for fast response and fallback
-    const predefinedSuggestions = {
-        'color-contrast': {
-            priority: 'high',
-            explanation: 'Text color does not have sufficient contrast against the background color, making it difficult for users with visual impairments to read.',
-            codeExample: `/* Before */
-.text { color: #999; background: #fff; }
-
-/* After - Improved contrast */
-.text { color: #333; background: #fff; }`,
-            steps: [
-                'Identify elements with insufficient color contrast',
-                'Use a color contrast checker tool to test ratios',
-                'Adjust text color or background color to meet WCAG AA standards (4.5:1 ratio)',
-                'Test with users who have visual impairments',
-                'Verify the new colors work across different devices and lighting conditions'
-            ]
-        },
-        'image-alt': {
-            priority: 'high',
-            explanation: 'Images must have alternative text that describes their content for screen reader users.',
-            codeExample: `<!-- Before -->
-<img src="chart.png">
-
-<!-- After -->
-<img src="chart.png" alt="Sales increased 25% from Q1 to Q2 2024">`,
-            steps: [
-                'Identify all images missing alt attributes',
-                'Write descriptive alt text that conveys the image\'s purpose',
-                'For decorative images, use alt=""',
-                'For complex images like charts, consider longer descriptions',
-                'Test with screen readers to ensure alt text is helpful'
-            ]
-        },
-        'heading-order': {
-            priority: 'medium',
-            explanation: 'Headings should follow a logical hierarchy (h1, h2, h3) to help screen reader users navigate content.',
-            codeExample: `<!-- Before -->
-<h1>Main Title</h1>
-<h3>Subsection</h3>
-
-<!-- After -->
-<h1>Main Title</h1>
-<h2>Subsection</h2>`,
-            steps: [
-                'Review current heading structure',
-                'Ensure only one h1 per page',
-                'Use headings in sequential order (don\'t skip levels)',
-                'Make headings descriptive of the content that follows',
-                'Test navigation with screen readers'
-            ]
-        },
-        'link-name': {
-            priority: 'medium',
-            explanation: 'Links must have accessible names that clearly describe their destination or purpose.',
-            codeExample: `<!-- Before -->
-<a href="/contact">Click here</a>
-
-<!-- After -->
-<a href="/contact">Contact our support team</a>`,
-            steps: [
-                'Find links with vague text like "click here" or "read more"',
-                'Rewrite link text to be descriptive and specific',
-                'Ensure link purpose is clear from the text alone',
-                'For icon links, add aria-label attributes',
-                'Test that links make sense when read out of context'
-            ]
-        }
-    };
-
-    // If we have a predefined suggestion, use it for fast response
-    if (predefinedSuggestions[violation.id]) {
-        return predefinedSuggestions[violation.id];
-    }
+    console.log(`🤖 Forcing OpenAI call for ${violation.id} to get specific suggestions`);
+    
+    // Extract element details from the first node if available
+    const firstNode = violation.nodes?.[0];
+    const elementDetails = firstNode ? {
+        html: firstNode.html || 'Not available',
+        target: firstNode.target?.[0] || 'Not available',
+        failureSummary: firstNode.failureSummary || 'Not available'
+    } : null;
 
     // Try to get AI-generated suggestion if OpenAI is available
     if (openai) {
         try {
             console.log(`🤖 Generating AI suggestion for violation: ${violation.id}`);
             
-            const prompt = `You are an accessibility expert. Provide a detailed fix suggestion for this accessibility violation:
+            const prompt = `You are an accessibility expert specializing in ${platformInfo?.name || 'web'} websites. Provide a detailed, SPECIFIC fix suggestion for this accessibility violation:
 
-Violation ID: ${violation.id}
-Description: ${violation.description || 'No description provided'}
-Impact: ${violation.impact || 'Unknown'}
-Help URL: ${violation.helpUrl || 'N/A'}
+VIOLATION DETAILS:
+- ID: ${violation.id}
+- Description: ${violation.description || 'No description provided'}
+- Impact: ${violation.impact || 'Unknown'}
+- Help URL: ${violation.helpUrl || 'N/A'}
 
-Please provide:
-1. Priority level (high/medium/low)
-2. Clear explanation of the issue
-3. Code example showing before and after
-4. Step-by-step implementation guide
+${elementDetails ? `
+SPECIFIC ELEMENT DETAILS:
+- HTML: ${elementDetails.html}
+- CSS Selector: ${elementDetails.target}
+- Issue: ${elementDetails.failureSummary}
+` : ''}
 
-Format your response as JSON with these fields:
+${platformInfo ? `
+PLATFORM INFORMATION:
+- Platform: ${platformInfo.name} (${platformInfo.type})
+- Confidence: ${Math.round(platformInfo.confidence * 100)}%
+- Capabilities: CSS Injection: ${platformInfo.capabilities?.cssInjection}, Theme Editor: ${platformInfo.capabilities?.themeEditor}
+` : ''}
+
+Please provide a SPECIFIC fix suggestion in JSON format:
 {
   "priority": "high|medium|low",
-  "explanation": "detailed explanation",
-  "codeExample": "code example with before/after",
-  "steps": ["step 1", "step 2", "step 3", ...]
+  "explanation": "Specific explanation for this exact element and platform",
+  "codeExample": "Before and after code showing the EXACT fix for this specific element",
+  "steps": ["Specific step 1 for ${platformInfo?.name || 'this platform'}", "Specific step 2", "etc."],
+  ${platformInfo ? `"platformSpecific": {
+    "method": "How to implement this fix on ${platformInfo.name}",
+    "location": "Where to make the change (theme editor, CSS file, etc.)",
+    "code": "${platformInfo.name}-specific code or instructions"
+  },` : ''}
+  "specificElement": "${elementDetails?.target || 'Not available'}",
+  "currentHTML": "${elementDetails?.html || 'Not available'}"
 }`;
 
             const completion = await openai.chat.completions.create({
@@ -2757,7 +2708,7 @@ async function detectPlatform(browser, url) {
                 }
             };
             
-            // WordPress Detection (More Specific)
+            // WordPress Detection (More Specific) - Only if not Shopify
             if ((document.querySelector('meta[name="generator"][content*="WordPress"]') ||
                 (document.querySelector('link[href*="wp-content"]') && document.querySelector('script[src*="wp-content"]')) ||
                 (window.wp && document.querySelector('link[href*="wp-content"]')) ||
@@ -2782,16 +2733,25 @@ async function detectPlatform(browser, url) {
                 }
             }
             
-            // Shopify Detection (Enhanced)
-            else if (document.querySelector('script[src*="shopify"]') ||
-                     document.querySelector('link[href*="shopify"]') ||
-                     document.querySelector('script[src*="shopifycdn"]') ||
-                     document.querySelector('meta[name="shopify-checkout-api-token"]') ||
-                     document.querySelector('script[src*="monorail-edge.shopifysvc.com"]') ||
-                     window.Shopify || 
-                     document.querySelector('[data-shopify]') ||
-                     document.querySelector('script').textContent?.includes('Shopify') ||
-                     document.querySelector('script').textContent?.includes('shop_money_format')) {
+            // Shopify Detection (Enhanced and More Aggressive)
+            if (document.querySelector('script[src*="shopify"]') ||
+                document.querySelector('link[href*="shopify"]') ||
+                document.querySelector('script[src*="shopifycdn"]') ||
+                document.querySelector('meta[name="shopify-checkout-api-token"]') ||
+                document.querySelector('script[src*="monorail-edge.shopifysvc.com"]') ||
+                document.querySelector('[id*="shopify"]') ||
+                document.querySelector('[class*="shopify"]') ||
+                document.querySelector('div[id*="shopify-section"]') ||
+                document.querySelector('script[src*="cdn.shopify.com"]') ||
+                window.Shopify || 
+                document.querySelector('[data-shopify]') ||
+                Array.from(document.querySelectorAll('script')).some(script => 
+                    script.textContent && (
+                        script.textContent.includes('Shopify') ||
+                        script.textContent.includes('shop_money_format') ||
+                        script.textContent.includes('shopify-section')
+                    )
+                )) {
                 platform.type = 'shopify';
                 platform.name = 'Shopify';
                 platform.confidence = 0.9;
