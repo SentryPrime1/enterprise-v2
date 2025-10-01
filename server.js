@@ -3028,7 +3028,7 @@ app.post('/api/scan', async (req, res) => {
         
         // Launch Puppeteer - EXACT WORKING CONFIGURATION
         browser = await puppeteer.launch({
-            executablePath: '/usr/bin/chromium-browser',
+            executablePath: '/usr/bin/google-chrome-stable',
             headless: 'new',
             args: [
                 '--no-sandbox',
