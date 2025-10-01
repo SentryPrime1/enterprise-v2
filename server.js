@@ -463,25 +463,46 @@ Please provide a SPECIFIC fix suggestion in JSON format:
                         content: prompt
                     }
                 ],
-                max_tokens: 1000,
+                max_tokens: 2500,
                 temperature: 0.7
             });
 
             const aiResponse = completion.choices[0].message.content;
+            console.log(`📝 AI response length: ${aiResponse.length} characters for ${violation.id}`);
+            console.log(`📄 AI response preview: ${aiResponse.substring(0, 200)}...`);
             
             // Try to parse JSON, with fallback for non-JSON responses
             let suggestion;
             try {
                 suggestion = JSON.parse(aiResponse);
+                console.log(`✅ Successfully parsed JSON response for ${violation.id}`);
             } catch (parseError) {
-                console.log(`⚠️ AI response not valid JSON for ${violation.id}, creating structured response`);
-                // Create structured response from text
-                suggestion = {
-                    priority: 'medium',
-                    explanation: aiResponse.substring(0, 200) + '...',
-                    codeExample: '// See full AI response for code examples',
-                    steps: aiResponse.split('\n').filter(line => line.trim().length > 0).slice(0, 5)
-                };
+                console.log(`⚠️ AI response not valid JSON for ${violation.id}, attempting to fix JSON`);
+                
+                // Try to fix common JSON issues
+                let fixedResponse = aiResponse;
+                
+                // Add missing closing braces if needed
+                const openBraces = (aiResponse.match(/{/g) || []).length;
+                const closeBraces = (aiResponse.match(/}/g) || []).length;
+                if (openBraces > closeBraces) {
+                    fixedResponse += '}'.repeat(openBraces - closeBraces);
+                }
+                
+                // Try parsing the fixed response
+                try {
+                    suggestion = JSON.parse(fixedResponse);
+                    console.log(`✅ Successfully fixed and parsed JSON for ${violation.id}`);
+                } catch (secondParseError) {
+                    console.log(`❌ Could not fix JSON for ${violation.id}, creating structured response`);
+                    // Create structured response from text
+                    suggestion = {
+                        priority: 'medium',
+                        explanation: aiResponse.substring(0, 500) + '...',
+                        codeExample: '// Full AI response available in logs',
+                        steps: aiResponse.split('\n').filter(line => line.trim().length > 0).slice(0, 8)
+                    };
+                }
             }
             
             console.log(`✅ AI suggestion generated for ${violation.id}`);
