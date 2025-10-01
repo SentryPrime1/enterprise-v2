@@ -398,6 +398,56 @@ app.post('/api/ai-fixes', async (req, res) => {
     }
 });
 
+// Parse AI text response into structured format
+function parseAITextResponse(aiResponse, violationId) {
+    try {
+        // Extract sections using regex patterns
+        const priorityMatch = aiResponse.match(/PRIORITY:\s*([^\n]+)/i);
+        const explanationMatch = aiResponse.match(/EXPLANATION:\s*([\s\S]*?)(?=CODE EXAMPLE:|IMPLEMENTATION STEPS:|$)/i);
+        const codeMatch = aiResponse.match(/CODE EXAMPLE:\s*([\s\S]*?)(?=IMPLEMENTATION STEPS:|PLATFORM-SPECIFIC|$)/i);
+        const stepsMatch = aiResponse.match(/IMPLEMENTATION STEPS:\s*([\s\S]*?)(?=PLATFORM-SPECIFIC|SPECIFIC ELEMENT:|$)/i);
+        
+        // Extract priority
+        const priority = priorityMatch ? priorityMatch[1].trim().toLowerCase() : 'medium';
+        
+        // Extract explanation
+        const explanation = explanationMatch ? explanationMatch[1].trim() : 
+            `Accessibility issue (${violationId}) needs attention to improve user experience.`;
+        
+        // Extract code example
+        const codeExample = codeMatch ? codeMatch[1].trim() : 
+            '// Refer to the implementation steps for specific code changes';
+        
+        // Extract and parse steps
+        let steps = [];
+        if (stepsMatch) {
+            const stepsText = stepsMatch[1].trim();
+            steps = stepsText.split(/\d+\./).filter(step => step.trim().length > 0)
+                .map(step => step.trim()).slice(0, 10); // Limit to 10 steps
+        }
+        
+        if (steps.length === 0) {
+            steps = ['Review the accessibility violation details', 'Apply the suggested code changes', 'Test with screen readers'];
+        }
+        
+        return {
+            priority: ['high', 'medium', 'low'].includes(priority) ? priority : 'medium',
+            explanation: explanation,
+            codeExample: codeExample,
+            steps: steps
+        };
+        
+    } catch (error) {
+        console.log(`⚠️ Error parsing AI response for ${violationId}:`, error.message);
+        return {
+            priority: 'medium',
+            explanation: aiResponse.substring(0, 500) + '...',
+            codeExample: '// Full AI response available in logs',
+            steps: ['Review the AI suggestion', 'Apply recommended changes', 'Test accessibility improvements']
+        };
+    }
+}
+
 async function generateAISuggestion(violation, platformInfo = null) {
     console.log(`🤖 Forcing OpenAI call for ${violation.id} to get specific suggestions`);
     
@@ -436,20 +486,29 @@ PLATFORM INFORMATION:
 - Capabilities: CSS Injection: ${platformInfo.capabilities?.cssInjection}, Theme Editor: ${platformInfo.capabilities?.themeEditor}
 ` : ''}
 
-Please provide a SPECIFIC fix suggestion in JSON format:
-{
-  "priority": "high|medium|low",
-  "explanation": "Specific explanation for this exact element and platform",
-  "codeExample": "Before and after code showing the EXACT fix for this specific element",
-  "steps": ["Specific step 1 for ${platformInfo?.name || 'this platform'}", "Specific step 2", "etc."],
-  ${platformInfo ? `"platformSpecific": {
-    "method": "How to implement this fix on ${platformInfo.name}",
-    "location": "Where to make the change (theme editor, CSS file, etc.)",
-    "code": "${platformInfo.name}-specific code or instructions"
-  },` : ''}
-  "specificElement": "${elementDetails?.target || 'Not available'}",
-  "currentHTML": "${elementDetails?.html || 'Not available'}"
-}`;
+Please provide a SPECIFIC fix suggestion with these sections:
+
+PRIORITY: (high/medium/low)
+
+EXPLANATION: 
+Provide a specific explanation for this exact element and platform.
+
+CODE EXAMPLE:
+Show the EXACT before and after code for this specific element.
+
+IMPLEMENTATION STEPS:
+1. First specific step for ${platformInfo?.name || 'this platform'}
+2. Second specific step
+3. Continue with detailed steps...
+
+${platformInfo ? `PLATFORM-SPECIFIC INSTRUCTIONS:
+- Method: How to implement this fix on ${platformInfo.name}
+- Location: Where to make the change (theme editor, CSS file, etc.)
+- Code: ${platformInfo.name}-specific code or instructions
+` : ''}
+
+SPECIFIC ELEMENT: ${elementDetails?.target || 'Not available'}
+CURRENT HTML: ${elementDetails?.html || 'Not available'}`;
 
             const completion = await openai.chat.completions.create({
                 model: "gpt-3.5-turbo",
@@ -471,39 +530,9 @@ Please provide a SPECIFIC fix suggestion in JSON format:
             console.log(`📝 AI response length: ${aiResponse.length} characters for ${violation.id}`);
             console.log(`📄 AI response preview: ${aiResponse.substring(0, 200)}...`);
             
-            // Try to parse JSON, with fallback for non-JSON responses
-            let suggestion;
-            try {
-                suggestion = JSON.parse(aiResponse);
-                console.log(`✅ Successfully parsed JSON response for ${violation.id}`);
-            } catch (parseError) {
-                console.log(`⚠️ AI response not valid JSON for ${violation.id}, attempting to fix JSON`);
-                
-                // Try to fix common JSON issues
-                let fixedResponse = aiResponse;
-                
-                // Add missing closing braces if needed
-                const openBraces = (aiResponse.match(/{/g) || []).length;
-                const closeBraces = (aiResponse.match(/}/g) || []).length;
-                if (openBraces > closeBraces) {
-                    fixedResponse += '}'.repeat(openBraces - closeBraces);
-                }
-                
-                // Try parsing the fixed response
-                try {
-                    suggestion = JSON.parse(fixedResponse);
-                    console.log(`✅ Successfully fixed and parsed JSON for ${violation.id}`);
-                } catch (secondParseError) {
-                    console.log(`❌ Could not fix JSON for ${violation.id}, creating structured response`);
-                    // Create structured response from text
-                    suggestion = {
-                        priority: 'medium',
-                        explanation: aiResponse.substring(0, 500) + '...',
-                        codeExample: '// Full AI response available in logs',
-                        steps: aiResponse.split('\n').filter(line => line.trim().length > 0).slice(0, 8)
-                    };
-                }
-            }
+            // Parse the structured text response
+            const suggestion = parseAITextResponse(aiResponse, violation.id);
+            console.log(`✅ Successfully parsed AI response for ${violation.id}`);
             
             console.log(`✅ AI suggestion generated for ${violation.id}`);
             return suggestion;
