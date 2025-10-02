@@ -344,9 +344,176 @@ app.post('/api/detailed-report', (req, res) => {
                         </div>
                         ${violation.help ? `<div class="violation-description"><strong>Help:</strong> ${violation.help}</div>` : ''}
                         ${violation.helpUrl ? `<div class="violation-description"><strong>Learn more:</strong> <a href="${violation.helpUrl}" target="_blank">${violation.helpUrl}</a></div>` : ''}
+                        
+                        <!-- PHASE 2A: Auto-Fix Buttons -->
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                            <button onclick="autoFixViolation('${violation.id}', ${index})" 
+                                    style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin-right: 10px; cursor: pointer; font-size: 14px;">
+                                🔧 Auto-Fix
+                            </button>
+                            <button onclick="previewFix('${violation.id}', ${index})" 
+                                    style="background: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                👁️ Preview Fix
+                            </button>
+                        </div>
                     </div>
                 `).join('')}
             </div>
+            
+            <!-- PHASE 2A: Auto-Fix JavaScript Functions -->
+            <script>
+                async function autoFixViolation(violationId, index) {
+                    const button = event.target;
+                    const originalText = button.textContent;
+                    
+                    try {
+                        button.textContent = '🔄 Applying Fix...';
+                        button.disabled = true;
+                        
+                        const response = await fetch('/api/implement-fix', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                violationId: violationId,
+                                fixType: 'auto',
+                                platformInfo: window.platformInfo || { type: 'custom' }
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            button.textContent = '✅ Fix Generated';
+                            button.style.background = '#28a745';
+                            
+                            // Show download options
+                            const fixContainer = button.parentElement;
+                            fixContainer.innerHTML += \`
+                                <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                                    <strong>✅ Fix Generated Successfully!</strong><br>
+                                    <small>Download the fix files and follow the implementation instructions.</small><br>
+                                    <button onclick="downloadFix('\${violationId}', 'css')" 
+                                            style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 3px; margin: 5px 5px 0 0; cursor: pointer; font-size: 12px;">
+                                        📄 Download CSS
+                                    </button>
+                                    <button onclick="downloadFix('\${violationId}', 'instructions')" 
+                                            style="background: #6f42c1; color: white; border: none; padding: 6px 12px; border-radius: 3px; margin: 5px 0 0 0; cursor: pointer; font-size: 12px;">
+                                        📋 Download Instructions
+                                    </button>
+                                </div>
+                            \`;
+                        } else {
+                            throw new Error(result.error || 'Fix generation failed');
+                        }
+                        
+                    } catch (error) {
+                        console.error('Auto-fix error:', error);
+                        button.textContent = '❌ Fix Failed';
+                        button.style.background = '#dc3545';
+                        setTimeout(() => {
+                            button.textContent = originalText;
+                            button.style.background = '#28a745';
+                            button.disabled = false;
+                        }, 3000);
+                    }
+                }
+                
+                async function previewFix(violationId, index) {
+                    const button = event.target;
+                    const originalText = button.textContent;
+                    
+                    try {
+                        button.textContent = '🔄 Generating Preview...';
+                        button.disabled = true;
+                        
+                        const response = await fetch('/api/preview-fix', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                violationId: violationId,
+                                elementSelector: \`violation-\${index}\`,
+                                platformInfo: window.platformInfo || { type: 'custom' }
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            // Create preview modal
+                            const modal = document.createElement('div');
+                            modal.style.cssText = \`
+                                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                                background: rgba(0,0,0,0.8); z-index: 1000; display: flex; 
+                                align-items: center; justify-content: center;
+                            \`;
+                            
+                            modal.innerHTML = \`
+                                <div style="background: white; padding: 30px; border-radius: 8px; max-width: 800px; max-height: 80vh; overflow-y: auto;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                        <h3>👁️ Fix Preview: \${violationId}</h3>
+                                        <button onclick="this.closest('div').parentElement.remove()" 
+                                                style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
+                                            ✕ Close
+                                        </button>
+                                    </div>
+                                    
+                                    <div style="margin-bottom: 20px;">
+                                        <h4>📋 What this fix will do:</h4>
+                                        <p>\${result.preview.impact}</p>
+                                    </div>
+                                    
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                                        <div>
+                                            <h4>❌ Before (Current):</h4>
+                                            <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;">\${result.preview.before.code}</pre>
+                                        </div>
+                                        <div>
+                                            <h4>✅ After (Fixed):</h4>
+                                            <pre style="background: #d4edda; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;">\${result.preview.after.code}</pre>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <h4>🛠️ Implementation Steps:</h4>
+                                        <ol>
+                                            \${result.preview.instructions.map(step => \`<li>\${step}</li>\`).join('')}
+                                        </ol>
+                                    </div>
+                                    
+                                    <div style="text-align: center; margin-top: 20px;">
+                                        <button onclick="autoFixViolation('\${violationId}', \${index}); this.closest('div').parentElement.remove();" 
+                                                style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                            🔧 Apply This Fix
+                                        </button>
+                                    </div>
+                                </div>
+                            \`;
+                            
+                            document.body.appendChild(modal);
+                        } else {
+                            throw new Error(result.error || 'Preview generation failed');
+                        }
+                        
+                    } catch (error) {
+                        console.error('Preview error:', error);
+                        alert('Failed to generate preview: ' + error.message);
+                    } finally {
+                        button.textContent = originalText;
+                        button.disabled = false;
+                    }
+                }
+                
+                function downloadFix(violationId, type) {
+                    // This would trigger the download of the generated fix files
+                    const url = \`/api/download-fix/\${type}?violationId=\${violationId}&platform=\${window.platformInfo?.type || 'custom'}\`;
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = \`\${violationId}-fix.\${type === 'css' ? 'css' : 'md'}\`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+            </script>
         </body>
         </html>
     `;
@@ -559,6 +726,300 @@ CURRENT HTML: ${elementDetails?.html || 'Not available'}`;
 
     return defaultSuggestion;
 }
+
+// PHASE 2A ENHANCEMENT: Auto-Fix Code Generation Function
+function generateFixCode(violation, platformInfo) {
+    const { id, impact, description, help, nodes } = violation;
+    const platform = platformInfo?.type || 'custom';
+    
+    let fixCode = {
+        css: '',
+        html: '',
+        javascript: '',
+        instructions: [],
+        filename: `fix-${id}-${Date.now()}`
+    };
+
+    switch (id) {
+        case 'color-contrast':
+            if (platform === 'shopify') {
+                fixCode.css = `/* Fix for color contrast issue in Shopify theme */
+.elementor-button, .btn, .button, a[href] {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+    border: 2px solid #000000 !important;
+}
+
+/* Ensure sufficient contrast for text elements */
+.text-content, p, span, div {
+    color: #000000 !important;
+    background-color: transparent !important;
+}`;
+                fixCode.instructions = [
+                    'Log in to your Shopify admin dashboard',
+                    'Navigate to Online Store > Themes',
+                    'Click "Actions" > "Edit code" on your active theme',
+                    'Find the assets/theme.css file or create a new CSS file',
+                    'Add the provided CSS code to fix color contrast issues',
+                    'Save the changes and preview your store'
+                ];
+            } else if (platform === 'wordpress') {
+                fixCode.css = `/* WordPress color contrast fix */
+.wp-block-button__link, .button, .btn {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+    border: 2px solid #000000 !important;
+}`;
+                fixCode.instructions = [
+                    'Log in to your WordPress admin dashboard',
+                    'Go to Appearance > Customize',
+                    'Click on "Additional CSS"',
+                    'Paste the provided CSS code',
+                    'Click "Publish" to save changes'
+                ];
+            } else {
+                fixCode.css = `/* Universal color contrast fix */
+.low-contrast-element {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+    border: 2px solid #000000 !important;
+}`;
+                fixCode.instructions = [
+                    'Add the provided CSS to your main stylesheet',
+                    'Apply the .low-contrast-element class to problematic elements',
+                    'Test the contrast ratio using browser developer tools'
+                ];
+            }
+            break;
+
+        case 'link-name':
+            fixCode.html = `<!-- Before: Problematic link -->
+<a href="/learn-more">Learn More</a>
+
+<!-- After: Accessible link with descriptive text -->
+<a href="/learn-more" aria-label="Learn more about our accessibility features">Learn More</a>
+
+<!-- Alternative: Add descriptive text -->
+<a href="/learn-more">Learn More About Our Accessibility Features</a>`;
+            
+            fixCode.instructions = [
+                'Locate the problematic link in your HTML',
+                'Add descriptive text or aria-label attribute',
+                'Ensure the link purpose is clear from the text alone',
+                'Test with screen readers to verify accessibility'
+            ];
+            break;
+
+        case 'image-alt':
+            fixCode.html = `<!-- Before: Image without alt text -->
+<img src="product-image.jpg">
+
+<!-- After: Image with descriptive alt text -->
+<img src="product-image.jpg" alt="Blue cotton t-shirt with round neck, size medium">
+
+<!-- For decorative images -->
+<img src="decorative-border.jpg" alt="" role="presentation">`;
+            
+            fixCode.instructions = [
+                'Add meaningful alt text that describes the image content',
+                'For decorative images, use alt="" and role="presentation"',
+                'Keep alt text concise but descriptive',
+                'Avoid phrases like "image of" or "picture of"'
+            ];
+            break;
+
+        case 'heading-order':
+            fixCode.html = `<!-- Before: Incorrect heading hierarchy -->
+<h1>Main Title</h1>
+<h3>Subsection</h3>
+<h2>Section Title</h2>
+
+<!-- After: Correct heading hierarchy -->
+<h1>Main Title</h1>
+<h2>Section Title</h2>
+<h3>Subsection</h3>`;
+            
+            fixCode.instructions = [
+                'Review your heading structure (h1, h2, h3, etc.)',
+                'Ensure headings follow a logical hierarchy',
+                'Use only one h1 per page',
+                'Don\'t skip heading levels (h1 to h3 without h2)'
+            ];
+            break;
+
+        default:
+            fixCode.css = `/* Generic accessibility fix for ${id} */
+.accessibility-fix {
+    /* Add appropriate styles based on the specific issue */
+}`;
+            fixCode.instructions = [
+                'Review the specific accessibility violation',
+                'Apply the recommended fixes from WCAG guidelines',
+                'Test the changes with accessibility tools',
+                'Verify the fix doesn\'t break existing functionality'
+            ];
+    }
+
+    return fixCode;
+}
+
+// PHASE 2A ENHANCEMENT: Generate downloadable fix files
+function createFixFiles(violations, platformInfo) {
+    const fixes = violations.map(violation => generateFixCode(violation, platformInfo));
+    
+    // Combine all CSS fixes
+    const combinedCSS = fixes.map(fix => fix.css).filter(css => css.trim()).join('\n\n');
+    
+    // Combine all HTML examples
+    const combinedHTML = fixes.map(fix => fix.html).filter(html => html.trim()).join('\n\n');
+    
+    // Create comprehensive instructions
+    const allInstructions = fixes.flatMap(fix => fix.instructions);
+    const uniqueInstructions = [...new Set(allInstructions)];
+    
+    const instructionsText = `# Accessibility Fix Instructions
+
+## Platform: ${platformInfo?.name || 'Custom'}
+## Generated: ${new Date().toLocaleString()}
+
+## Implementation Steps:
+${uniqueInstructions.map((instruction, index) => `${index + 1}. ${instruction}`).join('\n')}
+
+## CSS Fixes:
+\`\`\`css
+${combinedCSS}
+\`\`\`
+
+## HTML Examples:
+\`\`\`html
+${combinedHTML}
+\`\`\`
+
+## Testing:
+1. Apply the fixes to your website
+2. Re-run the accessibility scan to verify improvements
+3. Test with screen readers and keyboard navigation
+4. Validate color contrast ratios meet WCAG standards
+`;
+
+    return {
+        css: combinedCSS,
+        html: combinedHTML,
+        instructions: instructionsText,
+        platform: platformInfo?.type || 'custom'
+    };
+}
+
+// PHASE 2A ENHANCEMENT: New endpoint for implementing auto-fixes
+app.post('/api/implement-fix', async (req, res) => {
+    try {
+        const { violationId, fixType, platformInfo } = req.body;
+        
+        console.log('🔧 Implementing auto-fix for violation:', violationId);
+        
+        // Generate the specific fix
+        const mockViolation = { id: violationId, impact: 'serious' };
+        const fixCode = generateFixCode(mockViolation, platformInfo);
+        
+        // In a real implementation, this would:
+        // 1. Connect to the platform's API (Shopify, WordPress, etc.)
+        // 2. Apply the fix directly to the website
+        // 3. Verify the fix was applied successfully
+        
+        // For now, we'll return the generated code and instructions
+        res.json({
+            success: true,
+            message: `Auto-fix generated for ${violationId}`,
+            fixApplied: false, // Set to true when actually implemented
+            fixCode: fixCode,
+            nextSteps: [
+                'Download the generated fix files',
+                'Follow the platform-specific instructions',
+                'Apply the fixes to your website',
+                'Re-run the accessibility scan to verify improvements'
+            ]
+        });
+        
+    } catch (error) {
+        console.error('Error implementing fix:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to implement fix' 
+        });
+    }
+});
+
+// PHASE 2A ENHANCEMENT: Preview fix endpoint
+app.post('/api/preview-fix', async (req, res) => {
+    try {
+        const { violationId, elementSelector, platformInfo } = req.body;
+        
+        console.log('👁️ Generating fix preview for:', violationId);
+        
+        const mockViolation = { id: violationId, impact: 'serious' };
+        const fixCode = generateFixCode(mockViolation, platformInfo);
+        
+        // Generate a preview of what the fix will look like
+        const preview = {
+            before: {
+                description: `Current state with ${violationId} violation`,
+                code: `/* Current problematic code */\n${elementSelector} {\n  /* Accessibility issue present */\n}`
+            },
+            after: {
+                description: `Fixed state with accessibility improvements`,
+                code: fixCode.css || fixCode.html || 'Fix applied'
+            },
+            impact: `This fix will resolve the ${violationId} accessibility violation`,
+            instructions: fixCode.instructions
+        };
+        
+        res.json({
+            success: true,
+            preview: preview
+        });
+        
+    } catch (error) {
+        console.error('Error generating preview:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to generate preview' 
+        });
+    }
+});
+
+// PHASE 2A ENHANCEMENT: Download endpoints for fix files
+app.get('/api/download-fix/:type', (req, res) => {
+    const { type } = req.params;
+    const { violationId, platform } = req.query;
+    
+    // Generate fix for the specific violation
+    const mockViolation = { id: violationId, impact: 'serious' };
+    const platformInfo = { type: platform || 'custom', name: platform || 'Custom' };
+    const fixCode = generateFixCode(mockViolation, platformInfo);
+    
+    let content = '';
+    let filename = '';
+    let contentType = '';
+    
+    switch (type) {
+        case 'css':
+            content = fixCode.css || '/* No CSS fixes available for this violation */';
+            filename = `${violationId}-fix-${platform || 'custom'}.css`;
+            contentType = 'text/css';
+            break;
+        case 'instructions':
+            content = `# Fix Instructions for ${violationId}\n\n## Platform: ${platformInfo.name}\n\n## Steps:\n${fixCode.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}\n\n## CSS Code:\n\`\`\`css\n${fixCode.css}\n\`\`\`\n\n## HTML Example:\n\`\`\`html\n${fixCode.html}\n\`\`\``;
+            filename = `${violationId}-instructions-${platform || 'custom'}.md`;
+            contentType = 'text/markdown';
+            break;
+        default:
+            return res.status(400).json({ error: 'Invalid file type' });
+    }
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', contentType);
+    res.send(content);
+});
 
 // Main route - serves the dashboard HTML
 app.get('/', (req, res) => {
