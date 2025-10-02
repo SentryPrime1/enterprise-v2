@@ -339,14 +339,21 @@ app.post('/api/preview-fix', async (req, res) => {
     try {
         browser = await puppeteer.launch({
             headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
             args: [
-                '--no-sandbox', 
+                '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-gpu',
+                '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
-                '--single-process'
+                '--single-process',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
             ]
         });
 
@@ -402,6 +409,7 @@ app.post('/api/scan', async (req, res) => {
         // Launch browser with appropriate configuration
         browser = await puppeteer.launch({
             headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -410,7 +418,12 @@ app.post('/api/scan', async (req, res) => {
                 '--no-first-run',
                 '--no-zygote',
                 '--single-process',
-                '--disable-gpu'
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
             ]
         });
 
