@@ -339,8 +339,15 @@ app.post('/api/preview-fix', async (req, res) => {
     try {
         browser = await puppeteer.launch({
             headless: 'new',
-            executablePath: '/usr/bin/chromium-browser',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process'
+            ]
         });
 
         const page = await browser.newPage();
@@ -395,7 +402,6 @@ app.post('/api/scan', async (req, res) => {
         // Launch browser with appropriate configuration
         browser = await puppeteer.launch({
             headless: 'new',
-            executablePath: '/usr/bin/chromium-browser',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
