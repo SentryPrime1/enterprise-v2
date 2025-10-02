@@ -1,6 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
 const axeCore = require('axe-core');
+const { AxePuppeteer } = require('@axe-core/puppeteer');
 const { Pool } = require('pg');
 const OpenAI = require('openai');
 
@@ -398,6 +399,68 @@ app.post('/api/ai-fixes', async (req, res) => {
     }
 });
 
+// PHASE 2 ENHANCEMENT: Auto-Fix Implementation Endpoints
+app.post('/api/implement-fix', async (req, res) => {
+    try {
+        const { violation, platformInfo, fixMethod } = req.body;
+        
+        if (!violation || !platformInfo) {
+            return res.status(400).json({ error: 'Violation and platform info are required' });
+        }
+
+        const result = await implementAutoFix(violation, platformInfo, fixMethod);
+        res.json(result);
+    } catch (error) {
+        console.error('Error implementing auto-fix:', error);
+        res.status(500).json({ error: 'Failed to implement auto-fix' });
+    }
+});
+
+app.post('/api/preview-fix', async (req, res) => {
+    try {
+        const { violation, platformInfo, fixMethod } = req.body;
+        
+        if (!violation || !platformInfo) {
+            return res.status(400).json({ error: 'Violation and platform info are required' });
+        }
+
+        const preview = await generateFixPreview(violation, platformInfo, fixMethod);
+        res.json(preview);
+    } catch (error) {
+        console.error('Error generating fix preview:', error);
+        res.status(500).json({ error: 'Failed to generate fix preview' });
+    }
+});
+
+// API endpoint to apply a fix (Legacy endpoint for backward compatibility)
+app.post('/api/apply-fix', async (req, res) => {
+    const { platform, fix, context } = req.body;
+
+    if (!platform || !fix || !context) {
+        return res.status(400).json({ error: 'Platform, fix, and context are required' });
+    }
+
+    try {
+        let result;
+        if (platform === 'shopify') {
+            result = await applyShopifyFix(fix, context);
+        } else if (platform === 'wordpress') {
+            result = await applyWordPressFix(fix, context);
+        } else if (platform === 'wix') {
+            result = await applyWixFix(fix, context);
+        } else if (platform === 'squarespace') {
+            result = await applySquarespaceFix(fix, context);
+        } else {
+            return res.status(400).json({ error: `Platform '${platform}' not supported for auto-fixing yet` });
+        }
+
+        res.json(result);
+    } catch (error) {
+        console.error('Error applying fix:', error);
+        res.status(500).json({ error: 'Failed to apply fix' });
+    }
+});
+
 // Parse AI text response into structured format
 function parseAITextResponse(aiResponse, violationId) {
     try {
@@ -427,2434 +490,1833 @@ function parseAITextResponse(aiResponse, violationId) {
         }
         
         if (steps.length === 0) {
-            steps = ['Review the accessibility violation details', 'Apply the suggested code changes', 'Test with screen readers'];
+            steps = [
+                'Review the WCAG guidelines for this specific issue',
+                'Identify all instances of this problem on your site',
+                'Implement the recommended solution',
+                'Test with accessibility tools and real users',
+                'Document the fix for future reference'
+            ];
         }
         
-        // PHASE 2 ENHANCEMENT: Extract before/after code for auto-fix
-        const beforeRegex = /(\/\*\s*Before\s*\*\/|<!--\s*Before\s*-->)\s*([\s\S]*?)(\s*\/\*\s*After|\s*<!--\s*After)/;
-        const afterRegex = /(\/\*\s*After\s*\*\/|<!--\s*After\s*-->)\s*([\s\S]*)/;
-
-        const beforeMatch = codeExample.match(beforeRegex);
-        const afterMatch = codeExample.match(afterRegex);
-
-        let fix = null;
-        if (beforeMatch && afterMatch) {
-            fix = {
-                beforeCode: beforeMatch[2].trim(),
-                afterCode: afterMatch[2].trim()
-            };
-        }
-
         return {
-            priority: ['high', 'medium', 'low'].includes(priority) ? priority : 'medium',
+            priority: priority,
             explanation: explanation,
             codeExample: codeExample,
-            steps: steps,
-            fix: fix // PHASE 2: Add parsed fix for auto-implementation
+            steps: steps
         };
-        
     } catch (error) {
-        console.log(`⚠️ Error parsing AI response for ${violationId}:`, error.message);
+        console.error('Error parsing AI response:', error);
         return {
             priority: 'medium',
-            explanation: aiResponse.substring(0, 500) + '...',
-            codeExample: '// Full AI response available in logs',
-            steps: ['Review the AI suggestion', 'Apply recommended changes', 'Test accessibility improvements']
+            explanation: `Accessibility issue (${violationId}) needs attention to improve user experience.`,
+            codeExample: '// Refer to the implementation steps for specific code changes',
+            steps: [
+                'Review the WCAG guidelines for this specific issue',
+                'Identify all instances of this problem on your site',
+                'Implement the recommended solution',
+                'Test with accessibility tools and real users',
+                'Document the fix for future reference'
+            ]
         };
     }
 }
 
+// Generate AI-powered accessibility suggestions
 async function generateAISuggestion(violation, platformInfo = null) {
-    console.log(`🤖 Forcing OpenAI call for ${violation.id} to get specific suggestions`);
+    console.log(`🤖 Generating AI suggestion for violation: ${violation.id}`);
     
-    // Extract element details from the first node if available
-    const firstNode = violation.nodes?.[0];
-    const elementDetails = firstNode ? {
-        html: firstNode.html || 'Not available',
-        target: firstNode.target?.[0] || 'Not available',
-        failureSummary: firstNode.failureSummary || 'Not available'
-    } : null;
+    if (!openai) {
+        console.log('⚠️ No OpenAI client available, using predefined response');
+        return {
+            priority: 'medium',
+            explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities.`,
+            codeExample: '// Refer to the implementation steps for specific code changes',
+            steps: [
+                'Review the WCAG guidelines for this specific issue',
+                'Identify all instances of this problem on your site',
+                'Implement the recommended solution',
+                'Test with accessibility tools and real users',
+                'Document the fix for future reference'
+            ]
+        };
+    }
+    
+    try {
+        console.log(`🤖 Forcing OpenAI call for ${violation.id} to get specific suggestions`);
+        
+        const platformContext = platformInfo ? 
+            `The website is built on ${platformInfo.name} platform with the following capabilities: ${JSON.stringify(platformInfo.capabilities)}.` : 
+            'The platform is unknown.';
+        
+        const prompt = `You are an accessibility expert specializing in ${platformInfo?.name || 'web'} websites. Provide a detailed, SPECIFIC fix suggestion for this accessibility violation:
 
-    // Try to get AI-generated suggestion if OpenAI is available
-    if (openai) {
-        try {
-            console.log(`🤖 Generating AI suggestion for violation: ${violation.id}`);
-            
-            const prompt = `You are an accessibility expert specializing in ${platformInfo?.name || 'web'} websites. Provide a detailed, SPECIFIC fix suggestion for this accessibility violation:
-
-VIOLATION DETAILS:
-- ID: ${violation.id}
-- Description: ${violation.description || 'No description provided'}
-- Impact: ${violation.impact || 'Unknown'}
-- Help URL: ${violation.helpUrl || 'N/A'}
-
-${elementDetails ? `
-SPECIFIC ELEMENT DETAILS:
-- HTML: ${elementDetails.html}
-- CSS Selector: ${elementDetails.target}
-- Issue: ${elementDetails.failureSummary}
-` : ''}
-
-${platformInfo ? `
-PLATFORM INFORMATION:
-- Platform: ${platformInfo.name} (${platformInfo.type})
-- Confidence: ${Math.round(platformInfo.confidence * 100)}%
-- Capabilities: CSS Injection: ${platformInfo.capabilities?.cssInjection}, Theme Editor: ${platformInfo.capabilities?.themeEditor}
-` : ''}
+Violation ID: ${violation.id}
+Description: ${violation.description || 'No description provided'}
+Help Text: ${violation.help || 'No help text provided'}
+Impact Level: ${violation.impact || 'unknown'}
+Platform Context: ${platformContext}
 
 Please provide a SPECIFIC fix suggestion with these sections:
 
-PRIORITY: (high/medium/low)
+PRIORITY: [high/medium/low]
 
-EXPLANATION: 
-Provide a specific explanation for this exact element and platform.
+EXPLANATION: [Brief explanation of why this is important and what it affects]
 
-CODE EXAMPLE:
-Show the EXACT before and after code for this specific element.
+CODE EXAMPLE: [Specific code snippet that fixes this issue]
 
 IMPLEMENTATION STEPS:
-1. First specific step for ${platformInfo?.name || 'this platform'}
-2. Second specific step
-3. Continue with detailed steps...
+1. [First step]
+2. [Second step]
+3. [Third step]
+4. [Fourth step]
+5. [Fifth step]
 
-${platformInfo ? `PLATFORM-SPECIFIC INSTRUCTIONS:
 - Method: How to implement this fix on ${platformInfo.name}
-- Location: Where to make the change (theme editor, CSS file, etc.)
-- Code: ${platformInfo.name}-specific code or instructions
-` : ''}
+- Testing: How to verify the fix works
+- Impact: What this improves for users
 
-SPECIFIC ELEMENT: ${elementDetails?.target || 'Not available'}
-CURRENT HTML: ${elementDetails?.html || 'Not available'}`;
+Focus on practical, actionable advice that can be implemented immediately.`;
 
-            const completion = await openai.chat.completions.create({
-                model: "gpt-3.5-turbo",
-                messages: [
-                    {
-                        role: "system",
-                        content: "You are an expert web accessibility consultant specializing in WCAG compliance. Provide practical, actionable advice for fixing accessibility issues."
-                    },
-                    {
-                        role: "user",
-                        content: prompt
-                    }
-                ],
-                max_tokens: 2500,
-                temperature: 0.7
-            });
+        const response = await openai.chat.completions.create({
+            model: "gpt-4.1-mini",
+            messages: [
+                {
+                    role: "system",
+                    content: "You are an expert web accessibility consultant specializing in WCAG compliance. Provide practical, actionable advice for fixing accessibility issues."
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            max_tokens: 1000,
+            temperature: 0.3
+        });
 
-            const aiResponse = completion.choices[0].message.content;
-            console.log(`📝 AI response length: ${aiResponse.length} characters for ${violation.id}`);
-            console.log(`📄 AI response preview: ${aiResponse.substring(0, 200)}...`);
-            
-            // Parse the structured text response
-            const suggestion = parseAITextResponse(aiResponse, violation.id);
-            console.log(`✅ Successfully parsed AI response for ${violation.id}`);
-            
-            console.log(`✅ AI suggestion generated for ${violation.id}`);
-            return suggestion;
-            
-        } catch (error) {
-            console.log(`❌ Error generating AI suggestion for ${violation.id}:`, error.message);
-            // Fall through to default suggestion
-        }
+        const aiResponse = response.choices[0].message.content;
+        return parseAITextResponse(aiResponse, violation.id);
+        
+    } catch (error) {
+        console.error(`❌ Error generating AI suggestion for ${violation.id}:`, error.message);
+        
+        // Fallback to predefined response
+        return {
+            priority: 'medium',
+            explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities.`,
+            codeExample: '// Refer to the implementation steps for specific code changes',
+            steps: [
+                'Review the WCAG guidelines for this specific issue',
+                'Identify all instances of this problem on your site',
+                'Implement the recommended solution',
+                'Test with accessibility tools and real users',
+                'Document the fix for future reference'
+            ]
+        };
     }
-
-    // Default suggestion for unknown violation types or when AI fails
-    const defaultSuggestion = {
-        priority: 'medium',
-        explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities.`,
-        codeExample: '// Refer to WCAG guidelines for specific implementation details',
-        steps: [
-            'Review the WCAG guidelines for this specific issue',
-            'Identify all instances of this problem on your site',
-            'Implement the recommended solution',
-            'Test with accessibility tools and real users',
-            'Document the fix for future reference'
-        ]
-    };
-
-    return defaultSuggestion;
 }
 
-// Main route - serves the dashboard HTML
+// Main route - serve the dashboard
 app.get('/', (req, res) => {
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-    <title>SentryPrime Enterprise Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8f9fa;
-            color: #333;
-            height: 100vh;
-            overflow: hidden;
-        }
-        
-        .dashboard-container {
-            display: flex;
-            height: 100vh;
-        }
-        
-        /* Sidebar */
-        .sidebar {
-            width: 240px;
-            background: #1a1a1a;
-            color: white;
-            padding: 20px 0;
-            flex-shrink: 0;
-        }
-        
-        .sidebar-header {
-            padding: 0 20px 30px;
-            border-bottom: 1px solid #333;
-        }
-        
-        .sidebar-header h1 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .sidebar-header p {
-            font-size: 0.8rem;
-            color: #888;
-            margin-top: 4px;
-        }
-        
-        .sidebar-nav {
-            padding: 20px 0;
-        }
-        
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 20px;
-            color: #ccc;
-            text-decoration: none;
-            transition: all 0.2s ease;
-            gap: 12px;
-            font-size: 0.9rem;
-            cursor: pointer;
-        }
-        
-        .nav-item:hover {
-            background: #333;
-            color: white;
-        }
-        
-        .nav-item.active {
-            background: #333;
-            color: white;
-            border-right: 3px solid #667eea;
-        }
-        
-        .nav-icon {
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        /* Header */
-        .header {
-            background: white;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-        
-        .search-bar {
-            display: flex;
-            align-items: center;
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 8px 12px;
-            width: 300px;
-        }
-        
-        .search-bar input {
-            border: none;
-            background: none;
-            outline: none;
-            flex: 1;
-            font-size: 14px;
-        }
-        
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-        
-        .user-profile {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-        
-        .user-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: #667eea;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        
-        /* Content Area */
-        .content-area {
-            flex: 1;
-            padding: 24px;
-            overflow-y: auto;
-        }
-        
-        .page {
-            display: none;
-        }
-        
-        .page.active {
-            display: block;
-        }
-        
-        /* Dashboard Overview */
-        .dashboard-header {
-            margin-bottom: 32px;
-        }
-        
-        .dashboard-header h1 {
-            font-size: 2rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-        
-        .dashboard-header p {
-            color: #666;
-            font-size: 1rem;
-        }
-        
-        /* Stats Cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 24px;
-            margin-bottom: 32px;
-        }
-        
-        .stat-card {
-            background: white;
-            padding: 24px;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        
-        .stat-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-        }
-        
-        .stat-title {
-            font-size: 0.9rem;
-            color: #666;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .stat-value {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #333;
-            margin-bottom: 8px;
-        }
-        
-        .stat-change {
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-        
-        .stat-change.positive {
-            color: #28a745;
-        }
-        
-        .stat-change.negative {
-            color: #dc3545;
-        }
-        
-        /* Action Cards */
-        .actions-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 32px;
-        }
-        
-        .action-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            border: 2px solid #e1e5e9;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-align: center;
-        }
-        
-        .action-card:hover {
-            border-color: #667eea;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
-        }
-        
-        .action-card.primary {
-            border-color: #dc3545;
-            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-            color: white;
-        }
-        
-        .action-card.primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
-        }
-        
-        .action-card.secondary {
-            border-color: #667eea;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        .action-card.secondary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-        }
-        
-        .action-card.success {
-            border-color: #28a745;
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            color: white;
-        }
-        
-        .action-card.success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
-        }
-        
-        .action-icon {
-            font-size: 2rem;
-            margin-bottom: 12px;
-        }
-        
-        .action-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-        
-        .action-description {
-            font-size: 0.9rem;
-            opacity: 0.9;
-        }
-        
-        /* Scan Form */
-        .scan-form {
-            background: white;
-            padding: 24px;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            margin-bottom: 32px;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        .form-label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            color: #333;
-        }
-        
-        .form-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            font-size: 16px;
-            transition: border-color 0.2s ease;
-        }
-        
-        .form-input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        .scan-options {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .scan-option {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .scan-option input[type="radio"] {
-            margin: 0;
-        }
-        
-        .pages-input {
-            width: 80px;
-            padding: 6px 8px;
-            border: 1px solid #e1e5e9;
-            border-radius: 4px;
-            margin: 0 8px;
-        }
-        
-        .scan-button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        
-        .scan-button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-        }
-        
-        .scan-button:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        
-        /* Results */
-        .scan-results {
-            background: white;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            overflow: hidden;
-            margin-bottom: 24px;
-        }
-        
-        .results-header {
-            background: #f8f9fa;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .results-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .results-meta {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .results-body {
-            padding: 24px;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-        
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .violation {
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            margin-bottom: 16px;
-            overflow: hidden;
-        }
-        
-        .violation-header {
-            background: #f8f9fa;
-            padding: 12px 16px;
-            border-bottom: 1px solid #e1e5e9;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .violation-title {
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .violation-impact {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: uppercase;
-        }
-        
-        .impact-critical {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .impact-serious {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .impact-moderate {
-            background: #d1ecf1;
-            color: #0c5460;
-        }
-        
-        .impact-minor {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .violation-body {
-            padding: 16px;
-        }
-        
-        .violation-description {
-            margin-bottom: 12px;
-            color: #666;
-        }
-        
-        .violation-help {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .violation-help a {
-            color: #667eea;
-            text-decoration: none;
-        }
-        
-        .violation-help a:hover {
-            text-decoration: underline;
-        }
-        
-        .results-summary {
-            background: #f8f9fa;
-            padding: 16px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-        }
-        
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 16px;
-        }
-        
-        .summary-item {
-            text-align: center;
-        }
-        
-        .summary-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin-bottom: 4px;
-        }
-        
-        .summary-label {
-            font-size: 0.8rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .ai-suggestions-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            margin-right: 8px;
-        }
-        
-        .ai-suggestions-btn:hover {
-            background: #5a6fd8;
-        }
-        
-        .guided-fixing-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .guided-fixing-btn:hover {
-            background: #218838;
-        }
-        
-        /* AI Modal Styles */
-        .ai-modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-        }
-        
-        .ai-modal-content {
-            background-color: white;
-            margin: 5% auto;
-            padding: 0;
-            border-radius: 8px;
-            width: 80%;
-            max-width: 800px;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        
-        .ai-modal-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px 8px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .ai-modal-body {
-            padding: 20px;
-        }
-        
-        .close {
-            color: white;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        
-        .close:hover {
-            opacity: 0.7;
-        }
-        
-        .ai-suggestion {
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            overflow: hidden;
-        }
-        
-        .ai-suggestion-header {
-            background: #f8f9fa;
-            padding: 12px 16px;
-            border-bottom: 1px solid #e1e5e9;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .priority-badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: uppercase;
-        }
-        
-        .priority-high {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .priority-medium {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .priority-low {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .ai-suggestion-content {
-            padding: 16px;
-        }
-        
-        .ai-suggestion-content pre {
-            background: #f8f9fa;
-            padding: 12px;
-            border-radius: 4px;
-            overflow-x: auto;
-            margin: 12px 0;
-        }
-        
-        .ai-suggestion-content ol {
-            padding-left: 20px;
-        }
-        
-        .ai-suggestion-content li {
-            margin-bottom: 8px;
-        }
-        
-        /* NEW: Guided Fixing Modal Styles */
-        .guided-modal {
-            display: none;
-            position: fixed;
-            z-index: 1001;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
-        }
-        
-        .guided-modal-content {
-            background-color: white;
-            margin: 3% auto;
-            padding: 0;
-            border-radius: 8px;
-            width: 90%;
-            max-width: 900px;
-            max-height: 85vh;
-            overflow-y: auto;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-        
-        .guided-modal-header {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 8px 8px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .progress-indicator {
-            background: rgba(255,255,255,0.2);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-        
-        .guided-modal-body {
-            padding: 24px;
-            min-height: 300px;
-        }
-        
-        .guided-modal-footer {
-            padding: 20px 24px;
-            border-top: 1px solid #e1e5e9;
-            display: flex;
-            gap: 12px;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .prev-btn, .next-btn {
-            background: #6c757d;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .prev-btn:hover, .next-btn:hover {
-            background: #5a6268;
-        }
-        
-        .prev-btn:disabled, .next-btn:disabled {
-            background: #e9ecef;
-            color: #6c757d;
-            cursor: not-allowed;
-        }
-        
-        .get-ai-fix-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .get-ai-fix-btn:hover {
-            background: #5a6fd8;
-        }
-        
-        .finish-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .finish-btn:hover {
-            background: #c82333;
-        }
-        
-        .violation-details {
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .violation-title {
-            font-size: 1.3rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: #495057;
-        }
-        
-        .violation-impact {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            margin-bottom: 16px;
-        }
-        
-        .impact-critical { background: #f8d7da; color: #721c24; }
-        .impact-serious { background: #fff3cd; color: #856404; }
-        .impact-moderate { background: #d1ecf1; color: #0c5460; }
-        .impact-minor { background: #d4edda; color: #155724; }
-        
-        /* Recent Scans */
-        .recent-scans {
-            background: white;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            overflow: hidden;
-        }
-        
-        .recent-scans-header {
-            background: #f8f9fa;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
-        }
-        
-        .recent-scans-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 4px;
-        }
-        
-        .recent-scans-subtitle {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .recent-scans-body {
-            padding: 0;
-        }
-        
-        .scan-item {
-            padding: 16px 24px;
-            border-bottom: 1px solid #f1f3f4;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: background-color 0.2s ease;
-        }
-        
-        .scan-item:last-child {
-            border-bottom: none;
-        }
-        
-        .scan-item:hover {
-            background: #f8f9fa;
-        }
-        
-        .scan-info h4 {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 4px;
-        }
-        
-        .scan-meta {
-            font-size: 0.8rem;
-            color: #666;
-        }
-        
-        .scan-score {
-            background: #28a745;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-right: 8px;
-        }
-        
-        .view-report-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-        }
-        
-        .view-report-btn:hover {
-            background: #5a6fd8;
-        }
-        
-        /* Database Status */
-        .db-status {
-            background: #d4edda;
-            color: #155724;
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 24px;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .db-status.disconnected {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            .dashboard-container {
-                flex-direction: column;
-            }
-            
-            .sidebar {
-                width: 100%;
-                height: auto;
-            }
-            
-            .sidebar-nav {
-                display: flex;
-                overflow-x: auto;
-                padding: 10px 0;
-            }
-            
-            .nav-item {
-                white-space: nowrap;
-                min-width: 120px;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .actions-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .scan-options {
-                flex-direction: column;
-                gap: 10px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="dashboard-container">
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <h1>🛡️ SentryPrime</h1>
-                <p>Enterprise Dashboard</p>
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>SentryPrime Enterprise Dashboard</title>
+            <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    color: #333;
+                }
+                
+                .sidebar {
+                    position: fixed;
+                    left: 0;
+                    top: 0;
+                    width: 250px;
+                    height: 100vh;
+                    background: #2c3e50;
+                    color: white;
+                    padding: 20px 0;
+                    overflow-y: auto;
+                }
+                
+                .logo {
+                    padding: 0 20px 30px;
+                    border-bottom: 1px solid #34495e;
+                    margin-bottom: 20px;
+                }
+                
+                .logo h2 {
+                    color: #3498db;
+                    font-size: 1.2em;
+                }
+                
+                .logo p {
+                    color: #bdc3c7;
+                    font-size: 0.9em;
+                    margin-top: 5px;
+                }
+                
+                .nav-item {
+                    display: block;
+                    padding: 15px 20px;
+                    color: #ecf0f1;
+                    text-decoration: none;
+                    border-left: 3px solid transparent;
+                    transition: all 0.3s ease;
+                    position: relative;
+                }
+                
+                .nav-item:hover, .nav-item.active {
+                    background: #34495e;
+                    border-left-color: #3498db;
+                    color: white;
+                }
+                
+                .nav-item .badge {
+                    position: absolute;
+                    right: 20px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    background: #e74c3c;
+                    color: white;
+                    border-radius: 10px;
+                    padding: 2px 8px;
+                    font-size: 0.8em;
+                    min-width: 20px;
+                    text-align: center;
+                }
+                
+                .main-content {
+                    margin-left: 250px;
+                    padding: 20px;
+                    min-height: 100vh;
+                }
+                
+                .header {
+                    background: white;
+                    padding: 20px 30px;
+                    border-radius: 10px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    margin-bottom: 30px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .search-bar {
+                    flex: 1;
+                    max-width: 400px;
+                    margin: 0 20px;
+                    position: relative;
+                }
+                
+                .search-bar input {
+                    width: 100%;
+                    padding: 12px 20px;
+                    border: 2px solid #e0e6ed;
+                    border-radius: 25px;
+                    font-size: 14px;
+                    outline: none;
+                    transition: border-color 0.3s ease;
+                }
+                
+                .search-bar input:focus {
+                    border-color: #3498db;
+                }
+                
+                .user-info {
+                    display: flex;
+                    align-items: center;
+                    gap: 15px;
+                }
+                
+                .user-avatar {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 50%;
+                    background: #3498db;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: white;
+                    font-weight: bold;
+                }
+                
+                .dashboard-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }
+                
+                .dashboard-card {
+                    background: white;
+                    border-radius: 10px;
+                    padding: 25px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    transition: transform 0.3s ease, box-shadow 0.3s ease;
+                }
+                
+                .dashboard-card:hover {
+                    transform: translateY(-5px);
+                    box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+                }
+                
+                .card-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 20px;
+                }
+                
+                .card-title {
+                    font-size: 1.1em;
+                    font-weight: 600;
+                    color: #2c3e50;
+                }
+                
+                .card-icon {
+                    font-size: 1.5em;
+                }
+                
+                .stats-grid {
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }
+                
+                .stat-card {
+                    background: white;
+                    padding: 25px;
+                    border-radius: 10px;
+                    text-align: center;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    transition: transform 0.3s ease;
+                }
+                
+                .stat-card:hover {
+                    transform: translateY(-3px);
+                }
+                
+                .stat-number {
+                    font-size: 2.5em;
+                    font-weight: bold;
+                    color: #2c3e50;
+                    margin-bottom: 10px;
+                }
+                
+                .stat-label {
+                    color: #7f8c8d;
+                    font-size: 0.9em;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                }
+                
+                .stat-change {
+                    font-size: 0.8em;
+                    margin-top: 5px;
+                }
+                
+                .stat-change.positive {
+                    color: #27ae60;
+                }
+                
+                .stat-change.negative {
+                    color: #e74c3c;
+                }
+                
+                .quick-actions {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }
+                
+                .action-card {
+                    background: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    text-align: center;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    transition: all 0.3s ease;
+                    cursor: pointer;
+                    border: 2px solid transparent;
+                }
+                
+                .action-card:hover {
+                    transform: translateY(-5px);
+                    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+                    border-color: #3498db;
+                }
+                
+                .action-icon {
+                    font-size: 3em;
+                    margin-bottom: 15px;
+                    display: block;
+                }
+                
+                .action-title {
+                    font-size: 1.1em;
+                    font-weight: 600;
+                    color: #2c3e50;
+                    margin-bottom: 10px;
+                }
+                
+                .action-description {
+                    color: #7f8c8d;
+                    font-size: 0.9em;
+                    line-height: 1.4;
+                }
+                
+                .recent-scans {
+                    background: white;
+                    border-radius: 10px;
+                    padding: 25px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                
+                .scan-item {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 15px 0;
+                    border-bottom: 1px solid #ecf0f1;
+                }
+                
+                .scan-item:last-child {
+                    border-bottom: none;
+                }
+                
+                .scan-info h4 {
+                    color: #2c3e50;
+                    margin-bottom: 5px;
+                }
+                
+                .scan-meta {
+                    color: #7f8c8d;
+                    font-size: 0.9em;
+                }
+                
+                .scan-score {
+                    text-align: right;
+                }
+                
+                .score-badge {
+                    display: inline-block;
+                    padding: 5px 12px;
+                    border-radius: 20px;
+                    font-weight: bold;
+                    font-size: 0.9em;
+                    margin-bottom: 5px;
+                }
+                
+                .score-excellent {
+                    background: #d4edda;
+                    color: #155724;
+                }
+                
+                .score-good {
+                    background: #d1ecf1;
+                    color: #0c5460;
+                }
+                
+                .score-fair {
+                    background: #fff3cd;
+                    color: #856404;
+                }
+                
+                .score-poor {
+                    background: #f8d7da;
+                    color: #721c24;
+                }
+                
+                .view-report-btn {
+                    background: #3498db;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    font-size: 0.8em;
+                    transition: background 0.3s ease;
+                }
+                
+                .view-report-btn:hover {
+                    background: #2980b9;
+                }
+                
+                .scan-form {
+                    background: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    margin-bottom: 30px;
+                }
+                
+                .form-group {
+                    margin-bottom: 20px;
+                }
+                
+                .form-group label {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                    color: #2c3e50;
+                }
+                
+                .form-group input[type="url"] {
+                    width: 100%;
+                    padding: 12px 15px;
+                    border: 2px solid #e0e6ed;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    transition: border-color 0.3s ease;
+                }
+                
+                .form-group input[type="url"]:focus {
+                    outline: none;
+                    border-color: #3498db;
+                }
+                
+                .scan-options {
+                    display: flex;
+                    gap: 20px;
+                    margin-bottom: 20px;
+                }
+                
+                .option-group {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                
+                .option-group input[type="radio"] {
+                    margin: 0;
+                }
+                
+                .crawl-pages {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                
+                .crawl-pages input[type="number"] {
+                    width: 80px;
+                    padding: 8px;
+                    border: 2px solid #e0e6ed;
+                    border-radius: 5px;
+                    text-align: center;
+                }
+                
+                .scan-btn {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border: none;
+                    padding: 15px 30px;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                
+                .scan-btn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+                }
+                
+                .scan-btn:disabled {
+                    opacity: 0.6;
+                    cursor: not-allowed;
+                    transform: none;
+                }
+                
+                .loading {
+                    display: none;
+                    text-align: center;
+                    padding: 20px;
+                    color: #7f8c8d;
+                }
+                
+                .spinner {
+                    border: 3px solid #f3f3f3;
+                    border-top: 3px solid #3498db;
+                    border-radius: 50%;
+                    width: 30px;
+                    height: 30px;
+                    animation: spin 1s linear infinite;
+                    margin: 0 auto 10px;
+                }
+                
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+                
+                .results {
+                    background: white;
+                    border-radius: 10px;
+                    padding: 25px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    margin-top: 20px;
+                    display: none;
+                }
+                
+                .results-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 20px;
+                    padding-bottom: 15px;
+                    border-bottom: 2px solid #ecf0f1;
+                }
+                
+                .results-stats {
+                    display: grid;
+                    grid-template-columns: repeat(5, 1fr);
+                    gap: 15px;
+                    margin-bottom: 20px;
+                    text-align: center;
+                }
+                
+                .results-stat {
+                    padding: 15px;
+                    border-radius: 8px;
+                    background: #f8f9fa;
+                }
+                
+                .results-stat-number {
+                    font-size: 1.8em;
+                    font-weight: bold;
+                    margin-bottom: 5px;
+                }
+                
+                .results-stat-label {
+                    font-size: 0.9em;
+                    color: #6c757d;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+                
+                .results-actions {
+                    display: flex;
+                    gap: 10px;
+                    justify-content: center;
+                    margin-top: 20px;
+                }
+                
+                .btn {
+                    padding: 12px 24px;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 600;
+                    transition: all 0.3s ease;
+                    text-decoration: none;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                
+                .btn-primary {
+                    background: #007bff;
+                    color: white;
+                }
+                
+                .btn-primary:hover {
+                    background: #0056b3;
+                    transform: translateY(-1px);
+                }
+                
+                .btn-success {
+                    background: #28a745;
+                    color: white;
+                }
+                
+                .btn-success:hover {
+                    background: #1e7e34;
+                    transform: translateY(-1px);
+                }
+                
+                .btn-info {
+                    background: #17a2b8;
+                    color: white;
+                }
+                
+                .btn-info:hover {
+                    background: #117a8b;
+                    transform: translateY(-1px);
+                }
+                
+                .ai-suggestions-modal {
+                    display: none;
+                    position: fixed;
+                    z-index: 1000;
+                    left: 0;
+                    top: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: rgba(0,0,0,0.5);
+                }
+                
+                .modal-content {
+                    background-color: white;
+                    margin: 5% auto;
+                    padding: 0;
+                    border-radius: 10px;
+                    width: 90%;
+                    max-width: 800px;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                }
+                
+                .modal-header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 20px 30px;
+                    border-radius: 10px 10px 0 0;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .modal-header h2 {
+                    margin: 0;
+                    font-size: 1.5em;
+                }
+                
+                .close {
+                    color: white;
+                    font-size: 28px;
+                    font-weight: bold;
+                    cursor: pointer;
+                    border: none;
+                    background: none;
+                    padding: 0;
+                    line-height: 1;
+                }
+                
+                .close:hover {
+                    opacity: 0.7;
+                }
+                
+                .modal-body {
+                    padding: 30px;
+                }
+                
+                .ai-suggestion {
+                    margin-bottom: 30px;
+                    padding: 20px;
+                    border: 1px solid #e9ecef;
+                    border-radius: 8px;
+                    background: #f8f9fa;
+                }
+                
+                .ai-suggestion-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 15px;
+                }
+                
+                .ai-suggestion-content h4 {
+                    color: #2c3e50;
+                    margin-bottom: 10px;
+                }
+                
+                .ai-suggestion-content p {
+                    margin-bottom: 15px;
+                    line-height: 1.6;
+                }
+                
+                .ai-suggestion-content pre {
+                    background: #2c3e50;
+                    color: #ecf0f1;
+                    padding: 15px;
+                    border-radius: 5px;
+                    overflow-x: auto;
+                    margin: 15px 0;
+                }
+                
+                .ai-suggestion-content ol {
+                    padding-left: 20px;
+                }
+                
+                .ai-suggestion-content li {
+                    margin-bottom: 8px;
+                    line-height: 1.5;
+                }
+                
+                .priority-badge {
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 0.8em;
+                    font-weight: bold;
+                    text-transform: uppercase;
+                }
+                
+                .priority-high {
+                    background: #dc3545;
+                    color: white;
+                }
+                
+                .priority-medium {
+                    background: #ffc107;
+                    color: #212529;
+                }
+                
+                .priority-low {
+                    background: #6c757d;
+                    color: white;
+                }
+                
+                .database-status {
+                    background: #d4edda;
+                    color: #155724;
+                    padding: 10px 15px;
+                    border-radius: 5px;
+                    margin-bottom: 20px;
+                    font-size: 0.9em;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                
+                .guided-fixing-btn {
+                    background: #28a745;
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    border-radius: 6px;
+                    margin: 0 10px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.3s ease;
+                }
+                
+                .guided-fixing-btn:hover {
+                    background: #1e7e34;
+                    transform: translateY(-1px);
+                }
+                
+                /* NEW: Guided Fixing Modal Styles */
+                .guided-fixing-modal {
+                    display: none;
+                    position: fixed;
+                    z-index: 1001;
+                    left: 0;
+                    top: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: rgba(0,0,0,0.5);
+                }
+                
+                .guided-modal-content {
+                    background-color: white;
+                    margin: 3% auto;
+                    padding: 0;
+                    border-radius: 10px;
+                    width: 95%;
+                    max-width: 900px;
+                    max-height: 90vh;
+                    overflow-y: auto;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                }
+                
+                .guided-modal-header {
+                    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                    color: white;
+                    padding: 20px 30px;
+                    border-radius: 10px 10px 0 0;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .guided-modal-body {
+                    padding: 30px;
+                }
+                
+                .guided-modal-footer {
+                    padding: 20px 30px;
+                    border-top: 1px solid #e9ecef;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .violation-details {
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                }
+                
+                .violation-title {
+                    font-size: 1.3em;
+                    font-weight: bold;
+                    color: #2c3e50;
+                    margin-bottom: 10px;
+                }
+                
+                .violation-impact {
+                    display: inline-block;
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 0.8em;
+                    font-weight: bold;
+                    text-transform: uppercase;
+                    margin-bottom: 15px;
+                }
+                
+                .impact-critical {
+                    background: #dc3545;
+                    color: white;
+                }
+                
+                .impact-serious {
+                    background: #fd7e14;
+                    color: white;
+                }
+                
+                .impact-moderate {
+                    background: #ffc107;
+                    color: #212529;
+                }
+                
+                .impact-minor {
+                    background: #6c757d;
+                    color: white;
+                }
+                
+                .get-ai-fix-btn {
+                    background: #6f42c1;
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    transition: all 0.3s ease;
+                }
+                
+                .get-ai-fix-btn:hover {
+                    background: #5a32a3;
+                    transform: translateY(-1px);
+                }
+                
+                @media (max-width: 768px) {
+                    .sidebar {
+                        transform: translateX(-100%);
+                        transition: transform 0.3s ease;
+                    }
+                    
+                    .main-content {
+                        margin-left: 0;
+                    }
+                    
+                    .stats-grid {
+                        grid-template-columns: repeat(2, 1fr);
+                    }
+                    
+                    .dashboard-grid {
+                        grid-template-columns: 1fr;
+                    }
+                    
+                    .quick-actions {
+                        grid-template-columns: repeat(2, 1fr);
+                    }
+                    
+                    .scan-options {
+                        flex-direction: column;
+                        gap: 10px;
+                    }
+                    
+                    .results-stats {
+                        grid-template-columns: repeat(3, 1fr);
+                    }
+                    
+                    .results-actions {
+                        flex-direction: column;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="logo">
+                    <h2>🛡️ SentryPrime</h2>
+                    <p>Enterprise Dashboard</p>
+                </div>
+                <a href="#" class="nav-item active">📊 Dashboard</a>
+                <a href="#" class="nav-item">🔍 Scans <span class="badge">2</span></a>
+                <a href="#" class="nav-item">📈 Analytics <span class="badge">8</span></a>
+                <a href="#" class="nav-item">👥 Team <span class="badge">4</span></a>
+                <a href="#" class="nav-item">🔗 Integrations <span class="badge">5</span></a>
+                <a href="#" class="nav-item">⚙️ API Management <span class="badge">10</span></a>
+                <a href="#" class="nav-item">💳 Billing <span class="badge">7</span></a>
+                <a href="#" class="nav-item">⚙️ Settings <span class="badge">8</span></a>
             </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" onclick="switchToPage('dashboard')">
-                    <span class="nav-icon">📊</span>
-                    Dashboard
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('scans')">
-                    <span class="nav-icon">🔍</span>
-                    Scans
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('analytics')">
-                    <span class="nav-icon">📈</span>
-                    Analytics
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('team')">
-                    <span class="nav-icon">👥</span>
-                    Team
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('integrations')">
-                    <span class="nav-icon">🔗</span>
-                    Integrations
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('api')">
-                    <span class="nav-icon">⚙️</span>
-                    API Management
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('billing')">
-                    <span class="nav-icon">💳</span>
-                    Billing
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('settings')">
-                    <span class="nav-icon">⚙️</span>
-                    Settings
-                </a>
-            </nav>
-        </div>
-        
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Header -->
-            <div class="header">
-                <div class="header-left">
+            
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Header -->
+                <div class="header">
+                    <h1>Dashboard Overview</h1>
                     <div class="search-bar">
-                        <span>🔍</span>
                         <input type="text" placeholder="Search scans, reports, or settings...">
                     </div>
-                </div>
-                <div class="header-right">
-                    <div class="notification-icon">🔔</div>
-                    <div class="user-profile">
+                    <div class="user-info">
+                        <span>🔔</span>
                         <div class="user-avatar">JD</div>
                         <div>
-                            <div style="font-weight: 600; font-size: 0.9rem;">John Doe</div>
-                            <div style="font-size: 0.8rem; color: #666;">Acme Corporation</div>
-                        </div>
-                        <span>▼</span>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Content Area -->
-            <div class="content-area">
-                <!-- Dashboard Page -->
-                <div id="dashboard" class="page active">
-                    <div class="dashboard-header">
-                        <h1>Dashboard Overview</h1>
-                        <p>Monitor your accessibility compliance and recent activity</p>
-                    </div>
-                    
-                    <!-- Stats Grid -->
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">Total Scans</div>
-                            </div>
-                            <div class="stat-value" id="total-scans">-</div>
-                            <div class="stat-change positive" id="scans-change">+2 this week</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">Issues Found</div>
-                            </div>
-                            <div class="stat-value" id="total-issues">-</div>
-                            <div class="stat-change negative" id="issues-change">-5 from last week</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">Average Score</div>
-                            </div>
-                            <div class="stat-value" id="average-score">-</div>
-                            <div class="stat-change positive" id="score-change">+3% improvement</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">This Week</div>
-                            </div>
-                            <div class="stat-value" id="this-week-scans">-</div>
-                            <div class="stat-change" id="week-change">scans completed</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Action Cards -->
-                    <div class="actions-grid">
-                        <div class="action-card primary" onclick="switchToPage('scans')">
-                            <div class="action-icon">🔍</div>
-                            <div class="action-title">New Scan</div>
-                            <div class="action-description">Start a new accessibility scan</div>
-                        </div>
-                        
-                        <div class="action-card secondary" onclick="switchToPage('analytics')">
-                            <div class="action-icon">📊</div>
-                            <div class="action-title">View Analytics</div>
-                            <div class="action-description">Analyze compliance trends</div>
-                        </div>
-                        
-                        <div class="action-card" onclick="switchToPage('team')">
-                            <div class="action-icon">👥</div>
-                            <div class="action-title">Manage Team</div>
-                            <div class="action-description">Add or remove team members</div>
-                        </div>
-                        
-                        <div class="action-card success" onclick="switchToPage('settings')">
-                            <div class="action-icon">⚙️</div>
-                            <div class="action-title">Settings</div>
-                            <div class="action-description">Configure your preferences</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Recent Scans -->
-                    <div class="recent-scans">
-                        <div class="recent-scans-header">
-                            <div class="recent-scans-title">Recent Scans</div>
-                            <div class="recent-scans-subtitle">Your latest accessibility scan results</div>
-                        </div>
-                        <div class="recent-scans-body" id="dashboard-recent-scans">
-                            <div style="padding: 20px; text-align: center; color: #666;">
-                                📊 Loading recent scans...
-                            </div>
+                            <div style="font-weight: 600;">John Doe</div>
+                            <div style="font-size: 0.8em; color: #7f8c8d;">Acme Corporation</div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Scans Page -->
-                <div id="scans" class="page">
-                    <div class="dashboard-header">
-                        <h1>Accessibility Scans</h1>
-                        <p>Manage and review your accessibility scans</p>
+                <p style="color: #666; margin-bottom: 30px;">Monitor your accessibility compliance and recent activity</p>
+                
+                <!-- Database Status -->
+                <div class="database-status">
+                    ✅ Database connected - Scans will be saved to your history
+                </div>
+                
+                <!-- Stats Grid -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="total-scans">3</div>
+                        <div class="stat-label">Total Scans</div>
+                        <div class="stat-change positive">+2 this week</div>
                     </div>
-                    
-                    <!-- Database Status -->
-                    <div class="db-status" id="db-status">
-                        ✅ Database connected - Scans will be saved to your history
+                    <div class="stat-card">
+                        <div class="stat-number" id="total-issues">22</div>
+                        <div class="stat-label">Issues Found</div>
+                        <div class="stat-change negative">-5 from last week</div>
                     </div>
-                    
-                    <!-- Scan Form -->
-                    <div class="scan-form">
-                        <h2>Scan Website for Accessibility Issues</h2>
-                        
+                    <div class="stat-card">
+                        <div class="stat-number" id="average-score">92%</div>
+                        <div class="stat-label">Average Score</div>
+                        <div class="stat-change positive">+3% improvement</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="this-week-scans">2</div>
+                        <div class="stat-label">This Week</div>
+                        <div class="stat-change">scans completed</div>
+                    </div>
+                </div>
+                
+                <!-- Quick Actions -->
+                <div class="quick-actions">
+                    <div class="action-card" onclick="showScanForm()">
+                        <span class="action-icon">🔍</span>
+                        <div class="action-title">New Scan</div>
+                        <div class="action-description">Start a new accessibility scan</div>
+                    </div>
+                    <div class="action-card" onclick="showAnalytics()">
+                        <span class="action-icon">📊</span>
+                        <div class="action-title">View Analytics</div>
+                        <div class="action-description">Analyze compliance trends</div>
+                    </div>
+                    <div class="action-card" onclick="showTeam()">
+                        <span class="action-icon">👥</span>
+                        <div class="action-title">Manage Team</div>
+                        <div class="action-description">Add or remove team members</div>
+                    </div>
+                    <div class="action-card" onclick="showSettings()">
+                        <span class="action-icon">⚙️</span>
+                        <div class="action-title">Settings</div>
+                        <div class="action-description">Configure your preferences</div>
+                    </div>
+                </div>
+                
+                <!-- Scan Form -->
+                <div class="scan-form" id="scan-form" style="display: none;">
+                    <h2>Scan Website for Accessibility Issues</h2>
+                    <form id="accessibility-form">
                         <div class="form-group">
-                            <label class="form-label" for="url-input">Website URL</label>
-                            <input type="text" id="url-input" class="form-input" placeholder="https://example.com/" />
+                            <label for="website-url">Website URL</label>
+                            <input type="url" id="website-url" name="url" placeholder="https://example.com/" required>
                         </div>
                         
                         <div class="form-group">
-                            <label class="form-label">Scan Options:</label>
+                            <label>Scan Options:</label>
                             <div class="scan-options">
-                                <div class="scan-option">
-                                    <input type="radio" id="single-page" name="scan-type" value="single" checked />
+                                <div class="option-group">
+                                    <input type="radio" id="single-page" name="scanType" value="single" checked>
                                     <label for="single-page">Single Page (Fast - recommended)</label>
                                 </div>
-                                <div class="scan-option">
-                                    <input type="radio" id="multi-page" name="scan-type" value="crawl" />
-                                    <label for="multi-page">Multi-Page Crawl (Slower - up to <input type="number" class="pages-input" id="max-pages" value="5" min="1" max="20" /> pages)</label>
+                                <div class="option-group">
+                                    <input type="radio" id="multi-page" name="scanType" value="crawl">
+                                    <label for="multi-page">Multi-Page Crawl (Slower - up to</label>
+                                    <div class="crawl-pages">
+                                        <input type="number" id="max-pages" name="maxPages" value="5" min="1" max="20">
+                                        <span>pages)</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                         
-                        <button class="scan-button" onclick="startScan()">🔍 Start Accessibility Scan</button>
+                        <button type="submit" class="scan-btn" id="scan-button">
+                            🔍 Start Accessibility Scan
+                        </button>
+                    </form>
+                    
+                    <div class="loading" id="loading">
+                        <div class="spinner"></div>
+                        <p>Scanning website for accessibility issues...</p>
                     </div>
                     
-                    <!-- Scan Results -->
-                    <div id="scan-results-container"></div>
-                    
-                    <!-- Recent Scans -->
-                    <div class="recent-scans">
-                        <div class="recent-scans-header">
-                            <div class="recent-scans-title">Recent Scans</div>
-                            <div class="recent-scans-subtitle">Your latest accessibility scan results</div>
+                    <div class="results" id="results">
+                        <div class="results-header">
+                            <h3>Scan Results</h3>
+                            <span id="scan-time"></span>
                         </div>
-                        <div class="recent-scans-body" id="recent-scans-list">
-                            <div style="padding: 20px; text-align: center; color: #666;">
-                                📊 Loading recent scans...
+                        
+                        <div class="results-stats">
+                            <div class="results-stat">
+                                <div class="results-stat-number" id="total-issues-found">0</div>
+                                <div class="results-stat-label">Total Issues</div>
+                            </div>
+                            <div class="results-stat">
+                                <div class="results-stat-number" id="critical-issues">0</div>
+                                <div class="results-stat-label">Critical</div>
+                            </div>
+                            <div class="results-stat">
+                                <div class="results-stat-number" id="serious-issues">0</div>
+                                <div class="results-stat-label">Serious</div>
+                            </div>
+                            <div class="results-stat">
+                                <div class="results-stat-number" id="moderate-issues">0</div>
+                                <div class="results-stat-label">Moderate</div>
+                            </div>
+                            <div class="results-stat">
+                                <div class="results-stat-number" id="minor-issues">0</div>
+                                <div class="results-stat-label">Minor</div>
                             </div>
                         </div>
+                        
+                        <div id="violations-summary"></div>
+                        
+                        <div class="results-actions" id="results-actions">
+                            <!-- Action buttons will be inserted here -->
+                        </div>
                     </div>
                 </div>
                 
-                <!-- Other Pages (Placeholder) -->
-                <div id="analytics" class="page">
-                    <div class="dashboard-header">
-                        <h1>Analytics</h1>
-                        <p>Coming soon - Detailed analytics and reporting</p>
+                <!-- Recent Scans -->
+                <div class="recent-scans">
+                    <div class="card-header">
+                        <h3 class="card-title">Recent Scans</h3>
+                        <span class="card-icon">📋</span>
                     </div>
-                </div>
-                
-                <div id="team" class="page">
-                    <div class="dashboard-header">
-                        <h1>Team Management</h1>
-                        <p>Coming soon - Manage team members and permissions</p>
-                    </div>
-                </div>
-                
-                <div id="integrations" class="page">
-                    <div class="dashboard-header">
-                        <h1>Integrations</h1>
-                        <p>Coming soon - Connect with your favorite tools</p>
-                    </div>
-                </div>
-                
-                <div id="api" class="page">
-                    <div class="dashboard-header">
-                        <h1>API Management</h1>
-                        <p>Coming soon - API keys and documentation</p>
-                    </div>
-                </div>
-                
-                <div id="billing" class="page">
-                    <div class="dashboard-header">
-                        <h1>Billing</h1>
-                        <p>Coming soon - Subscription and usage details</p>
-                    </div>
-                </div>
-                
-                <div id="settings" class="page">
-                    <div class="dashboard-header">
-                        <h1>Settings</h1>
-                        <p>Coming soon - Account and application settings</p>
+                    <p style="color: #666; margin-bottom: 20px;">Your latest accessibility scan results</p>
+                    
+                    <div id="recent-scans-list">
+                        <!-- Recent scans will be loaded here -->
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-    
-    <script>
-        // Page switching functionality - PRESERVED FROM WORKING VERSION
-        function switchToPage(pageId) {
-            // Hide all pages
-            const pages = document.querySelectorAll('.page');
-            pages.forEach(page => page.classList.remove('active'));
             
-            // Show selected page
-            const targetPage = document.getElementById(pageId);
-            if (targetPage) {
-                targetPage.classList.add('active');
-            }
-            
-            // Update navigation
-            const navItems = document.querySelectorAll('.nav-item');
-            navItems.forEach(item => item.classList.remove('active'));
-            
-            // Find and activate the corresponding nav item
-            const activeNavItem = document.querySelector(\`[onclick="switchToPage('\${pageId}')"]\`);
-            if (activeNavItem) {
-                activeNavItem.classList.add('active');
-            }
-        }
-        
-        // Scan functionality - PRESERVED FROM WORKING VERSION
-        async function startScan() {
-            const urlInput = document.getElementById('url-input');
-            const scanButton = document.querySelector('.scan-button');
-            const resultsContainer = document.getElementById('scan-results-container');
-            
-            const url = urlInput.value.trim();
-            if (!url) {
-                alert('Please enter a URL to scan');
-                return;
-            }
-            
-            // Get scan type
-            const scanType = document.querySelector('input[name="scan-type"]:checked').value;
-            const maxPages = document.getElementById('max-pages').value;
-            
-            // Disable button and show loading
-            scanButton.disabled = true;
-            scanButton.textContent = '🔄 Scanning...';
-            
-            // Show loading in results
-            resultsContainer.innerHTML = \`
-                <div class="scan-results">
-                    <div class="results-header">
-                        <div class="results-title">Scanning in Progress</div>
-                        <div class="results-meta">Please wait...</div>
+            <!-- AI Suggestions Modal -->
+            <div id="ai-suggestions-modal" class="ai-suggestions-modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>🤖 AI Fix Suggestions</h2>
+                        <span class="close" onclick="closeAISuggestions()">&times;</span>
                     </div>
-                    <div class="results-body">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            Analyzing accessibility issues on \${url}
-                        </div>
+                    <div class="modal-body" id="ai-suggestions-content">
+                        <!-- AI suggestions will be loaded here -->
                     </div>
                 </div>
-            \`;
+            </div>
             
-            try {
-                const response = await fetch('/api/scan', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        url: url,
-                        scanType: scanType,
-                        maxPages: parseInt(maxPages)
-                    })
+            <!-- Guided Fixing Modal -->
+            <div id="guided-fixing-modal" class="guided-fixing-modal">
+                <div class="guided-modal-content">
+                    <div class="guided-modal-header">
+                        <h2>🛠️ Guided Accessibility Fixing</h2>
+                        <div id="progress-indicator">Violation 1 of 3</div>
+                        <span class="close" onclick="GuidedFixing.close()">&times;</span>
+                    </div>
+                    <div class="guided-modal-body" id="guided-modal-body">
+                        <!-- Violation details and AI suggestions will be loaded here -->
+                    </div>
+                    <div class="guided-modal-footer">
+                        <button id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
+                        <button id="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
+                        <button id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
+                        <button id="finish-btn" onclick="GuidedFixing.close()" style="display: none;">✅ Finish</button>
+                    </div>
+                </div>
+            </div>
+            
+            <script>
+                let currentViolations = [];
+                let currentPlatformInfo = null;
+                
+                // Load dashboard data on page load
+                document.addEventListener('DOMContentLoaded', function() {
+                    loadDashboardStats();
+                    loadRecentScans();
+                    updateDatabaseStatus();
                 });
                 
-                const result = await response.json();
+                async function loadDashboardStats() {
+                    try {
+                        const response = await fetch('/api/dashboard/stats');
+                        const stats = await response.json();
+                        
+                        document.getElementById('total-scans').textContent = stats.totalScans;
+                        document.getElementById('total-issues').textContent = stats.totalIssues;
+                        document.getElementById('average-score').textContent = stats.averageScore + '%';
+                        document.getElementById('this-week-scans').textContent = stats.thisWeekScans;
+                    } catch (error) {
+                        console.error('Error loading dashboard stats:', error);
+                    }
+                }
                 
-                if (result.success) {
-                    displayScanResults(result);
+                async function loadRecentScans() {
+                    try {
+                        const response = await fetch('/api/scans/recent');
+                        const scans = await response.json();
+                        
+                        const scansList = document.getElementById('recent-scans-list');
+                        
+                        if (scans.length === 0) {
+                            scansList.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">No scans found. Start your first scan above!</p>';
+                            return;
+                        }
+                        
+                        scansList.innerHTML = scans.map(scan => {
+                            const scoreClass = scan.score >= 95 ? 'excellent' : 
+                                             scan.score >= 85 ? 'good' : 
+                                             scan.score >= 70 ? 'fair' : 'poor';
+                            
+                            return \`
+                                <div class="scan-item">
+                                    <div class="scan-info">
+                                        <h4>\${scan.url}</h4>
+                                        <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
+                                    </div>
+                                    <div class="scan-score">
+                                        <div class="score-badge score-\${scoreClass}">\${scan.score}% Score</div>
+                                        <button class="view-report-btn" onclick="viewScanReport(\${scan.id})">👁️ View Report</button>
+                                    </div>
+                                </div>
+                            \`;
+                        }).join('');
+                    } catch (error) {
+                        console.error('Error loading recent scans:', error);
+                        document.getElementById('recent-scans-list').innerHTML = '<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading recent scans</p>';
+                    }
+                }
+                
+                function updateDatabaseStatus() {
+                    // This would be updated based on actual database connection status
+                    // For now, we'll show a generic message
+                }
+                
+                function showScanForm() {
+                    document.getElementById('scan-form').style.display = 'block';
+                    document.getElementById('scan-form').scrollIntoView({ behavior: 'smooth' });
+                }
+                
+                function showAnalytics() {
+                    alert('Analytics feature coming soon!');
+                }
+                
+                function showTeam() {
+                    alert('Team management feature coming soon!');
+                }
+                
+                function showSettings() {
+                    alert('Settings feature coming soon!');
+                }
+                
+                function viewScanReport(scanId) {
+                    alert(\`Viewing detailed report for scan \${scanId} - Feature coming soon!\`);
+                }
+                
+                // Handle form submission
+                document.getElementById('accessibility-form').addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(e.target);
+                    const url = formData.get('url');
+                    const scanType = formData.get('scanType');
+                    const maxPages = formData.get('maxPages') || 5;
+                    
+                    // Show loading state
+                    document.getElementById('scan-button').disabled = true;
+                    document.getElementById('loading').style.display = 'block';
+                    document.getElementById('results').style.display = 'none';
+                    
+                    try {
+                        const response = await fetch('/api/scan', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                url: url,
+                                scanType: scanType,
+                                maxPages: parseInt(maxPages)
+                            })
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error('Scan failed');
+                        }
+                        
+                        const result = await response.json();
+                        displayResults(result);
+                        
+                    } catch (error) {
+                        console.error('Scan error:', error);
+                        alert('Scan failed. Please try again.');
+                    } finally {
+                        document.getElementById('scan-button').disabled = false;
+                        document.getElementById('loading').style.display = 'none';
+                    }
+                });
+                
+                function displayResults(result) {
+                    currentViolations = result.violations || [];
+                    currentPlatformInfo = result.platformInfo || null;
+                    
+                    // Update stats
+                    document.getElementById('total-issues-found').textContent = result.totalIssues || 0;
+                    document.getElementById('critical-issues').textContent = result.violations?.filter(v => v.impact === 'critical').length || 0;
+                    document.getElementById('serious-issues').textContent = result.violations?.filter(v => v.impact === 'serious').length || 0;
+                    document.getElementById('moderate-issues').textContent = result.violations?.filter(v => v.impact === 'moderate').length || 0;
+                    document.getElementById('minor-issues').textContent = result.violations?.filter(v => v.impact === 'minor').length || 0;
+                    document.getElementById('scan-time').textContent = \`Completed in \${result.scanTimeMs}ms\`;
+                    
+                    // Show summary
+                    const summaryDiv = document.getElementById('violations-summary');
+                    if (result.totalIssues > 0) {
+                        summaryDiv.innerHTML = 
+                            '<div style="text-align: center; color: #666; padding: 20px; background: #f8f9fa; border-radius: 8px; margin: 20px 0;"><p>📋 <strong>' + result.totalIssues + ' accessibility issues found</strong></p><p>Use the buttons below to view details or start fixing issues.</p></div>';
+                    } else {
+                        summaryDiv.innerHTML = 
+                            '<div style="text-align: center; color: #28a745; padding: 20px; background: #d4edda; border-radius: 8px; margin: 20px 0;"><p>🎉 <strong>No accessibility issues found!</strong></p><p>Your website meets the basic accessibility standards.</p></div>';
+                    }
+                    
+                    // Show action buttons
+                    const actionsDiv = document.getElementById('results-actions');
+                    if (result.totalIssues > 0) {
+                        actionsDiv.innerHTML = 
+                            '<button class="btn btn-primary" onclick="showDetailedReport()">📄 View Detailed Report</button>' +
+                            '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(currentViolations).replace(/"/g, '&quot;') + ', ' + JSON.stringify(currentPlatformInfo || {}).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' +
+                            '<button class="btn btn-success" onclick="startGuidedFixing()">🛠️ Let\\'s Start Fixing</button>';
+                    } else {
+                        actionsDiv.innerHTML = 
+                            '<button class="btn btn-primary" onclick="showDetailedReport()">📄 View Detailed Report</button>';
+                    }
+                    
+                    // Show results
+                    document.getElementById('results').style.display = 'block';
+                    document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+                    
                     // Refresh recent scans
                     loadRecentScans();
-                } else {
-                    displayScanError(result.error);
                 }
                 
-            } catch (error) {
-                console.error('Scan error:', error);
-                displayScanError('Network error occurred. Please try again.');
-            } finally {
-                // Re-enable button
-                scanButton.disabled = false;
-                scanButton.textContent = '🔍 Start Accessibility Scan';
-            }
-        }
-        
-        function displayScanResults(result) {
-            // Store violations and platform info globally
-            currentViolations = result.violations;
-            window.currentPlatformInfo = result.platformInfo;
-            
-            const resultsContainer = document.getElementById('scan-results-container');
-            
-            const violations = result.violations || result.pages?.reduce((acc, page) => acc.concat(page.violations), []) || [];
-            
-            resultsContainer.innerHTML = \`
-                <div class="scan-results">
-                    <div class="results-header">
-                        <div class="results-title">Scan Results</div>
-                        <div class="results-meta">Completed in \${result.scanTime}ms</div>
-                    </div>
-                    <div class="results-body">
-                        <div class="results-summary">
-                            <div class="summary-grid">
-                                <div class="summary-item">
-                                    <div class="summary-value">\${violations.length}</div>
-                                    <div class="summary-label">Total Issues</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.critical || 0}</div>
-                                    <div class="summary-label">Critical</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.serious || 0}</div>
-                                    <div class="summary-label">Serious</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.moderate || 0}</div>
-                                    <div class="summary-label">Moderate</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.minor || 0}</div>
-                                    <div class="summary-label">Minor</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        \${violations.length > 0 ? 
-                            '<div style="text-align: center; color: #666; padding: 20px; background: #f8f9fa; border-radius: 8px; margin: 20px 0;"><p>📋 <strong>' + violations.length + ' accessibility issues found</strong></p><p>Use the buttons below to view details or start fixing issues.</p></div>'
-                            : '<p style="text-align: center; color: #28a745; font-size: 1.2rem; padding: 40px;">🎉 No accessibility issues found!</p>'
-                        }
-                        
-                        <div style="margin-top: 20px; text-align: center;">
-                            \${violations.length > 0 ? 
-                                '<button class="view-report-btn" onclick="openDetailedReport()" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
-                                : ''
-                            }
-                            \${violations.length > 0 ? 
-                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ', ' + JSON.stringify(result.platformInfo || {}).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
-                                : ''
-                            }
-                            \${violations.length > 0 ? 
-                                '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🛠️ Let\\'s Start Fixing</button>' 
-                                : ''
-                            }
-                        </div>
-                    </div>
-                </div>
-            \`;
-        }
-        
-        function displayScanError(error) {
-            const resultsContainer = document.getElementById('scan-results-container');
-            resultsContainer.innerHTML = \`
-                <div class="scan-results">
-                    <div class="results-header">
-                        <div class="results-title">Scan Failed</div>
-                        <div class="results-meta" style="color: #dc3545;">Error occurred</div>
-                    </div>
-                    <div class="results-body">
-                        <div style="text-align: center; color: #dc3545; padding: 40px;">
-                            <h3>Scan Failed</h3>
-                            <p>\${error}</p>
-                        </div>
-                    </div>
-                </div>
-            \`;
-        }
-        
-        // AI Suggestions functionality - PRESERVED FROM WORKING VERSION
-        async function showAISuggestions(violations, platformInfo = null) {
-            const modal = document.getElementById('ai-modal');
-            const modalBody = document.getElementById('ai-modal-body');
-            
-            modal.style.display = 'block';
-            modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Generating AI suggestions...</div>';
-            
-            try {
-                const response = await fetch('/api/ai-fixes', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ violations, platformInfo })
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to get AI suggestions');
-                }
-                
-                const suggestions = await response.json();
-                
-                modalBody.innerHTML = suggestions.map(suggestion => \`
-                    <div class="ai-suggestion">
-                        <div class="ai-suggestion-header">
-                            <strong>🤖 AI Fix Suggestion</strong>
-                            <span class="priority-badge priority-\${suggestion.priority}">\${suggestion.priority.toUpperCase()}</span>
-                        </div>
-                        <div class="ai-suggestion-content">
-                            <p><strong>Issue:</strong> \${suggestion.explanation}</p>
-                            <p><strong>Code Example:</strong></p>
-                            <pre><code>\${suggestion.codeExample}</code></pre>
-                            <p><strong>Implementation Steps:</strong></p>
-                            <ol>
-                                \${suggestion.steps.map(step => \`<li>\${step}</li>\`).join('')}
-                            </ol>
-                        </div>
-                    </div>
-                \`).join('');
-                
-            } catch (error) {
-                console.error('Error getting AI suggestions:', error);
-                modalBody.innerHTML = \`
-                    <div style="color: #dc3545; text-align: center; padding: 20px;">
-                        <h3>Unable to Generate AI Suggestions</h3>
-                        <p>Please try again later or contact support if the problem persists.</p>
-                    </div>
-                \`;
-            }
-        }
-        
-        function closeAIModal() {
-            document.getElementById('ai-modal').style.display = 'none';
-        }
-        
-        // Global variable to store current violations for detailed report
-        let currentViolations = [];
-        
-        // NEW: Open detailed report in new tab
-        function openDetailedReport(violations) {
-            // Use the stored violations if no parameter passed
-            const violationsToShow = violations || currentViolations;
-            
-            if (!violationsToShow || violationsToShow.length === 0) {
-                alert('No violations data available for detailed report. Please run a scan first.');
-                return;
-            }
-            
-            // Send violations to server endpoint for report generation
-            fetch('/api/detailed-report', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ violations: violationsToShow })
-            })
-            .then(response => response.text())
-            .then(html => {
-                const reportWindow = window.open('', '_blank');
-                reportWindow.document.write(html);
-                reportWindow.document.close();
-            })
-            .catch(error => {
-                console.error('Error generating detailed report:', error);
-                alert('Failed to generate detailed report. Please try again.');
-            });
-        }
-        
-        // Fallback: Simple detailed report function
-        function openDetailedReportSimple(violations) {
-            const violationsToShow = violations || currentViolations;
-            const reportWindow = window.open('', '_blank');
-            const reportHtml = \`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Accessibility Scan Report</title>
-                    <style>
-                        body { 
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            margin: 0; 
-                            padding: 20px; 
-                            background: #f8f9fa; 
-                            color: #333;
-                        }
-                        .report-header {
-                            background: white;
-                            padding: 30px;
-                            border-radius: 8px;
-                            margin-bottom: 20px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                        }
-                        .report-title {
-                            font-size: 2rem;
-                            font-weight: bold;
-                            color: #333;
-                            margin-bottom: 10px;
-                        }
-                        .report-meta {
-                            color: #666;
-                            font-size: 1rem;
-                        }
-                        .violation {
-                            background: white;
-                            border-radius: 8px;
-                            margin-bottom: 20px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                            overflow: hidden;
-                        }
-                        .violation-header {
-                            padding: 20px;
-                            border-bottom: 1px solid #eee;
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                        }
-                        .violation-title {
-                            font-size: 1.25rem;
-                            font-weight: bold;
-                            color: #333;
-                        }
-                        .violation-impact {
-                            padding: 4px 12px;
-                            border-radius: 20px;
-                            font-size: 0.875rem;
-                            font-weight: bold;
-                            text-transform: uppercase;
-                        }
-                        .impact-critical { background: #dc3545; color: white; }
-                        .impact-serious { background: #fd7e14; color: white; }
-                        .impact-moderate { background: #ffc107; color: #333; }
-                        .impact-minor { background: #6c757d; color: white; }
-                        .violation-body {
-                            padding: 20px;
-                        }
-                        .violation-description {
-                            font-size: 1rem;
-                            margin-bottom: 15px;
-                            line-height: 1.5;
-                        }
-                        .violation-help {
-                            color: #666;
-                            font-size: 0.9rem;
-                            line-height: 1.4;
-                        }
-                        .violation-help a {
-                            color: #007bff;
-                            text-decoration: none;
-                        }
-                        .violation-help a:hover {
-                            text-decoration: underline;
-                        }
-                        .summary-stats {
-                            display: grid;
-                            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-                            gap: 15px;
-                            margin: 20px 0;
-                        }
-                        .stat-item {
-                            text-align: center;
-                            padding: 15px;
-                            background: #f8f9fa;
-                            border-radius: 6px;
-                        }
-                        .stat-value {
-                            font-size: 1.5rem;
-                            font-weight: bold;
-                            color: #333;
-                        }
-                        .stat-label {
-                            font-size: 0.875rem;
-                            color: #666;
-                            margin-top: 5px;
-                        }
-                        @media print {
-                            body { background: white; }
-                            .violation { box-shadow: none; border: 1px solid #ddd; }
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="report-header">
-                        <div class="report-title">🔍 Accessibility Scan Report</div>
-                        <div class="report-meta">Generated on \${new Date().toLocaleString()}</div>
-                        <div class="summary-stats">
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.length}</div>
-                                <div class="stat-label">Total Issues</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'critical').length}</div>
-                                <div class="stat-label">Critical</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'serious').length}</div>
-                                <div class="stat-label">Serious</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'moderate').length}</div>
-                                <div class="stat-label">Moderate</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'minor').length}</div>
-                                <div class="stat-label">Minor</div>
-                            </div>
-                        </div>
-                    </div>
+                function showDetailedReport() {
+                    if (currentViolations.length === 0) {
+                        alert('No violations to show in detailed report.');
+                        return;
+                    }
                     
-                    \${violationsToShow.map((violation, index) => \`
-                        <div class="violation">
-                            <div class="violation-header">
-                                <div class="violation-title">\${index + 1}. \${violation.id}</div>
-                                <div class="violation-impact impact-\${violation.impact}">\${violation.impact}</div>
-                            </div>
-                            <div class="violation-body">
-                                <div class="violation-description">
-                                    <strong>Description:</strong> \${violation.description || 'No description available'}
-                                </div>
-                                <div class="violation-help">
-                                    <strong>Help:</strong> \${violation.help || 'Refer to WCAG guidelines for more information'}
-                                    \${violation.helpUrl ? \`<br><br><strong>Learn more:</strong> <a href="\${violation.helpUrl}" target="_blank">\${violation.helpUrl}</a>\` : ''}
-                                </div>
-                            </div>
-                        </div>
-                    \`).join('')}
+                    // Open detailed report in new window
+                    const reportWindow = window.open('', '_blank');
+                    reportWindow.document.write('<html><body><h1>Loading detailed report...</h1></body></html>');
                     
-                    <div style="text-align: center; margin: 40px 0; color: #666;">
-                        <p>Report generated by SentryPrime Enterprise Accessibility Scanner</p>
-                    </div>
-                </body>
-                </html>
-            \`;
-            
-            reportWindow.document.write(reportHtml);
-            reportWindow.document.close();
-        }
-        
-        // NEW: Guided Fixing Workflow - Properly Namespaced
-        const GuidedFixing = {
-            currentViolations: [],
-            currentViolationIndex: 0,
-            fixedViolations: [],
-            
-            start: function(violations) {
-                // Sort violations by priority (critical > serious > moderate > minor)
-                const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
-                this.currentViolations = violations.sort((a, b) => {
-                    return priorityOrder[a.impact] - priorityOrder[b.impact];
-                });
-                
-                this.currentViolationIndex = 0;
-                this.fixedViolations = [];
-                
-                // Show the modal
-                const modal = document.getElementById('guided-fixing-modal');
-                modal.style.display = 'block';
-                
-                // Display the first violation
-                this.showCurrentViolation();
-            },
-            
-            showCurrentViolation: function() {
-                const violation = this.currentViolations[this.currentViolationIndex];
-                const totalViolations = this.currentViolations.length;
-                
-                // Update progress indicator
-                document.getElementById('progress-indicator').textContent = 
-                    'Violation ' + (this.currentViolationIndex + 1) + ' of ' + totalViolations;
-                
-                // Update modal body with violation details
-                const modalBody = document.getElementById('guided-modal-body');
-                modalBody.innerHTML = 
-                    '<div class="violation-details">' +
-                        '<div class="violation-title">' + violation.id + '</div>' +
-                        '<div class="violation-impact impact-' + violation.impact + '">' + violation.impact + '</div>' +
-                        '<p><strong>Description:</strong> ' + (violation.description || 'No description available') + '</p>' +
-                        '<p><strong>Help:</strong> ' + (violation.help || 'Refer to WCAG guidelines for more information') + '</p>' +
-                        (violation.helpUrl ? '<p><strong>Learn more:</strong> <a href="' + violation.helpUrl + '" target="_blank">' + violation.helpUrl + '</a></p>' : '') +
-                    '</div>' +
-                    '<div id="ai-fix-area" style="margin-top: 20px;">' +
-                        '<!-- AI fix suggestions will appear here -->' +
-                    '</div>';
-                
-                // Update navigation buttons
-                this.updateNavigationButtons();
-            },
-            
-            updateNavigationButtons: function() {
-                const prevBtn = document.getElementById('prev-btn');
-                const nextBtn = document.getElementById('next-btn');
-                const finishBtn = document.getElementById('finish-btn');
-                
-                // Previous button
-                prevBtn.disabled = this.currentViolationIndex === 0;
-                
-                // Next button and finish button
-                if (this.currentViolationIndex === this.currentViolations.length - 1) {
-                    nextBtn.style.display = 'none';
-                    finishBtn.style.display = 'inline-block';
-                } else {
-                    nextBtn.style.display = 'inline-block';
-                    finishBtn.style.display = 'none';
-                }
-            },
-            
-            previousViolation: function() {
-                if (this.currentViolationIndex > 0) {
-                    this.currentViolationIndex--;
-                    this.showCurrentViolation();
-                }
-            },
-            
-            nextViolation: function() {
-                if (this.currentViolationIndex < this.currentViolations.length - 1) {
-                    this.currentViolationIndex++;
-                    this.showCurrentViolation();
-                }
-            },
-            
-            close: function() {
-                document.getElementById('guided-fixing-modal').style.display = 'none';
-            },
-            
-            getAIFixForCurrent: async function() {
-                const violation = this.currentViolations[this.currentViolationIndex];
-                const aiFixArea = document.getElementById('ai-fix-area');
-                
-                // Show loading state
-                aiFixArea.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI fix suggestion...</div>';
-                
-                try {
-                    const response = await fetch('/api/ai-fixes', {
+                    fetch('/api/detailed-report', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ violations: [violation], platformInfo: window.currentPlatformInfo || null })
+                        body: JSON.stringify({ violations: currentViolations })
+                    })
+                    .then(response => response.text())
+                    .then(html => {
+                        reportWindow.document.open();
+                        reportWindow.document.write(html);
+                        reportWindow.document.close();
+                    })
+                    .catch(error => {
+                        console.error('Error generating report:', error);
+                        reportWindow.document.write('<html><body><h1>Error generating report</h1></body></html>');
+                        reportWindow.document.close();
                     });
+                }
+                
+                async function showAISuggestions(violations, platformInfo) {
+                    const modal = document.getElementById('ai-suggestions-modal');
+                    const content = document.getElementById('ai-suggestions-content');
                     
-                    if (!response.ok) {
-                        throw new Error('Failed to get AI suggestion');
+                    modal.style.display = 'block';
+                    content.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI suggestions...</div>';
+                    
+                    try {
+                        const response = await fetch('/api/ai-fixes', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ violations, platformInfo })
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error('Failed to get AI suggestions');
+                        }
+                        
+                        const suggestions = await response.json();
+                        
+                        content.innerHTML = suggestions.map((suggestion, index) => \`
+                            <div class="ai-suggestion priority-\${suggestion.priority}">
+                                <div class="ai-suggestion-header">
+                                    <strong>🤖 AI Fix Suggestion</strong>
+                                    <span class="priority-badge priority-\${suggestion.priority}">\${suggestion.priority.toUpperCase()}</span>
+                                </div>
+                                <div class="ai-suggestion-content">
+                                    <p><strong>Issue:</strong> \${suggestion.explanation}</p>
+                                    <p><strong>Code Example:</strong></p>
+                                    <pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>\${suggestion.codeExample}</code></pre>
+                                    <p><strong>Implementation Steps:</strong></p>
+                                    <ol>\${suggestion.steps.map(step => '<li>' + step + '</li>').join('')}</ol>
+                                </div>
+                            </div>
+                        \`).join('');
+                        
+                    } catch (error) {
+                        console.error('Error getting AI suggestions:', error);
+                        content.innerHTML = '<div style="text-align: center; color: #e74c3c; padding: 20px;">Error loading AI suggestions. Please try again.</div>';
+                    }
+                }
+                
+                function closeAISuggestions() {
+                    document.getElementById('ai-suggestions-modal').style.display = 'none';
+                }
+                
+                function startGuidedFixing() {
+                    if (currentViolations.length === 0) {
+                        alert('No violations to fix.');
+                        return;
                     }
                     
-                    const suggestions = await response.json();
-                    const suggestion = suggestions[0];
+                    GuidedFixing.start(currentViolations);
+                }
+                
+                // NEW: Guided Fixing Workflow - Properly Namespaced
+                const GuidedFixing = {
+                    currentViolations: [],
+                    currentViolationIndex: 0,
+                    fixedViolations: [],
                     
-                    if (suggestion) {
-                        aiFixArea.innerHTML = 
-                            '<div class="ai-suggestion priority-' + suggestion.priority + '">' +
-                                '<div class="ai-suggestion-header">' +
-                                    '<strong>🤖 AI Fix Suggestion</strong>' +
-                                    '<span class="priority-badge priority-' + suggestion.priority + '">' + suggestion.priority.toUpperCase() + '</span>' +
-                                '</div>' +
-                                '<div class="ai-suggestion-content">' +
-                                    '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
-                                    '<p><strong>Code Example:</strong></p>' +
-                                    '<pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + suggestion.codeExample + '</code></pre>' +
-                                    '<p><strong>Implementation Steps:</strong></p>' +
-                                    '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
-                                    '<div style="margin-top: 16px;">' +
-                                        '<button onclick="GuidedFixing.saveFixToReport()" class="btn btn-success">💾 Save to Report</button>' +
-                                        (suggestion.fix ? '<button onclick="GuidedFixing.previewFix()" class="btn btn-primary" style="margin-left: 8px;">👁️ Preview Fix</button>' : '') +
-                                        (suggestion.fix ? '<button onclick="GuidedFixing.applyFix()" class="btn btn-warning" style="margin-left: 8px;">⚡ Apply Fix</button>' : '') +
-                                    '</div>' +
-                                '</div>' +
+                    start: function(violations) {
+                        // Sort violations by priority (critical > serious > moderate > minor)
+                        const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
+                        this.currentViolations = violations.sort((a, b) => {
+                            return priorityOrder[a.impact] - priorityOrder[b.impact];
+                        });
+                        
+                        this.currentViolationIndex = 0;
+                        this.fixedViolations = [];
+                        
+                        // Show the modal
+                        const modal = document.getElementById('guided-fixing-modal');
+                        modal.style.display = 'block';
+                        
+                        // Display the first violation
+                        this.showCurrentViolation();
+                    },
+                    
+                    showCurrentViolation: function() {
+                        const violation = this.currentViolations[this.currentViolationIndex];
+                        const totalViolations = this.currentViolations.length;
+                        
+                        // Update progress indicator
+                        document.getElementById('progress-indicator').textContent = 
+                            'Violation ' + (this.currentViolationIndex + 1) + ' of ' + totalViolations;
+                        
+                        // Update modal body with violation details
+                        const modalBody = document.getElementById('guided-modal-body');
+                        modalBody.innerHTML = 
+                            '<div class="violation-details">' +
+                                '<div class="violation-title">' + violation.id + '</div>' +
+                                '<div class="violation-impact impact-' + violation.impact + '">' + violation.impact + '</div>' +
+                                '<p><strong>Description:</strong> ' + (violation.description || 'No description available') + '</p>' +
+                                '<p><strong>Help:</strong> ' + (violation.help || 'Refer to WCAG guidelines for more information') + '</p>' +
+                                (violation.helpUrl ? '<p><strong>Learn more:</strong> <a href="' + violation.helpUrl + '" target="_blank">' + violation.helpUrl + '</a></p>' : '') +
+                            '</div>' +
+                            '<div id="ai-fix-area" style="margin-top: 20px;">' +
+                                '<!-- AI fix suggestions will appear here -->' +
                             '</div>';
                         
-                        // Store the suggestion for potential saving
-                        this.currentViolations[this.currentViolationIndex].aiSuggestion = suggestion;
-                    } else {
-                        throw new Error('No suggestion received');
-                    }
+                        // Update navigation buttons
+                        this.updateNavigationButtons();
+                    },
                     
-                } catch (error) {
-                    console.error('Error getting AI suggestion:', error);
-                    aiFixArea.innerHTML = 
-                        '<div style="color: #dc3545; text-align: center; padding: 20px;">' +
-                            '<h4>Unable to Generate AI Suggestion</h4>' +
-                            '<p>Please try again or proceed to the next violation.</p>' +
-                        '</div>';
-                }
-            },
-            
-            saveFixToReport: function() {
-                const violation = this.currentViolations[this.currentViolationIndex];
-                if (violation.aiSuggestion) {
-                    this.fixedViolations.push({
-                        violation: violation,
-                        suggestion: violation.aiSuggestion,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    // Show confirmation
-                    const aiFixArea = document.getElementById('ai-fix-area');
-                    const saveButton = aiFixArea.querySelector('button');
-                    if (saveButton) {
-                        saveButton.textContent = '✅ Saved to Report';
-                        saveButton.disabled = true;
-                        saveButton.style.background = '#28a745';
-                    }
-                }
-            },
-            
-            // PHASE 2: Preview Fix Method
-            previewFix: function() {
-                const violation = this.currentViolations[this.currentViolationIndex];
-                if (!violation.aiSuggestion || !violation.aiSuggestion.fix) {
-                    alert('No parsed fix available for preview. Please ensure the AI suggestion includes before/after code.');
-                    return;
-                }
-                
-                const fix = violation.aiSuggestion.fix;
-                const previewModal = document.createElement('div');
-                previewModal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center;';
-                previewModal.innerHTML = 
-                    '<div style="background: white; padding: 30px; border-radius: 8px; max-width: 80%; max-height: 80%; overflow-y: auto;">' +
-                        '<h3>Fix Preview</h3>' +
-                        '<div style="display: flex; gap: 20px; margin: 20px 0;">' +
-                            '<div style="flex: 1;">' +
-                                '<h4 style="color: #dc3545;">Before (Current Code)</h4>' +
-                                '<pre style="background: #f8d7da; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + fix.beforeCode + '</code></pre>' +
-                            '</div>' +
-                            '<div style="flex: 1;">' +
-                                '<h4 style="color: #28a745;">After (Fixed Code)</h4>' +
-                                '<pre style="background: #d4edda; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + fix.afterCode + '</code></pre>' +
-                            '</div>' +
-                        '</div>' +
-                        '<div style="text-align: center; margin-top: 20px;">' +
-                            '<button onclick="this.parentElement.parentElement.parentElement.remove()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Close Preview</button>' +
-                        '</div>' +
-                    '</div>';
-                
-                document.body.appendChild(previewModal);
-            },
-            
-            // PHASE 2: Apply Fix Method
-            applyFix: async function() {
-                const violation = this.currentViolations[this.currentViolationIndex];
-                if (!violation.aiSuggestion || !violation.aiSuggestion.fix) {
-                    alert('No parsed fix available to apply. Please ensure the AI suggestion includes before/after code.');
-                    return;
-                }
-                
-                // Get the detected platform from the scan results
-                const platform = window.currentPlatformInfo?.type || 'unknown';
-                
-                if (platform === 'unknown') {
-                    alert('Platform not detected. Auto-fix is only available for supported platforms (Shopify, WordPress, etc.).');
-                    return;
-                }
-                
-                if (!confirm('Are you sure you want to apply this fix to your ' + platform + ' website? This will make changes to your live site.')) {
-                    return;
-                }
-                
-                try {
-                    const response = await fetch('/api/apply-fix', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            platform: platform,
-                            fix: violation.aiSuggestion.fix,
-                            context: {
-                                violationId: violation.id,
-                                url: window.currentPlatformInfo?.url || '',
-                                element: violation.target ? violation.target[0] : null
-                            }
-                        })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        alert('Fix applied successfully! ' + result.message);
+                    updateNavigationButtons: function() {
+                        const prevBtn = document.getElementById('prev-btn');
+                        const nextBtn = document.getElementById('next-btn');
+                        const finishBtn = document.getElementById('finish-btn');
                         
-                        // Mark this violation as fixed
-                        violation.fixed = true;
+                        // Previous button
+                        prevBtn.disabled = this.currentViolationIndex === 0;
                         
-                        // Update the UI to show the fix was applied
-                        const aiFixArea = document.getElementById('ai-fix-area');
-                        const applyButton = aiFixArea.querySelector('button[onclick="GuidedFixing.applyFix()"]');
-                        if (applyButton) {
-                            applyButton.textContent = '✅ Fix Applied';
-                            applyButton.disabled = true;
-                            applyButton.style.background = '#28a745';
+                        // Next button and finish button
+                        if (this.currentViolationIndex === this.currentViolations.length - 1) {
+                            nextBtn.style.display = 'none';
+                            finishBtn.style.display = 'inline-block';
+                        } else {
+                            nextBtn.style.display = 'inline-block';
+                            finishBtn.style.display = 'none';
                         }
-                    } else {
-                        alert('Failed to apply fix: ' + (result.error || 'Unknown error'));
-                    }
+                    },
                     
-                } catch (error) {
-                    console.error('Error applying fix:', error);
-                    alert('Error applying fix. Please try again or apply the fix manually.');
+                    previousViolation: function() {
+                        if (this.currentViolationIndex > 0) {
+                            this.currentViolationIndex--;
+                            this.showCurrentViolation();
+                        }
+                    },
+                    
+                    nextViolation: function() {
+                        if (this.currentViolationIndex < this.currentViolations.length - 1) {
+                            this.currentViolationIndex++;
+                            this.showCurrentViolation();
+                        }
+                    },
+                    
+                    close: function() {
+                        document.getElementById('guided-fixing-modal').style.display = 'none';
+                    },
+                    
+                    getAIFixForCurrent: async function() {
+                        const violation = this.currentViolations[this.currentViolationIndex];
+                        const aiFixArea = document.getElementById('ai-fix-area');
+                        
+                        // Show loading state
+                        aiFixArea.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI fix suggestion...</div>';
+                        
+                        try {
+                            const response = await fetch('/api/ai-fixes', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({ violations: [violation], platformInfo: window.currentPlatformInfo || null })
+                            });
+                            
+                            if (!response.ok) {
+                                throw new Error('Failed to get AI suggestion');
+                            }
+                            
+                            const suggestions = await response.json();
+                            const suggestion = suggestions[0];
+                            
+                            if (suggestion) {
+                                aiFixArea.innerHTML = 
+                                    '<div class="ai-suggestion priority-' + suggestion.priority + '">' +
+                                        '<div class="ai-suggestion-header">' +
+                                            '<strong>🤖 AI Fix Suggestion</strong>' +
+                                            '<span class="priority-badge priority-' + suggestion.priority + '">' + suggestion.priority.toUpperCase() + '</span>' +
+                                        '</div>' +
+                                        '<div class="ai-suggestion-content">' +
+                                            '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
+                                            '<p><strong>Code Example:</strong></p>' +
+                                            '<pre style="background: #f8f9fa; padding: 12px; border-radius: 4px; overflow-x: auto;"><code>' + suggestion.codeExample + '</code></pre>' +
+                                            '<p><strong>Implementation Steps:</strong></p>' +
+                                            '<ol>' + suggestion.steps.map(step => '<li>' + step + '</li>').join('') + '</ol>' +
+                                            '<div style="margin-top: 16px;">' +
+                                                '<button onclick="GuidedFixing.saveFixToReport()" class="btn btn-success">💾 Save to Report</button>' +
+                                            '</div>' +
+                                        '</div>' +
+                                    '</div>';
+                                
+                                // Store the suggestion for potential saving
+                                this.currentViolations[this.currentViolationIndex].aiSuggestion = suggestion;
+                            } else {
+                                throw new Error('No suggestion received');
+                            }
+                            
+                        } catch (error) {
+                            console.error('Error getting AI suggestion:', error);
+                            aiFixArea.innerHTML = 
+                                '<div style="text-align: center; color: #e74c3c; padding: 20px; background: #f8d7da; border-radius: 8px;">' +
+                                    '<p><strong>Error getting AI suggestion</strong></p>' +
+                                    '<p>Please try again or refer to the violation details above.</p>' +
+                                '</div>';
+                        }
+                    },
+                    
+                    saveFixToReport: function() {
+                        const violation = this.currentViolations[this.currentViolationIndex];
+                        if (violation.aiSuggestion) {
+                            this.fixedViolations.push({
+                                violation: violation,
+                                suggestion: violation.aiSuggestion,
+                                timestamp: new Date().toISOString()
+                            });
+                            
+                            alert('Fix suggestion saved to your report!');
+                        }
+                    }
+                };
+                
+                // Close modals when clicking outside
+                window.onclick = function(event) {
+                    const aiModal = document.getElementById('ai-suggestions-modal');
+                    const guidedModal = document.getElementById('guided-fixing-modal');
+                    
+                    if (event.target === aiModal) {
+                        aiModal.style.display = 'none';
+                    }
+                    if (event.target === guidedModal) {
+                        guidedModal.style.display = 'none';
+                    }
                 }
-            },
-            
-            finish: function() {
-                if (this.fixedViolations.length === 0) {
-                    alert('No fixes have been saved to the report yet. Please get AI suggestions and save them before generating a report.');
-                    return;
-                }
-                
-                // Generate and download report
-                this.generateReport();
-                
-                // Close modal
-                this.close();
-            },
-            
-            generateReport: function() {
-                const reportContent = 
-                    '# Accessibility Fix Report\\n' +
-                    'Generated on: ' + new Date().toLocaleString() + '\\n\\n' +
-                    '## Summary\\n' +
-                    '- Total violations processed: ' + this.currentViolations.length + '\\n' +
-                    '- Fixes saved to report: ' + this.fixedViolations.length + '\\n\\n' +
-                    '## Fix Details\\n\\n' +
-                    this.fixedViolations.map((fix, index) => 
-                        '### ' + (index + 1) + '. ' + fix.violation.id + '\\n' +
-                        '**Impact:** ' + fix.violation.impact + '\\n' +
-                        '**Description:** ' + fix.violation.description + '\\n\\n' +
-                        '**AI Suggestion:**\\n' +
-                        fix.suggestion.explanation + '\\n\\n' +
-                        '**Code Example:**\\n' +
-                        fix.suggestion.codeExample + '\\n\\n' +
-                        '**Implementation Steps:**\\n' +
-                        fix.suggestion.steps.map((step, i) => (i + 1) + '. ' + step).join('\\n') + '\\n\\n' +
-                        '---\\n'
-                    ).join('') +
-                    '\\n## Next Steps\\n' +
-                    '1. Review each fix suggestion carefully\\n' +
-                    '2. Test implementations in a development environment\\n' +
-                    '3. Validate fixes with accessibility tools\\n' +
-                    '4. Deploy to production after thorough testing';
-                
-                // Create and download the report
-                const blob = new Blob([reportContent], { type: 'text/markdown' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'accessibility-fix-report-' + new Date().toISOString().split('T')[0] + '.md';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                alert('Report generated! ' + this.fixedViolations.length + ' fixes saved to your downloads.');
-            }
-        };
-        
-        // Dashboard data loading - PRESERVED FROM WORKING VERSION
-        async function loadDashboardStats() {
-            try {
-                const response = await fetch('/api/dashboard/stats');
-                const stats = await response.json();
-                
-                document.getElementById('total-scans').textContent = stats.totalScans;
-                document.getElementById('total-issues').textContent = stats.totalIssues;
-                document.getElementById('average-score').textContent = stats.averageScore + '%';
-                document.getElementById('this-week-scans').textContent = stats.thisWeekScans;
-                
-            } catch (error) {
-                console.error('Error loading dashboard stats:', error);
-            }
-        }
-        
-        async function loadDashboardRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const scans = await response.json();
-                
-                const container = document.getElementById('dashboard-recent-scans');
-                
-                if (scans.length > 0) {
-                    container.innerHTML = scans.slice(0, 3).map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading dashboard recent scans:', error);
-                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        async function loadRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const scans = await response.json();
-                
-                const container = document.getElementById('recent-scans-list');
-                
-                if (scans.length > 0) {
-                    container.innerHTML = scans.map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading recent scans:', error);
-                document.getElementById('recent-scans-list').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        // Initialize dashboard - PRESERVED FROM WORKING VERSION
-        document.addEventListener('DOMContentLoaded', () => {
-            loadDashboardStats();
-            loadDashboardRecentScans();
-            loadRecentScans();
-        });
-    </script>
-    
-    <!-- AI Suggestions Modal -->
-    <div id="ai-modal" class="ai-modal">
-        <div class="ai-modal-content">
-            <div class="ai-modal-header">
-                <h2>🤖 AI Fix Suggestions</h2>
-                <span class="close" onclick="closeAIModal()">&times;</span>
-            </div>
-            <div class="ai-modal-body" id="ai-modal-body">
-                <!-- AI suggestions will be loaded here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- NEW: Guided Fixing Modal -->
-    <div id="guided-fixing-modal" class="guided-modal">
-        <div class="guided-modal-content">
-            <div class="guided-modal-header">
-                <h2>🛠️ Guided Accessibility Fixing</h2>
-                <div class="progress-indicator" id="progress-indicator">Violation 1 of 6</div>
-                <span class="close" onclick="GuidedFixing.close()">&times;</span>
-            </div>
-            <div class="guided-modal-body" id="guided-modal-body">
-                <!-- Current violation details will be loaded here -->
-            </div>
-            <div class="guided-modal-footer">
-                <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
-                <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
-                <button class="next-btn" id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
-                <button class="finish-btn" id="finish-btn" onclick="GuidedFixing.finish()" style="display: none;">📄 Generate Report</button>
-            </div>
-        </div>
-    </div>
-</body>
-</html>`;
-    
-    res.send(html);
+            </script>
+        </body>
+        </html>
+    `);
 });
 
-// Helper functions for link extraction and scanning
-async function extractLinks(page, baseUrl) {
-    try {
-        const links = await page.evaluate((baseUrl) => {
-            const anchors = Array.from(document.querySelectorAll('a[href]'));
-            const baseUrlObj = new URL(baseUrl);
-            
-            return anchors
-                .map(a => {
-                    try {
-                        const href = a.getAttribute('href');
-                        if (!href) return null;
-                        
-                        // Convert relative URLs to absolute
-                        const url = new URL(href, baseUrl);
-                        
-                        // Only include URLs from the same domain
-                        if (url.hostname !== baseUrlObj.hostname) return null;
-                        
-                        // Exclude common non-page URLs
-                        if (url.pathname.match(/\.(pdf|jpg|jpeg|png|gif|css|js|xml|zip|doc|docx)$/i)) return null;
-                        if (url.pathname.includes('#')) return null;
-                        
-                        return url.href;
-                    } catch (e) {
-                        return null;
-                    }
-                })
-                .filter(url => url !== null)
-                .filter((url, index, self) => self.indexOf(url) === index) // Remove duplicates
-                .slice(0, 20); // Limit to 20 links max
-        }, baseUrl);
-        
-        return links;
-    } catch (error) {
-        console.log('Error extracting links:', error.message);
-        return [];
+// Main scanning endpoint
+app.post('/api/scan', async (req, res) => {
+    const { url, scanType = 'single', maxPages = 5 } = req.body;
+    
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
     }
-}
+    
+    console.log(`🔍 Starting accessibility scan for: ${url} (type: ${scanType})`);
+    
+    const startTime = Date.now();
+    let browser = null;
+    let platformInfo = null;
+    
+    try {
+        const targetUrl = url.startsWith('http') ? url : `https://${url}`;
+        
+        // Launch Puppeteer - EXACT WORKING CONFIGURATION
+        browser = await puppeteer.launch({
+            headless: 'new',
+            executablePath: '/usr/bin/chromium-browser',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor',
+                '--window-size=1280,720'
+            ]
+        });
+        
+        let allViolations = [];
+        let pagesScanned = 0;
+        
+        if (scanType === 'single') {
+            // Single page scan
+            const results = await scanSinglePage(browser, targetUrl);
+            allViolations = results.violations;
+            pagesScanned = 1;
+            
+            // Detect platform for single page
+            platformInfo = await detectPlatform(browser, targetUrl);
+        } else {
+            // Multi-page crawl scan
+            console.log(`🕷️ Starting crawl scan (max ${maxPages} pages)`);
+            
+            const visitedUrls = new Set();
+            const urlsToVisit = [targetUrl];
+            
+            // Scan first page and get platform info
+            const firstPageResults = await scanSinglePage(browser, targetUrl);
+            allViolations.push(...firstPageResults.violations);
+            visitedUrls.add(targetUrl);
+            pagesScanned++;
+            
+            // Detect platform from first page
+            platformInfo = await detectPlatform(browser, targetUrl);
+            
+            // Extract links from first page for crawling
+            try {
+                const page = await browser.newPage();
+                await page.goto(targetUrl, { 
+                    waitUntil: 'networkidle0',
+                    timeout: 30000 
+                });
+                
+                const links = await page.evaluate((baseUrl) => {
+                    const anchors = Array.from(document.querySelectorAll('a[href]'));
+                    const baseUrlObj = new URL(baseUrl);
+                    
+                    return anchors
+                        .map(a => a.href)
+                        .filter(href => {
+                            try {
+                                const url = new URL(href);
+                                return url.hostname === baseUrlObj.hostname && 
+                                       !href.includes('#') && 
+                                       !href.includes('mailto:') && 
+                                       !href.includes('tel:');
+                            } catch {
+                                return false;
+                            }
+                        })
+                        .slice(0, maxPages - 1); // Reserve one slot for the main page
+                }, targetUrl);
+                
+                urlsToVisit.push(...links);
+                await page.close();
+                
+            } catch (error) {
+                console.log('⚠️ Error extracting links for crawl:', error.message);
+            }
+            
+            // Scan additional pages
+            for (const pageUrl of urlsToVisit.slice(1)) {
+                if (pagesScanned >= maxPages) break;
+                if (visitedUrls.has(pageUrl)) continue;
+                
+                try {
+                    console.log(`🔍 Scanning page ${pagesScanned + 1}: ${pageUrl}`);
+                    const pageResults = await scanSinglePage(browser, pageUrl);
+                    allViolations.push(...pageResults.violations);
+                    visitedUrls.add(pageUrl);
+                    pagesScanned++;
+                } catch (error) {
+                    console.log(`⚠️ Error scanning ${pageUrl}:`, error.message);
+                }
+            }
+        }
+        
+        const scanTimeMs = Date.now() - startTime;
+        const totalIssues = allViolations.length;
+        
+        console.log(`✅ ${scanType === 'single' ? 'Single page' : 'Multi-page'} scan completed in ${scanTimeMs}ms. Found ${totalIssues} violations.`);
+        
+        // Save scan to database with platform information
+        const scanId = await saveScan(
+            1, // userId
+            1, // organizationId  
+            targetUrl,
+            scanType,
+            totalIssues,
+            scanTimeMs,
+            pagesScanned,
+            allViolations,
+            platformInfo?.type || 'unknown'
+        );
+        
+        // Log platform detection results
+        console.log('🔍 Platform detected:', JSON.stringify(platformInfo, null, 2));
+        
+        res.json({
+            success: true,
+            url: targetUrl,
+            scanType,
+            totalIssues,
+            scanTimeMs,
+            pagesScanned,
+            violations: allViolations,
+            platformInfo,
+            scanId
+        });
+        
+    } catch (error) {
+        console.error('❌ Scan error:', error);
+        res.status(500).json({ 
+            error: 'Scan failed', 
+            details: error.message,
+            url: url
+        });
+    } finally {
+        if (browser) {
+            try {
+                await browser.close();
+                console.log('🔒 Browser closed successfully');
+            } catch (closeError) {
+                console.error('❌ Error closing browser:', closeError);
+            }
+        }
+    }
+});
 
 async function scanSinglePage(browser, url) {
     const page = await browser.newPage();
     
     try {
-        // Set viewport and user agent
-        await page.setViewport({ width: 1280, height: 720 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+        console.log('Navigating to:', url);
+        await page.goto(url, { 
+            waitUntil: 'networkidle0',
+            timeout: 30000 
+        });
         
-        console.log('Navigating to: ' + url);
-        
-        // Try multiple navigation strategies
-        try {
-            await page.goto(url, { 
-                waitUntil: 'networkidle0',
-                timeout: 90000 
-            });
-        } catch (navError) {
-            console.log('Network idle failed, trying domcontentloaded...');
-            await page.goto(url, { 
-                waitUntil: 'domcontentloaded',
-                timeout: 90000 
-            });
-        }
-        
-        // Wait for page to stabilize
         console.log('Waiting for page to stabilize...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await page.waitForTimeout(2000);
         
-        // Inject axe-core
         console.log('Injecting axe-core...');
         await page.addScriptTag({
-            content: axeCore.source
+            path: require.resolve('axe-core/axe.min.js')
         });
         
         console.log('Running axe accessibility scan...');
-        const results = await page.evaluate(() => {
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Axe scan timeout'));
-                }, 60000);
-                
-                axe.run((err, results) => {
-                    clearTimeout(timeout);
-                    if (err) reject(err);
-                    else {
-                        // PHASE 1 ENHANCEMENT: Collect detailed element information
-                        results.violations = results.violations.map(violation => {
-                            violation.nodes = violation.nodes.map(node => {
-                                const element = document.querySelector(node.target[0]);
-                                if (element) {
-                                    // Enhanced element data collection
-                                    node.enhancedData = {
-                                        // Element targeting
-                                        selector: node.target[0],
-                                        xpath: getXPath(element),
-                                        tagName: element.tagName.toLowerCase(),
-                                        
-                                        // Current element state
-                                        outerHTML: element.outerHTML.substring(0, 500), // Truncate for size
-                                        textContent: element.textContent?.substring(0, 200) || '',
-                                        
-                                        // Computed styles for relevant violations
-                                        computedStyles: getRelevantStyles(element, violation.id),
-                                        
-                                        // Element attributes
-                                        attributes: Array.from(element.attributes).reduce((acc, attr) => {
-                                            acc[attr.name] = attr.value;
-                                            return acc;
-                                        }, {}),
-                                        
-                                        // Position information
-                                        boundingRect: element.getBoundingClientRect(),
-                                        
-                                        // Parent context
-                                        parentInfo: {
-                                            tagName: element.parentElement?.tagName.toLowerCase(),
-                                            className: element.parentElement?.className || '',
-                                            id: element.parentElement?.id || ''
-                                        }
-                                    };
-                                }
-                                return node;
-                            });
-                            return violation;
-                        });
-                        
-                        resolve(results);
-                    }
-                });
-                
-                // Helper function to get XPath
-                function getXPath(element) {
-                    if (element.id) return `//*[@id="${element.id}"]`;
-                    if (element === document.body) return '/html/body';
-                    
-                    let ix = 0;
-                    const siblings = element.parentNode?.childNodes || [];
-                    for (let i = 0; i < siblings.length; i++) {
-                        const sibling = siblings[i];
-                        if (sibling === element) {
-                            return getXPath(element.parentNode) + '/' + element.tagName.toLowerCase() + '[' + (ix + 1) + ']';
-                        }
-                        if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
-                            ix++;
-                        }
-                    }
-                    return '';
-                }
-                
-                // Helper function to get relevant computed styles based on violation type
-                function getRelevantStyles(element, violationId) {
-                    const computedStyle = window.getComputedStyle(element);
-                    const relevantStyles = {};
-                    
-                    // Collect styles relevant to specific violation types
-                    if (violationId === 'color-contrast') {
-                        relevantStyles.color = computedStyle.color;
-                        relevantStyles.backgroundColor = computedStyle.backgroundColor;
-                        relevantStyles.fontSize = computedStyle.fontSize;
-                        relevantStyles.fontWeight = computedStyle.fontWeight;
-                    } else if (violationId.includes('focus')) {
-                        relevantStyles.outline = computedStyle.outline;
-                        relevantStyles.outlineColor = computedStyle.outlineColor;
-                        relevantStyles.outlineWidth = computedStyle.outlineWidth;
-                        relevantStyles.boxShadow = computedStyle.boxShadow;
-                    } else if (violationId.includes('size') || violationId.includes('target')) {
-                        relevantStyles.width = computedStyle.width;
-                        relevantStyles.height = computedStyle.height;
-                        relevantStyles.padding = computedStyle.padding;
-                        relevantStyles.margin = computedStyle.margin;
-                    }
-                    
-                    // Always include basic layout styles
-                    relevantStyles.display = computedStyle.display;
-                    relevantStyles.position = computedStyle.position;
-                    relevantStyles.zIndex = computedStyle.zIndex;
-                    
-                    return relevantStyles;
-                }
-            });
+        const results = await page.evaluate(async () => {
+            return await axe.run();
         });
         
-        return results;
+        return {
+            url: url,
+            violations: results.violations || [],
+            passes: results.passes || [],
+            incomplete: results.incomplete || [],
+            inapplicable: results.inapplicable || []
+        };
         
+    } catch (error) {
+        console.error(`Error scanning ${url}:`, error);
+        throw error;
     } finally {
         await page.close();
     }
 }
 
-// PHASE 1 ENHANCEMENT: Platform Detection Function
 async function detectPlatform(browser, url) {
     const page = await browser.newPage();
+    
     try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(url, { 
+            waitUntil: 'networkidle0',
+            timeout: 30000 
+        });
         
         const platformInfo = await page.evaluate(() => {
             const platform = {
@@ -2960,303 +2422,265 @@ async function detectPlatform(browser, url) {
                 };
             }
             
-            // Webflow Detection
-            else if (document.querySelector('script[src*="webflow"]') ||
-                     document.querySelector('meta[name="generator"][content*="Webflow"]')) {
-                platform.type = 'webflow';
-                platform.name = 'Webflow';
-                platform.confidence = 0.8;
-                platform.indicators.push('Webflow generator meta tag', 'Webflow scripts');
-                platform.capabilities = {
-                    cssInjection: false,
-                    themeEditor: true,
-                    pluginSystem: false,
-                    apiAccess: true
-                };
-            }
-            
-            // Generic CMS Detection
-            else if (document.querySelector('meta[name="generator"]')) {
-                const generator = document.querySelector('meta[name="generator"]').content;
-                platform.name = generator.split(' ')[0];
-                platform.confidence = 0.5;
-                platform.indicators.push('Generic CMS generator tag');
-            }
-            
             return platform;
         });
         
         return platformInfo;
         
     } catch (error) {
-        console.log('❌ Platform detection failed:', error.message);
+        console.error('Error detecting platform:', error);
         return {
             type: 'unknown',
             name: 'Unknown',
+            version: null,
             confidence: 0,
-            error: error.message
+            indicators: ['Detection failed'],
+            capabilities: {
+                cssInjection: false,
+                themeEditor: false,
+                pluginSystem: false,
+                apiAccess: false
+            }
         };
     } finally {
         await page.close();
     }
 }
 
-// EXACT COPY OF WORKING API ENDPOINT WITH DATABASE INTEGRATION ADDED
-app.post('/api/scan', async (req, res) => {
-    const startTime = Date.now();
-    let browser = null;
-    
+// PHASE 2 ENHANCEMENT: Auto-Fix Implementation Functions
+async function implementAutoFix(violation, platformInfo, fixMethod = 'auto') {
     try {
-        const { url, scanType = 'single', maxPages = 5 } = req.body;
+        console.log(`🔧 Implementing auto-fix for ${violation.id} on ${platformInfo.name}`);
         
-        if (!url) {
-            return res.status(400).json({
-                success: false,
-                error: 'URL is required'
-            });
+        // Generate platform-specific fix code
+        const fixCode = await generatePlatformSpecificFix(violation, platformInfo);
+        
+        // Determine implementation method based on platform capabilities
+        let implementationResult;
+        
+        switch (platformInfo.type) {
+            case 'wordpress':
+                implementationResult = await implementWordPressFix(violation, fixCode, platformInfo);
+                break;
+            case 'shopify':
+                implementationResult = await implementShopifyFix(violation, fixCode, platformInfo);
+                break;
+            case 'wix':
+                implementationResult = await implementWixFix(violation, fixCode, platformInfo);
+                break;
+            case 'squarespace':
+                implementationResult = await implementSquarespaceFix(violation, fixCode, platformInfo);
+                break;
+            default:
+                implementationResult = await implementGenericFix(violation, fixCode, platformInfo);
         }
         
-        let targetUrl = url;
-        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-            targetUrl = 'https://' + targetUrl;
-        }
-        
-        console.log('🔍 Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
-        
-        // PHASE 1 ENHANCEMENT: Platform Detection
-        let platformInfo = null;
-        
-        // Launch Puppeteer - EXACT WORKING CONFIGURATION
-        browser = await puppeteer.launch({
-            executablePath: '/usr/bin/google-chrome-stable',
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
-            ],
-            timeout: 60000
-        });
-        
-        if (scanType === 'single') {
-            // Single page scan (existing working functionality)
-            const results = await scanSinglePage(browser, targetUrl);
-            const scanTime = Date.now() - startTime;
-            
-            // PHASE 1 ENHANCEMENT: Detect platform for single page scans
-            platformInfo = await detectPlatform(browser, targetUrl);
-            console.log('🔍 Platform detected:', platformInfo);
-            
-            console.log('✅ Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
-            
-            // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, results.violations.length, scanTime, 1, results.violations, platformInfo?.type || 'unknown');
-            
-            res.json({
-                success: true,
-                url: targetUrl,
-                violations: results.violations,
-                timestamp: new Date().toISOString(),
-                totalIssues: results.violations.length,
-                scanTime: scanTime,
-                platformInfo: platformInfo, // PHASE 1 ENHANCEMENT
-                summary: {
-                    critical: results.violations.filter(v => v.impact === 'critical').length,
-                    serious: results.violations.filter(v => v.impact === 'serious').length,
-                    moderate: results.violations.filter(v => v.impact === 'moderate').length,
-                    minor: results.violations.filter(v => v.impact === 'minor').length
-                }
-            });
-            
-        } else if (scanType === 'crawl') {
-            // Multi-page crawl - EXACT WORKING LOGIC
-            console.log('🕷️ Starting multi-page crawl (max ' + maxPages + ' pages)');
-            
-            const scannedPages = [];
-            const urlsToScan = [targetUrl];
-            const scannedUrls = new Set();
-            
-            // Scan the first page and extract links
-            const firstPageResults = await scanSinglePage(browser, targetUrl);
-            
-            // PHASE 1 ENHANCEMENT: Detect platform after first page scan
-            if (!platformInfo) {
-                platformInfo = await detectPlatform(browser, targetUrl);
-                console.log('🔍 Platform detected:', platformInfo);
-            }
-            
-            scannedPages.push({
-                url: targetUrl,
-                violations: firstPageResults.violations,
-                scanTime: Date.now() - startTime
-            });
-            scannedUrls.add(targetUrl);
-            
-            // Extract links from the first page for crawling
-            if (maxPages > 1) {
-                const page = await browser.newPage();
-                try {
-                    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    const links = await extractLinks(page, targetUrl);
-                    
-                    // Add unique links to scan queue
-                    for (const link of links) {
-                        if (urlsToScan.length < maxPages && !scannedUrls.has(link)) {
-                            urlsToScan.push(link);
-                        }
-                    }
-                } catch (error) {
-                    console.log('Error extracting links:', error.message);
-                } finally {
-                    await page.close();
-                }
-            }
-            
-            // Scan additional pages
-            for (let i = 1; i < urlsToScan.length && i < maxPages; i++) {
-                const pageUrl = urlsToScan[i];
-                if (scannedUrls.has(pageUrl)) continue;
-                
-                try {
-                    console.log('🔍 Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
-                    const pageStartTime = Date.now();
-                    const pageResults = await scanSinglePage(browser, pageUrl);
-                    
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: pageResults.violations,
-                        scanTime: Date.now() - pageStartTime
-                    });
-                    scannedUrls.add(pageUrl);
-                    
-                } catch (error) {
-                    console.log('❌ Error scanning page ' + pageUrl + ':', error.message);
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: [],
-                        scanTime: 0,
-                        error: error.message
-                    });
-                }
-            }
-            
-            // Aggregate results
-            const allViolations = scannedPages.reduce((acc, page) => acc.concat(page.violations || []), []);
-            const scanTime = Date.now() - startTime;
-            
-            console.log('✅ Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
-            
-            // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations, platformInfo?.type || 'unknown');
-            
-            res.json({
-                success: true,
-                scanType: 'crawl',
-                pages: scannedPages,
-                totalIssues: allViolations.length,
-                scanTime: scanTime,
-                timestamp: new Date().toISOString(),
-                summary: {
-                    critical: allViolations.filter(v => v.impact === 'critical').length,
-                    serious: allViolations.filter(v => v.impact === 'serious').length,
-                    moderate: allViolations.filter(v => v.impact === 'moderate').length,
-                    minor: allViolations.filter(v => v.impact === 'minor').length
-                }
-            });
-        }
-        
-    } catch (error) {
-        console.error('❌ Scan error:', error);
-        const scanTime = Date.now() - startTime;
-        
-        let errorMessage = error.message;
-        if (errorMessage.includes('Navigation timeout')) {
-            errorMessage = 'Website took too long to load. This may be due to slow server response or complex page content. Please try a different URL or try again later.';
-        } else if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED')) {
-            errorMessage = 'Website not found. Please check the URL and try again.';
-        } else if (errorMessage.includes('net::ERR_CONNECTION_REFUSED')) {
-            errorMessage = 'Connection refused. The website may be down or blocking automated access.';
-        }
-        
-        res.status(500).json({
-            success: false,
-            error: errorMessage,
-            scanTime: scanTime,
+        return {
+            success: true,
+            violation: violation.id,
+            platform: platformInfo.name,
+            method: fixMethod,
+            implementation: implementationResult,
             timestamp: new Date().toISOString()
-        });
-    } finally {
-        if (browser) {
-            try {
-                await browser.close();
-                console.log('🔒 Browser closed successfully');
-            } catch (closeError) {
-                console.error('❌ Error closing browser:', closeError);
-            }
-        }
-    }
-});
-
-// Start server
-app.listen(PORT, () => {
-    console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
-    console.log('📊 Health check: http://localhost:' + PORT + '/health');
-    console.log('🔍 Scanner: http://localhost:' + PORT + '/');
-    console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
-    console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
-});
-
-// --- PHASE 2 AUTO-FIX BACKEND ---
-
-// API endpoint to apply a fix
-app.post('/api/apply-fix', async (req, res) => {
-    const { platform, fix, context } = req.body;
-
-    if (!platform || !fix || !context) {
-        return res.status(400).json({ error: 'Platform, fix, and context are required' });
-    }
-
-    try {
-        let result;
-        if (platform === 'shopify') {
-            result = await applyShopifyFix(fix, context);
-        } else if (platform === 'wordpress') {
-            result = await applyWordPressFix(fix, context);
-        } else if (platform === 'wix') {
-            result = await applyWixFix(fix, context);
-        } else if (platform === 'squarespace') {
-            result = await applySquarespaceFix(fix, context);
-        } else {
-            return res.status(400).json({ error: `Platform '${platform}' not supported for auto-fixing yet` });
-        }
-
-        res.json(result);
+        };
+        
     } catch (error) {
-        console.error('Error applying fix:', error);
-        res.status(500).json({ error: 'Failed to apply fix' });
+        console.error('❌ Auto-fix implementation error:', error);
+        return {
+            success: false,
+            error: error.message,
+            violation: violation.id,
+            platform: platformInfo.name
+        };
     }
-});
+}
 
-// Placeholder for Shopify auto-fix implementation
+async function generatePlatformSpecificFix(violation, platformInfo) {
+    try {
+        const prompt = `Generate specific ${platformInfo.name} code to fix this accessibility violation:
+
+Violation: ${violation.id}
+Description: ${violation.description}
+Platform: ${platformInfo.name}
+Platform Capabilities: ${JSON.stringify(platformInfo.capabilities)}
+
+Provide the exact code needed to fix this issue on ${platformInfo.name}, considering:
+1. Platform-specific syntax and methods
+2. Available customization options
+3. Best practices for ${platformInfo.name}
+4. WCAG compliance requirements
+
+Return only the code without explanations.`;
+
+        const response = await openai.chat.completions.create({
+            model: "gpt-4.1-mini",
+            messages: [
+                {
+                    role: "system",
+                    content: `You are an expert ${platformInfo.name} developer specializing in accessibility fixes. Generate precise, platform-specific code.`
+                },
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ],
+            max_tokens: 1000,
+            temperature: 0.3
+        });
+
+        return response.choices[0].message.content.trim();
+    } catch (error) {
+        console.error('❌ Error generating platform-specific fix:', error);
+        throw error;
+    }
+}
+
+async function implementWordPressFix(violation, fixCode, platformInfo) {
+    return {
+        method: 'WordPress Theme/Plugin Modification',
+        code: fixCode,
+        instructions: [
+            'Access WordPress admin dashboard',
+            'Navigate to Appearance > Theme Editor or Plugins',
+            'Apply the generated code to the appropriate file',
+            'Test the changes on the frontend',
+            'Verify accessibility improvement'
+        ],
+        files: ['functions.php', 'style.css', 'custom-accessibility.js'],
+        apiEndpoint: '/wp-admin/admin-ajax.php',
+        capabilities: platformInfo.capabilities
+    };
+}
+
+async function implementShopifyFix(violation, fixCode, platformInfo) {
+    return {
+        method: 'Shopify Theme Liquid/Asset Modification',
+        code: fixCode,
+        instructions: [
+            'Access Shopify admin panel',
+            'Navigate to Online Store > Themes',
+            'Click "Actions" > "Edit code"',
+            'Apply changes to appropriate template files',
+            'Preview and publish changes'
+        ],
+        files: ['theme.liquid', 'assets/theme.css', 'assets/accessibility.js'],
+        apiEndpoint: '/admin/api/themes',
+        capabilities: platformInfo.capabilities
+    };
+}
+
+async function implementWixFix(violation, fixCode, platformInfo) {
+    return {
+        method: 'Wix Editor Custom Code',
+        code: fixCode,
+        instructions: [
+            'Open Wix Editor',
+            'Navigate to Settings > Custom Code',
+            'Add code to Head or Body section',
+            'Use Wix Code (Velo) if dynamic functionality needed',
+            'Publish site to apply changes'
+        ],
+        files: ['Custom Code Head', 'Custom Code Body', 'Velo Code Files'],
+        apiEndpoint: 'Wix Editor Interface',
+        capabilities: platformInfo.capabilities,
+        limitations: 'Limited direct DOM access, use Wix APIs when possible'
+    };
+}
+
+async function implementSquarespaceFix(violation, fixCode, platformInfo) {
+    return {
+        method: 'Squarespace Code Injection',
+        code: fixCode,
+        instructions: [
+            'Access Squarespace admin',
+            'Navigate to Settings > Advanced > Code Injection',
+            'Add CSS to Header or Footer',
+            'Use Custom CSS panel for styling fixes',
+            'Save and preview changes'
+        ],
+        files: ['Header Code Injection', 'Footer Code Injection', 'Custom CSS'],
+        apiEndpoint: 'Squarespace Admin Interface',
+        capabilities: platformInfo.capabilities
+    };
+}
+
+async function implementGenericFix(violation, fixCode, platformInfo) {
+    return {
+        method: 'Generic Web Implementation',
+        code: fixCode,
+        instructions: [
+            'Access your website\'s source code',
+            'Locate the relevant HTML/CSS/JS files',
+            'Apply the generated code changes',
+            'Test across different browsers',
+            'Validate accessibility improvements'
+        ],
+        files: ['index.html', 'styles.css', 'scripts.js'],
+        apiEndpoint: 'Direct file modification',
+        capabilities: {
+            cssInjection: true,
+            themeEditor: true,
+            pluginSystem: false,
+            apiAccess: false
+        }
+    };
+}
+
+async function generateFixPreview(violation, platformInfo, fixMethod) {
+    try {
+        const fixCode = await generatePlatformSpecificFix(violation, platformInfo);
+        
+        return {
+            violation: violation.id,
+            platform: platformInfo.name,
+            preview: {
+                before: `Current state: ${violation.description}`,
+                after: 'Accessibility issue will be resolved',
+                code: fixCode,
+                impact: `Fixes ${violation.impact} level accessibility violation`,
+                wcagCriteria: violation.tags || []
+            },
+            estimatedTime: '5-15 minutes',
+            difficulty: getDifficultyLevel(violation, platformInfo),
+            requirements: getPlatformRequirements(platformInfo)
+        };
+    } catch (error) {
+        console.error('❌ Error generating fix preview:', error);
+        throw error;
+    }
+}
+
+function getDifficultyLevel(violation, platformInfo) {
+    const complexViolations = ['color-contrast', 'keyboard-navigation', 'focus-management'];
+    const isComplex = complexViolations.some(complex => violation.id.includes(complex));
+    
+    if (isComplex) return 'Advanced';
+    if (platformInfo.capabilities.cssInjection) return 'Beginner';
+    return 'Intermediate';
+}
+
+function getPlatformRequirements(platformInfo) {
+    const requirements = ['Admin access to ' + platformInfo.name];
+    
+    if (platformInfo.capabilities.themeEditor) {
+        requirements.push('Theme editing permissions');
+    }
+    if (platformInfo.capabilities.pluginSystem) {
+        requirements.push('Plugin installation rights');
+    }
+    if (!platformInfo.capabilities.cssInjection) {
+        requirements.push('Custom code injection capability');
+    }
+    
+    return requirements;
+}
+
+// Legacy platform-specific fix functions (for backward compatibility)
 async function applyShopifyFix(fix, context) {
     console.log('Applying Shopify fix:', { fix, context });
 
-    // TODO: Implement Shopify Admin API calls here
-    // 1. Authenticate with Shopify Admin API
-    // 2. Fetch the relevant theme file/asset
-    // 3. Apply the code change (replace 'before' with 'after')
-    // 4. Save the updated file/asset
+    // TODO: Implement Shopify API calls here
 
-    // For now, return a mock success response
     return {
         success: true,
         message: 'Shopify fix applied successfully (mocked).',
@@ -3264,17 +2688,11 @@ async function applyShopifyFix(fix, context) {
     };
 }
 
-// Placeholder for WordPress auto-fix implementation
 async function applyWordPressFix(fix, context) {
     console.log('Applying WordPress fix:', { fix, context });
 
-    // TODO: Implement WordPress REST API calls here
-    // 1. Authenticate with WordPress REST API (e.g., using Application Passwords)
-    // 2. Fetch the relevant theme file/asset
-    // 3. Apply the code change (replace 'before' with 'after')
-    // 4. Save the updated file/asset
+    // TODO: Implement WordPress API calls here
 
-    // For now, return a mock success response
     return {
         success: true,
         message: 'WordPress fix applied successfully (mocked).',
@@ -3282,7 +2700,6 @@ async function applyWordPressFix(fix, context) {
     };
 }
 
-// Placeholder for Wix auto-fix implementation
 async function applyWixFix(fix, context) {
     console.log('Applying Wix fix:', { fix, context });
 
@@ -3295,7 +2712,6 @@ async function applyWixFix(fix, context) {
     };
 }
 
-// Placeholder for Squarespace auto-fix implementation
 async function applySquarespaceFix(fix, context) {
     console.log('Applying Squarespace fix:', { fix, context });
 
@@ -3307,3 +2723,12 @@ async function applySquarespaceFix(fix, context) {
         platform: 'squarespace'
     };
 }
+
+// Start server - MUST BE AT THE END
+app.listen(PORT, () => {
+    console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
+    console.log('📊 Health check: http://localhost:' + PORT + '/health');
+    console.log('🔍 Scanner: http://localhost:' + PORT + '/');
+    console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
+    console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
+});
