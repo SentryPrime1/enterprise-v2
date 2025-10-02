@@ -1681,6 +1681,14 @@ app.get('/', (req, res) => {
                             Completed in \${result.scanTimeMs}ms • Score: \${result.accessibilityScore}%
                             \${result.platform ? \`<span class="platform-badge">\${result.platform}</span>\` : ''}
                         </div>
+                        
+                        <!-- PHASE 2 ENHANCEMENT: Action buttons -->
+                        \${violations.length > 0 ? \`
+                        <div style="text-align: center; margin: 20px 0; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                            <button class="ai-suggestions-btn" onclick="showAISuggestions(\${JSON.stringify(violations).replace(/"/g, '&quot;')}, \${JSON.stringify(result.platform || {}).replace(/"/g, '&quot;')})" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>
+                            <button class="guided-fixing-btn" onclick="GuidedFixing.start(\${JSON.stringify(violations).replace(/"/g, '&quot;')})" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🛠️ Let's Start Fixing</button>
+                        </div>
+                        \` : ''}
                     </div>
                     <div class="results-body">
                         <div class="results-summary">
@@ -1844,6 +1852,207 @@ app.get('/', (req, res) => {
             }
         }
         
+        // PHASE 2 ENHANCEMENT: AI Fix Suggestions Modal
+        function showAISuggestions(violations, platformInfo) {
+            // Show modal with AI suggestions
+            const modal = document.getElementById('ai-modal') || createAIModal();
+            const modalBody = modal.querySelector('.ai-modal-body');
+            
+            modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI suggestions...</div>';
+            modal.style.display = 'block';
+            
+            // Fetch AI suggestions
+            fetch('/api/ai-fixes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ violations, platformInfo })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.suggestions) {
+                    modalBody.innerHTML = data.suggestions.map(suggestion => 
+                        '<div class="ai-suggestion">' +
+                            '<h4>' + suggestion.violationId + '</h4>' +
+                            '<p><strong>Issue:</strong> ' + suggestion.description + '</p>' +
+                            '<p><strong>Fix:</strong> ' + suggestion.fix + '</p>' +
+                            '<pre><code>' + suggestion.code + '</code></pre>' +
+                        '</div>'
+                    ).join('');
+                } else {
+                    modalBody.innerHTML = '<div style="color: #dc3545; text-align: center; padding: 20px;"><h4>Unable to Generate AI Suggestions</h4><p>Please try again later.</p></div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching AI suggestions:', error);
+                modalBody.innerHTML = '<div style="color: #dc3545; text-align: center; padding: 20px;"><h4>Error</h4><p>Failed to get AI suggestions. Please try again.</p></div>';
+            });
+        }
+        
+        function createAIModal() {
+            const modal = document.createElement('div');
+            modal.id = 'ai-modal';
+            modal.className = 'ai-modal';
+            modal.style.cssText = 'display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);';
+            modal.innerHTML = 
+                '<div class="ai-modal-content" style="background: white; margin: 5% auto; padding: 20px; border-radius: 8px; width: 80%; max-width: 800px; max-height: 80%; overflow-y: auto;">' +
+                    '<div class="ai-modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">' +
+                        '<h2>🤖 AI Fix Suggestions</h2>' +
+                        '<span class="close" onclick="closeAIModal()" style="font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>' +
+                    '</div>' +
+                    '<div class="ai-modal-body"></div>' +
+                '</div>';
+            document.body.appendChild(modal);
+            return modal;
+        }
+        
+        function closeAIModal() {
+            const modal = document.getElementById('ai-modal');
+            if (modal) modal.style.display = 'none';
+        }
+        
+        // PHASE 2 ENHANCEMENT: Guided Fixing Object
+        const GuidedFixing = {
+            currentViolations: [],
+            currentViolationIndex: 0,
+            fixedViolations: [],
+            
+            start: function(violations) {
+                // Sort violations by priority (critical > serious > moderate > minor)
+                const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
+                this.currentViolations = violations.sort((a, b) => {
+                    return priorityOrder[a.impact] - priorityOrder[b.impact];
+                });
+                
+                this.currentViolationIndex = 0;
+                this.fixedViolations = [];
+                
+                // Show the modal
+                const modal = document.getElementById('guided-fixing-modal') || this.createModal();
+                modal.style.display = 'block';
+                
+                // Display the first violation
+                this.showCurrentViolation();
+            },
+            
+            createModal: function() {
+                const modal = document.createElement('div');
+                modal.id = 'guided-fixing-modal';
+                modal.className = 'guided-modal';
+                modal.style.cssText = 'display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);';
+                modal.innerHTML = 
+                    '<div class="guided-modal-content" style="background: white; margin: 2% auto; padding: 0; border-radius: 8px; width: 90%; max-width: 1000px; max-height: 90%; overflow-y: auto;">' +
+                        '<div class="guided-modal-header" style="padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">' +
+                            '<h2>🛠️ Guided Accessibility Fixing</h2>' +
+                            '<div class="progress-indicator" id="progress-indicator">Violation 1 of 6</div>' +
+                            '<span class="close" onclick="GuidedFixing.close()" style="font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>' +
+                        '</div>' +
+                        '<div class="guided-modal-body" id="guided-modal-body" style="padding: 20px;"></div>' +
+                        '<div class="guided-modal-footer" style="padding: 20px; border-top: 1px solid #eee; display: flex; justify-content: space-between;">' +
+                            '<button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">← Previous</button>' +
+                            '<button class="ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()" style="background: #6f42c1; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">🤖 Get AI Fix</button>' +
+                            '<button class="next-btn" id="next-btn" onclick="GuidedFixing.nextViolation()" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Next →</button>' +
+                        '</div>' +
+                    '</div>';
+                document.body.appendChild(modal);
+                return modal;
+            },
+            
+            showCurrentViolation: function() {
+                const violation = this.currentViolations[this.currentViolationIndex];
+                const totalViolations = this.currentViolations.length;
+                
+                // Update progress indicator
+                document.getElementById('progress-indicator').textContent = 
+                    'Violation ' + (this.currentViolationIndex + 1) + ' of ' + totalViolations;
+                
+                // Update modal body with violation details
+                const modalBody = document.getElementById('guided-modal-body');
+                modalBody.innerHTML = 
+                    '<div class="violation-details">' +
+                        '<div class="violation-title" style="font-size: 1.5rem; font-weight: bold; margin-bottom: 10px;">' + violation.id + '</div>' +
+                        '<div class="violation-impact impact-' + violation.impact + '" style="display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.875rem; font-weight: bold; margin-bottom: 15px; background: #dc3545; color: white;">' + violation.impact + '</div>' +
+                        '<p><strong>Description:</strong> ' + (violation.description || 'No description available') + '</p>' +
+                        '<p><strong>Help:</strong> ' + (violation.help || 'Refer to WCAG guidelines for more information') + '</p>' +
+                        (violation.helpUrl ? '<p><strong>Learn more:</strong> <a href="' + violation.helpUrl + '" target="_blank">' + violation.helpUrl + '</a></p>' : '') +
+                    '</div>' +
+                    '<div id="ai-fix-area" style="margin-top: 20px;">' +
+                        '<!-- AI fix suggestions will appear here -->' +
+                    '</div>';
+                
+                // Update navigation buttons
+                this.updateNavigationButtons();
+            },
+            
+            updateNavigationButtons: function() {
+                const prevBtn = document.getElementById('prev-btn');
+                const nextBtn = document.getElementById('next-btn');
+                
+                prevBtn.disabled = this.currentViolationIndex === 0;
+                nextBtn.disabled = this.currentViolationIndex === this.currentViolations.length - 1;
+            },
+            
+            nextViolation: function() {
+                if (this.currentViolationIndex < this.currentViolations.length - 1) {
+                    this.currentViolationIndex++;
+                    this.showCurrentViolation();
+                }
+            },
+            
+            previousViolation: function() {
+                if (this.currentViolationIndex > 0) {
+                    this.currentViolationIndex--;
+                    this.showCurrentViolation();
+                }
+            },
+            
+            close: function() {
+                const modal = document.getElementById('guided-fixing-modal');
+                if (modal) modal.style.display = 'none';
+            },
+            
+            getAIFixForCurrent: async function() {
+                const violation = this.currentViolations[this.currentViolationIndex];
+                const aiFixArea = document.getElementById('ai-fix-area');
+                
+                // Show loading state
+                aiFixArea.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI fix suggestion...</div>';
+                
+                try {
+                    const response = await fetch('/api/ai-fixes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ violations: [violation], platformInfo: window.currentPlatformInfo || null })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success && data.suggestions && data.suggestions.length > 0) {
+                        const suggestion = data.suggestions[0];
+                        aiFixArea.innerHTML = 
+                            '<div class="ai-suggestion-result" style="background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #6f42c1;">' +
+                                '<h4 style="color: #6f42c1; margin-bottom: 15px;">🤖 AI Fix Suggestion</h4>' +
+                                '<p><strong>Issue:</strong> ' + suggestion.description + '</p>' +
+                                '<p><strong>Recommended Fix:</strong> ' + suggestion.fix + '</p>' +
+                                '<div style="margin-top: 15px;">' +
+                                    '<strong>Code Example:</strong>' +
+                                    '<pre style="background: #2d3748; color: #e2e8f0; padding: 15px; border-radius: 4px; overflow-x: auto; margin-top: 10px;"><code>' + suggestion.code + '</code></pre>' +
+                                '</div>' +
+                            '</div>';
+                    } else {
+                        throw new Error('No suggestion received');
+                    }
+                    
+                } catch (error) {
+                    console.error('Error getting AI suggestion:', error);
+                    aiFixArea.innerHTML = 
+                        '<div style="color: #dc3545; text-align: center; padding: 20px;">' +
+                            '<h4>Unable to Generate AI Suggestion</h4>' +
+                            '<p>Please try again or proceed to the next violation.</p>' +
+                        '</div>';
+                }
+            }
+        };
+
         // Initialize dashboard - PRESERVED FROM WORKING VERSION
         document.addEventListener('DOMContentLoaded', function() {
             loadDashboardStats();
