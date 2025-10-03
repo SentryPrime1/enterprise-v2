@@ -3453,7 +3453,7 @@ app.get('/', (req, res) => {
                     <div style="background: white; padding: 30px; border-radius: 12px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3 style="color: #333;">\${title}</h3>
-                            <button onclick="this.closest('div').parentNode.remove()" 
+                            <button onclick="BulkOperations.closeModal(this)" 
                                     style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
                                 ✕ Close
                             </button>
@@ -3490,7 +3490,7 @@ app.get('/', (req, res) => {
                     <div style="background: white; padding: 30px; border-radius: 12px; max-width: 90vw; max-height: 90vh; overflow-y: auto; width: 800px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3 style="color: #333;">👁️ Preview All Changes</h3>
-                            <button onclick="this.closest('div').parentNode.remove()" 
+                            <button onclick="BulkOperations.closeModal(this)" 
                                     style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
                                 ✕ Close
                             </button>
@@ -3520,6 +3520,23 @@ app.get('/', (req, res) => {
             addPreviewToModal: function(modal, violation, previewHtml) {
                 const content = modal.querySelector('#bulk-preview-content');
                 content.innerHTML += previewHtml;
+            },
+            
+            // Helper: Properly close modal and remove dark overlay
+            closeModal: function(button) {
+                // Find the modal container (the dark overlay)
+                const modal = button.closest('[style*="position: fixed"]');
+                if (modal && modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+                
+                // Also remove any remaining modal overlays as backup
+                const allModals = document.querySelectorAll('[style*="position: fixed"][style*="background: rgba(0,0,0,0.8)"]');
+                allModals.forEach(m => {
+                    if (m.parentNode) {
+                        m.parentNode.removeChild(m);
+                    }
+                });
             }
         };
         
