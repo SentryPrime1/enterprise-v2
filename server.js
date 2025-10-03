@@ -344,18 +344,7 @@ app.post('/api/detailed-report', (req, res) => {
                         </div>
                         ${violation.help ? `<div class="violation-description"><strong>Help:</strong> ${violation.help}</div>` : ''}
                         ${violation.helpUrl ? `<div class="violation-description"><strong>Learn more:</strong> <a href="${violation.helpUrl}" target="_blank">${violation.helpUrl}</a></div>` : ''}
-                        
-                        <!-- PHASE 2A: Auto-Fix Buttons -->
-                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
-                            <button onclick="autoFixViolation('${violation.id}', ${index})" 
-                                    style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin-right: 10px; cursor: pointer; font-size: 14px;">
-                                🔧 Auto-Fix
-                            </button>
-                            <button onclick="previewFix('${violation.id}', ${index})" 
-                                    style="background: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                👁️ Preview Fix
-                            </button>
-                        </div>
+
                     </div>
                 `).join('')}
             </div>
@@ -2886,6 +2875,178 @@ app.get('/', (req, res) => {
                 URL.revokeObjectURL(url);
                 
                 alert('Report generated! ' + this.fixedViolations.length + ' fixes saved to your downloads.');
+            },
+            
+            // PHASE 2A: Auto-Fix functionality for current violation
+            autoFixCurrent: async function() {
+                const currentViolation = this.currentViolations[this.currentViolationIndex];
+                if (!currentViolation) return;
+                
+                const button = document.querySelector('.auto-fix-btn');
+                const originalText = button.textContent;
+                
+                try {
+                    button.textContent = '🔄 Applying Fix...';
+                    button.disabled = true;
+                    
+                    const response = await fetch('/api/implement-fix', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            violationId: currentViolation.id,
+                            fixType: 'auto',
+                            platformInfo: window.platformInfo || { type: 'custom' }
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        button.textContent = '✅ Fix Generated';
+                        button.style.background = '#28a745';
+                        
+                        // Show fix details in the modal body
+                        const modalBody = document.getElementById('guided-modal-body');
+                        const fixDetailsHtml = \`
+                            <div style="margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
+                                <h4 style="color: #155724; margin-bottom: 10px;">✅ Auto-Fix Generated Successfully!</h4>
+                                <p style="color: #155724; margin-bottom: 15px;">The fix has been generated for <strong>\${currentViolation.id}</strong>. Download the files below:</p>
+                                
+                                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                                    <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'css')" 
+                                            style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                        📄 Download CSS Fix
+                                    </button>
+                                    <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'instructions')" 
+                                            style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                        📋 Download Instructions
+                                    </button>
+                                </div>
+                                
+                                <div style="font-size: 14px; color: #155724;">
+                                    <strong>Next Steps:</strong>
+                                    <ol style="margin: 8px 0 0 20px;">
+                                        \${result.nextSteps.map(step => \`<li>\${step}</li>\`).join('')}
+                                    </ol>
+                                </div>
+                            </div>
+                        \`;
+                        
+                        modalBody.innerHTML += fixDetailsHtml;
+                        
+                        // Mark this violation as having a fix generated
+                        currentViolation.fixGenerated = true;
+                        
+                    } else {
+                        throw new Error(result.error || 'Fix generation failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('Auto-fix error:', error);
+                    button.textContent = '❌ Fix Failed';
+                    button.style.background = '#dc3545';
+                    setTimeout(() => {
+                        button.textContent = originalText;
+                        button.style.background = '#28a745';
+                        button.disabled = false;
+                    }, 3000);
+                }
+            },
+            
+            // PHASE 2A: Preview Fix functionality for current violation
+            previewFixCurrent: async function() {
+                const currentViolation = this.currentViolations[this.currentViolationIndex];
+                if (!currentViolation) return;
+                
+                const button = document.querySelector('.preview-fix-btn');
+                const originalText = button.textContent;
+                
+                try {
+                    button.textContent = '🔄 Generating Preview...';
+                    button.disabled = true;
+                    
+                    const response = await fetch('/api/preview-fix', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            violationId: currentViolation.id,
+                            elementSelector: \`violation-\${this.currentViolationIndex}\`,
+                            platformInfo: window.platformInfo || { type: 'custom' }
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // Create preview overlay within the modal
+                        const previewHtml = \`
+                            <div id="fix-preview-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; display: flex; align-items: center; justify-content: center;">
+                                <div style="background: white; padding: 30px; border-radius: 8px; max-width: 900px; max-height: 80vh; overflow-y: auto; position: relative;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                        <h3>👁️ Fix Preview: \${currentViolation.id}</h3>
+                                        <button onclick="document.getElementById('fix-preview-overlay').remove()" 
+                                                style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
+                                            ✕ Close
+                                        </button>
+                                    </div>
+                                    
+                                    <div style="margin-bottom: 20px;">
+                                        <h4>📋 What this fix will do:</h4>
+                                        <p>\${result.preview.impact}</p>
+                                    </div>
+                                    
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                                        <div>
+                                            <h4>❌ Before (Current):</h4>
+                                            <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;">\${result.preview.before.code}</pre>
+                                        </div>
+                                        <div>
+                                            <h4>✅ After (Fixed):</h4>
+                                            <pre style="background: #d4edda; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;">\${result.preview.after.code}</pre>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <h4>🛠️ Implementation Steps:</h4>
+                                        <ol>
+                                            \${result.preview.instructions.map(step => \`<li>\${step}</li>\`).join('')}
+                                        </ol>
+                                    </div>
+                                    
+                                    <div style="text-align: center; margin-top: 20px;">
+                                        <button onclick="GuidedFixing.autoFixCurrent(); document.getElementById('fix-preview-overlay').remove();" 
+                                                style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                            🔧 Apply This Fix
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        \`;
+                        
+                        document.body.insertAdjacentHTML('beforeend', previewHtml);
+                        
+                    } else {
+                        throw new Error(result.error || 'Preview generation failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('Preview error:', error);
+                    alert('Failed to generate preview: ' + error.message);
+                } finally {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                }
+            },
+            
+            // PHASE 2A: Download fix files
+            downloadFix: function(violationId, type) {
+                const url = \`/api/download-fix/\${type}?violationId=\${violationId}&platform=\${window.platformInfo?.type || 'custom'}\`;
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = \`\${violationId}-fix.\${type === 'css' ? 'css' : 'md'}\`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
             }
         };
         
@@ -2998,6 +3159,15 @@ app.get('/', (req, res) => {
             <div class="guided-modal-footer">
                 <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
                 <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
+                
+                <!-- PHASE 2A: Enhanced Auto-Fix Buttons -->
+                <button class="auto-fix-btn" onclick="GuidedFixing.autoFixCurrent()" style="background: #28a745; color: white; border: none; padding: 10px 16px; border-radius: 4px; margin: 0 5px; cursor: pointer; font-size: 14px;">
+                    🔧 Auto-Fix
+                </button>
+                <button class="preview-fix-btn" onclick="GuidedFixing.previewFixCurrent()" style="background: #17a2b8; color: white; border: none; padding: 10px 16px; border-radius: 4px; margin: 0 5px; cursor: pointer; font-size: 14px;">
+                    👁️ Preview Fix
+                </button>
+                
                 <button class="next-btn" id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
                 <button class="finish-btn" id="finish-btn" onclick="GuidedFixing.finish()" style="display: none;">📄 Generate Report</button>
             </div>
