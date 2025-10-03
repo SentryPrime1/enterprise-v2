@@ -3368,7 +3368,7 @@ async function scanSinglePage(browser, url) {
     }
 }
 
-// PHASE 1 ENHANCEMENT: Platform Detection Function
+// PHASE 2B: Enhanced Platform Detection Function with Deep Intelligence
 async function detectPlatform(browser, url) {
     const page = await browser.newPage();
     try {
@@ -3386,15 +3386,33 @@ async function detectPlatform(browser, url) {
                     themeEditor: false,
                     pluginSystem: false,
                     apiAccess: false
+                },
+                // PHASE 2B: Enhanced platform intelligence
+                theme: {
+                    name: null,
+                    version: null,
+                    framework: null
+                },
+                plugins: [],
+                pageBuilder: null,
+                framework: null,
+                deploymentMethod: 'unknown',
+                cssFramework: null,
+                accessibilityPlugins: [],
+                customizations: {
+                    hasCustomCSS: false,
+                    hasCustomJS: false,
+                    customizationLevel: 'low'
                 }
             };
             
-            // WordPress Detection (More Specific) - Only if not Shopify
+            // PHASE 2B: Enhanced WordPress Detection with Deep Intelligence
             if ((document.querySelector('meta[name="generator"][content*="WordPress"]') ||
                 (document.querySelector('link[href*="wp-content"]') && document.querySelector('script[src*="wp-content"]')) ||
                 (window.wp && document.querySelector('link[href*="wp-content"]')) ||
                 document.body.className.includes('wp-')) &&
                 !document.querySelector('script[src*="shopify"]')) { // Exclude if Shopify detected
+                
                 platform.type = 'wordpress';
                 platform.name = 'WordPress';
                 platform.confidence = 0.9;
@@ -3405,16 +3423,80 @@ async function detectPlatform(browser, url) {
                     pluginSystem: true,
                     apiAccess: true
                 };
+                platform.deploymentMethod = 'wordpress-admin';
                 
-                // Try to detect version
+                // Detect WordPress version
                 const generator = document.querySelector('meta[name="generator"]');
                 if (generator && generator.content.includes('WordPress')) {
                     const versionMatch = generator.content.match(/WordPress\\s+([\\d.]+)/);
                     if (versionMatch) platform.version = versionMatch[1];
                 }
+                
+                // PHASE 2B: Detect WordPress theme
+                const themeStylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+                    .map(link => link.href)
+                    .filter(href => href.includes('wp-content/themes/'));
+                
+                if (themeStylesheets.length > 0) {
+                    const themeMatch = themeStylesheets[0].match(/wp-content\/themes\/([^\/]+)/);
+                    if (themeMatch) {
+                        platform.theme.name = themeMatch[1];
+                        platform.indicators.push(`Theme: ${themeMatch[1]}`);
+                    }
+                }
+                
+                // PHASE 2B: Detect page builders
+                if (document.querySelector('.elementor-element') || document.querySelector('[data-elementor-type]')) {
+                    platform.pageBuilder = 'elementor';
+                    platform.indicators.push('Elementor page builder detected');
+                    platform.deploymentMethod = 'elementor-editor';
+                } else if (document.querySelector('.et_pb_module') || document.querySelector('.et_pb_section')) {
+                    platform.pageBuilder = 'divi';
+                    platform.indicators.push('Divi page builder detected');
+                    platform.deploymentMethod = 'divi-builder';
+                } else if (document.querySelector('.vc_row') || document.querySelector('[data-vc-full-width]')) {
+                    platform.pageBuilder = 'visual-composer';
+                    platform.indicators.push('Visual Composer detected');
+                    platform.deploymentMethod = 'visual-composer';
+                } else if (document.querySelector('.beaver-builder') || document.querySelector('.fl-builder-content')) {
+                    platform.pageBuilder = 'beaver-builder';
+                    platform.indicators.push('Beaver Builder detected');
+                    platform.deploymentMethod = 'beaver-builder';
+                }
+                
+                // PHASE 2B: Detect accessibility plugins
+                if (document.querySelector('#wpaccessibility') || document.querySelector('.wpa-')) {
+                    platform.accessibilityPlugins.push('WP Accessibility');
+                }
+                if (document.querySelector('[data-userway]') || document.querySelector('.userway-')) {
+                    platform.accessibilityPlugins.push('UserWay');
+                }
+                if (document.querySelector('[data-accessibe]') || document.querySelector('.acsb-')) {
+                    platform.accessibilityPlugins.push('accessiBe');
+                }
+                
+                // PHASE 2B: Detect CSS frameworks
+                if (document.querySelector('.container') && document.querySelector('.row')) {
+                    platform.cssFramework = 'bootstrap';
+                } else if (document.querySelector('.uk-container') || document.querySelector('[class*="uk-"]')) {
+                    platform.cssFramework = 'uikit';
+                } else if (document.querySelector('.foundation-') || document.querySelector('.grid-container')) {
+                    platform.cssFramework = 'foundation';
+                }
+                
+                // PHASE 2B: Detect customization level
+                const customCSS = Array.from(document.querySelectorAll('style')).some(style => 
+                    style.textContent && style.textContent.length > 100);
+                const customJS = Array.from(document.querySelectorAll('script')).some(script => 
+                    script.textContent && !script.src && script.textContent.length > 100);
+                
+                platform.customizations.hasCustomCSS = customCSS;
+                platform.customizations.hasCustomJS = customJS;
+                platform.customizations.customizationLevel = (customCSS && customJS) ? 'high' : 
+                    (customCSS || customJS) ? 'medium' : 'low';
             }
             
-            // Shopify Detection (Enhanced and More Aggressive)
+            // PHASE 2B: Enhanced Shopify Detection with Deep Intelligence
             if (document.querySelector('script[src*="shopify"]') ||
                 document.querySelector('link[href*="shopify"]') ||
                 document.querySelector('script[src*="shopifycdn"]') ||
@@ -3433,6 +3515,7 @@ async function detectPlatform(browser, url) {
                         script.textContent.includes('shopify-section')
                     )
                 )) {
+                
                 platform.type = 'shopify';
                 platform.name = 'Shopify';
                 platform.confidence = 0.9;
@@ -3443,9 +3526,60 @@ async function detectPlatform(browser, url) {
                     pluginSystem: false,
                     apiAccess: true
                 };
+                platform.deploymentMethod = 'shopify-admin';
+                
+                // PHASE 2B: Detect Shopify theme
+                const themeScripts = Array.from(document.querySelectorAll('script[src]'))
+                    .map(script => script.src)
+                    .filter(src => src.includes('cdn.shopify.com') && src.includes('assets'));
+                
+                if (themeScripts.length > 0) {
+                    // Try to extract theme name from asset URLs
+                    const themeMatch = themeScripts[0].match(/\/assets\/([^.]+)/);
+                    if (themeMatch) {
+                        platform.theme.name = 'shopify-theme';
+                        platform.indicators.push('Shopify theme assets detected');
+                    }
+                }
+                
+                // PHASE 2B: Detect common Shopify themes
+                if (document.querySelector('.dawn-') || document.querySelector('[class*="dawn"]')) {
+                    platform.theme.name = 'Dawn';
+                    platform.theme.framework = 'liquid';
+                } else if (document.querySelector('.debut-') || document.querySelector('[class*="debut"]')) {
+                    platform.theme.name = 'Debut';
+                    platform.theme.framework = 'liquid';
+                } else if (document.querySelector('.brooklyn-') || document.querySelector('[class*="brooklyn"]')) {
+                    platform.theme.name = 'Brooklyn';
+                    platform.theme.framework = 'liquid';
+                } else if (document.querySelector('.narrative-') || document.querySelector('[class*="narrative"]')) {
+                    platform.theme.name = 'Narrative';
+                    platform.theme.framework = 'liquid';
+                }
+                
+                // PHASE 2B: Detect Shopify apps (accessibility-related)
+                if (document.querySelector('[data-userway]') || document.querySelector('.userway-')) {
+                    platform.accessibilityPlugins.push('UserWay (Shopify App)');
+                }
+                if (document.querySelector('[data-accessibe]') || document.querySelector('.acsb-')) {
+                    platform.accessibilityPlugins.push('accessiBe (Shopify App)');
+                }
+                if (document.querySelector('[data-equalweb]') || document.querySelector('.ew-')) {
+                    platform.accessibilityPlugins.push('EqualWeb (Shopify App)');
+                }
+                
+                // PHASE 2B: Detect customization level
+                const liquidTemplates = Array.from(document.querySelectorAll('script')).some(script => 
+                    script.textContent && script.textContent.includes('liquid'));
+                const customSections = document.querySelectorAll('[id*="shopify-section-template"]').length;
+                
+                platform.customizations.customizationLevel = customSections > 5 ? 'high' : 
+                    customSections > 2 ? 'medium' : 'low';
+                platform.customizations.hasCustomCSS = Array.from(document.querySelectorAll('style')).some(style => 
+                    style.textContent && style.textContent.length > 200);
             }
             
-            // Wix Detection
+            // PHASE 2B: Enhanced Wix Detection with Deep Intelligence
             else if (document.querySelector('meta[name="generator"][content*="Wix"]') ||
                      document.querySelector('script[src*="wix.com"]') ||
                      window.wixDevelopersAnalytics) {
@@ -3459,9 +3593,28 @@ async function detectPlatform(browser, url) {
                     pluginSystem: false,
                     apiAccess: false
                 };
+                platform.deploymentMethod = 'wix-editor';
+                
+                // PHASE 2B: Detect Wix editor type
+                if (document.querySelector('[data-wix-editor]') || document.querySelector('.wix-ads')) {
+                    platform.deploymentMethod = 'wix-adi';
+                    platform.indicators.push('Wix ADI detected');
+                } else if (document.querySelector('[data-corvid]') || window.wixCode) {
+                    platform.deploymentMethod = 'wix-corvid';
+                    platform.indicators.push('Wix Corvid/Velo detected');
+                    platform.capabilities.apiAccess = true;
+                }
+                
+                // PHASE 2B: Detect accessibility apps
+                if (document.querySelector('[data-userway]')) {
+                    platform.accessibilityPlugins.push('UserWay (Wix App)');
+                }
+                if (document.querySelector('[data-accessibe]')) {
+                    platform.accessibilityPlugins.push('accessiBe (Wix App)');
+                }
             }
             
-            // Squarespace Detection
+            // PHASE 2B: Enhanced Squarespace Detection with Deep Intelligence
             else if (document.querySelector('script[src*="squarespace"]') ||
                      document.querySelector('link[href*="squarespace"]') ||
                      document.body.id === 'collection' ||
@@ -3476,9 +3629,34 @@ async function detectPlatform(browser, url) {
                     pluginSystem: false,
                     apiAccess: false
                 };
+                platform.deploymentMethod = 'squarespace-style-editor';
+                
+                // PHASE 2B: Detect Squarespace template family
+                if (document.querySelector('.sqs-template-') || document.body.className.includes('sqs-template-')) {
+                    const templateMatch = document.body.className.match(/sqs-template-([^\s]+)/);
+                    if (templateMatch) {
+                        platform.theme.name = templateMatch[1];
+                        platform.indicators.push(`Template: ${templateMatch[1]}`);
+                    }
+                }
+                
+                // PHASE 2B: Detect version
+                if (document.querySelector('.sqs-7-1') || document.body.className.includes('sqs-7-1')) {
+                    platform.version = '7.1';
+                    platform.deploymentMethod = 'squarespace-7.1-editor';
+                } else if (document.querySelector('.sqs-7-0') || document.body.className.includes('sqs-7-0')) {
+                    platform.version = '7.0';
+                    platform.deploymentMethod = 'squarespace-7.0-editor';
+                }
+                
+                // PHASE 2B: Detect customization level
+                const customCSS = Array.from(document.querySelectorAll('style')).some(style => 
+                    style.textContent && style.textContent.includes('/* CUSTOM CSS */'));
+                platform.customizations.hasCustomCSS = customCSS;
+                platform.customizations.customizationLevel = customCSS ? 'medium' : 'low';
             }
             
-            // Webflow Detection
+            // PHASE 2B: Enhanced Webflow Detection with Deep Intelligence
             else if (document.querySelector('script[src*="webflow"]') ||
                      document.querySelector('meta[name="generator"][content*="Webflow"]')) {
                 platform.type = 'webflow';
@@ -3491,6 +3669,28 @@ async function detectPlatform(browser, url) {
                     pluginSystem: false,
                     apiAccess: true
                 };
+                platform.deploymentMethod = 'webflow-designer';
+                
+                // PHASE 2B: Detect Webflow hosting vs export
+                if (document.querySelector('script[src*="webflow.com"]')) {
+                    platform.deploymentMethod = 'webflow-hosting';
+                    platform.indicators.push('Webflow hosted site');
+                } else {
+                    platform.deploymentMethod = 'webflow-export';
+                    platform.indicators.push('Webflow exported site');
+                }
+                
+                // PHASE 2B: Detect Webflow CMS
+                if (document.querySelector('[data-w-id]') && document.querySelector('.w-dyn-')) {
+                    platform.indicators.push('Webflow CMS detected');
+                    platform.capabilities.apiAccess = true;
+                }
+                
+                // PHASE 2B: Detect custom code
+                const customCode = Array.from(document.querySelectorAll('script')).some(script => 
+                    script.textContent && script.textContent.includes('/* Custom Code */'));
+                platform.customizations.hasCustomJS = customCode;
+                platform.customizations.customizationLevel = customCode ? 'high' : 'medium';
             }
             
             // Generic CMS Detection
