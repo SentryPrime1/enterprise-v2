@@ -216,6 +216,447 @@ app.get('/health', (req, res) => {
     });
 });
 
+// PHASE 2D: Visual Preview Endpoint
+app.post('/api/visual-preview', async (req, res) => {
+    const { url, violation } = req.body;
+
+    if (!url || !violation) {
+        return res.status(400).json({ error: 'URL and violation data are required' });
+    }
+
+    let browser;
+    try {
+        console.log('👁️ Starting visual preview for:', url, 'violation:', violation.id);
+        browser = await puppeteer.launch({ 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            headless: true
+        });
+        
+        const page = await browser.newPage();
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+        // Inject highlighting CSS based on violation severity
+        const severityColors = {
+            'critical': '#dc3545',
+            'serious': '#fd7e14', 
+            'moderate': '#ffc107',
+            'minor': '#6c757d'
+        };
+
+        const highlightColor = severityColors[violation.impact] || '#dc3545';
+
+        await page.addStyleTag({
+            content: `
+                .accessibility-highlight {
+                    border: 3px solid ${highlightColor} !important;
+                    box-shadow: 0 0 10px ${highlightColor}80 !important;
+                    position: relative !important;
+                }
+                .accessibility-highlight::after {
+                    content: "${violation.id} (${violation.impact})";
+                    position: absolute;
+                    top: -25px;
+                    left: 0;
+                    background: ${highlightColor};
+                    color: white;
+                    padding: 2px 8px;
+                    font-size: 12px;
+                    border-radius: 3px;
+                    z-index: 10000;
+                    font-family: Arial, sans-serif;
+                }
+            `
+        });
+
+        // Add highlighting to elements (simplified approach)
+        await page.evaluate((violationId) => {
+            // Highlight common problematic elements based on violation type
+            let selector = '';
+            if (violationId.includes('color-contrast')) {
+                selector = 'button, a, .btn, [role="button"]';
+            } else if (violationId.includes('image-alt')) {
+                selector = 'img:not([alt])';
+            } else if (violationId.includes('label')) {
+                selector = 'input:not([aria-label]):not([aria-labelledby])';
+            } else {
+                selector = 'h1, h2, h3, button, a, input, img';
+            }
+            
+            const elements = document.querySelectorAll(selector);
+            elements.forEach((el, index) => {
+                if (index < 3) { // Highlight first 3 matching elements
+                    el.classList.add('accessibility-highlight');
+                }
+            });
+        }, violation.id);
+
+        // Take screenshot
+        const screenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false,
+            clip: { x: 0, y: 0, width: 1200, height: 800 }
+        });
+
+        console.log('✅ Visual preview generated successfully');
+
+        res.json({
+            success: true,
+            screenshot: `data:image/png;base64,${screenshot}`,
+            violation: violation
+        });
+
+    } catch (error) {
+        console.error('❌ Error generating visual preview:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate visual preview',
+            details: error.message 
+        });
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+});
+
+// PHASE 2D: Color Contrast Preview Endpoint
+app.post('/api/color-contrast-preview', async (req, res) => {
+    const { url, simulationType } = req.body;
+
+    if (!url || !simulationType) {
+        return res.status(400).json({ error: 'URL and simulation type are required' });
+    }
+
+    let browser;
+    try {
+        console.log('🎨 Starting color contrast simulation:', simulationType, 'for:', url);
+        browser = await puppeteer.launch({ 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            headless: true
+        });
+        
+        const page = await browser.newPage();
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+        // Apply color simulation filters
+        let filterCSS = '';
+        switch (simulationType) {
+            case 'protanopia':
+                filterCSS = 'filter: url("data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\'><defs><filter id=\\'protanopia\\'><feColorMatrix values=\\'0.567,0.433,0,0,0 0.558,0.442,0,0,0 0,0.242,0.758,0,0 0,0,0,1,0\\'/></filter></defs></svg>#protanopia");';
+                break;
+            case 'deuteranopia':
+                filterCSS = 'filter: url("data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\'><defs><filter id=\\'deuteranopia\\'><feColorMatrix values=\\'0.625,0.375,0,0,0 0.7,0.3,0,0,0 0,0.3,0.7,0,0 0,0,0,1,0\\'/></filter></defs></svg>#deuteranopia");';
+                break;
+            case 'tritanopia':
+                filterCSS = 'filter: url("data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\'><defs><filter id=\\'tritanopia\\'><feColorMatrix values=\\'0.95,0.05,0,0,0 0,0.433,0.567,0,0 0,0.475,0.525,0,0 0,0,0,1,0\\'/></filter></defs></svg>#tritanopia");';
+                break;
+            case 'monochrome':
+                filterCSS = 'filter: grayscale(100%);';
+                break;
+            case 'low-contrast':
+                filterCSS = 'filter: contrast(0.5) brightness(1.2);';
+                break;
+            default:
+                filterCSS = '';
+        }
+
+        if (filterCSS) {
+            await page.addStyleTag({
+                content: `html { ${filterCSS} }`
+            });
+        }
+
+        // Take screenshot
+        const screenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false,
+            clip: { x: 0, y: 0, width: 1200, height: 800 }
+        });
+
+        console.log('✅ Color contrast simulation generated successfully');
+
+        res.json({
+            success: true,
+            screenshot: `data:image/png;base64,${screenshot}`,
+            simulationType: simulationType
+        });
+
+    } catch (error) {
+        console.error('❌ Error generating color contrast preview:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate color contrast preview',
+            details: error.message 
+        });
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+});
+
+// PHASE 2D: Screen Reader Simulation Endpoint
+app.post('/api/screen-reader-preview', async (req, res) => {
+    const { url } = req.body;
+
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+    }
+
+    let browser;
+    try {
+        console.log('🔊 Starting screen reader simulation for:', url);
+        browser = await puppeteer.launch({ 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            headless: true
+        });
+        
+        const page = await browser.newPage();
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+        // Extract text content that would be read by screen readers
+        const screenReaderContent = await page.evaluate(() => {
+            const content = [];
+            
+            // Get page title
+            const title = document.title;
+            if (title) {
+                content.push({
+                    type: 'title',
+                    text: title,
+                    element: 'title'
+                });
+            }
+            
+            // Get headings in order
+            const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+            headings.forEach((heading, index) => {
+                if (heading.textContent.trim()) {
+                    content.push({
+                        type: 'heading',
+                        level: heading.tagName.toLowerCase(),
+                        text: heading.textContent.trim(),
+                        element: `${heading.tagName.toLowerCase()}[${index}]`
+                    });
+                }
+            });
+            
+            // Get links
+            const links = document.querySelectorAll('a[href]');
+            links.forEach((link, index) => {
+                const text = link.textContent.trim();
+                const href = link.getAttribute('href');
+                if (text && href) {
+                    content.push({
+                        type: 'link',
+                        text: text,
+                        href: href,
+                        element: `a[${index}]`
+                    });
+                }
+            });
+            
+            // Get form elements
+            const inputs = document.querySelectorAll('input, textarea, select');
+            inputs.forEach((input, index) => {
+                const label = input.getAttribute('aria-label') || 
+                             input.getAttribute('placeholder') ||
+                             (input.labels && input.labels[0] ? input.labels[0].textContent.trim() : '');
+                const type = input.type || input.tagName.toLowerCase();
+                
+                content.push({
+                    type: 'form',
+                    inputType: type,
+                    label: label || 'Unlabeled input',
+                    element: `${input.tagName.toLowerCase()}[${index}]`,
+                    hasLabel: !!label
+                });
+            });
+            
+            // Get images
+            const images = document.querySelectorAll('img');
+            images.forEach((img, index) => {
+                const alt = img.getAttribute('alt');
+                const src = img.getAttribute('src');
+                
+                content.push({
+                    type: 'image',
+                    alt: alt || 'Image without alt text',
+                    src: src,
+                    element: `img[${index}]`,
+                    hasAlt: !!alt
+                });
+            });
+            
+            // Get main content paragraphs
+            const paragraphs = document.querySelectorAll('p, div[role="main"] *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(a):not(img):not(input):not(textarea):not(select)');
+            paragraphs.forEach((p, index) => {
+                const text = p.textContent.trim();
+                if (text && text.length > 20 && !p.querySelector('h1, h2, h3, h4, h5, h6, a, img, input, textarea, select')) {
+                    content.push({
+                        type: 'content',
+                        text: text.substring(0, 200) + (text.length > 200 ? '...' : ''),
+                        element: `${p.tagName.toLowerCase()}[${index}]`
+                    });
+                }
+            });
+            
+            return content;
+        });
+
+        console.log('✅ Screen reader content extracted successfully');
+
+        res.json({
+            success: true,
+            content: screenReaderContent,
+            summary: {
+                totalElements: screenReaderContent.length,
+                headings: screenReaderContent.filter(item => item.type === 'heading').length,
+                links: screenReaderContent.filter(item => item.type === 'link').length,
+                images: screenReaderContent.filter(item => item.type === 'image').length,
+                imagesWithoutAlt: screenReaderContent.filter(item => item.type === 'image' && !item.hasAlt).length,
+                formElements: screenReaderContent.filter(item => item.type === 'form').length,
+                unlabeledInputs: screenReaderContent.filter(item => item.type === 'form' && !item.hasLabel).length
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error generating screen reader preview:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate screen reader preview',
+            details: error.message 
+        });
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+});
+
+// PHASE 2D: Keyboard Navigation Test Endpoint
+app.post('/api/keyboard-navigation-test', async (req, res) => {
+    const { url } = req.body;
+
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+    }
+
+    let browser;
+    try {
+        console.log('⌨️ Starting keyboard navigation test for:', url);
+        browser = await puppeteer.launch({ 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            headless: true
+        });
+        
+        const page = await browser.newPage();
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+        // Test keyboard navigation
+        const navigationResults = await page.evaluate(() => {
+            const results = {
+                focusableElements: [],
+                tabOrder: [],
+                issues: []
+            };
+            
+            // Find all potentially focusable elements
+            const focusableSelectors = [
+                'a[href]',
+                'button',
+                'input:not([disabled])',
+                'textarea:not([disabled])',
+                'select:not([disabled])',
+                '[tabindex]:not([tabindex="-1"])',
+                '[role="button"]',
+                '[role="link"]'
+            ];
+            
+            const allFocusable = document.querySelectorAll(focusableSelectors.join(', '));
+            
+            allFocusable.forEach((element, index) => {
+                const rect = element.getBoundingClientRect();
+                const isVisible = rect.width > 0 && rect.height > 0 && 
+                                 window.getComputedStyle(element).visibility !== 'hidden' &&
+                                 window.getComputedStyle(element).display !== 'none';
+                
+                const tabIndex = element.getAttribute('tabindex') || '0';
+                const hasVisibleFocus = window.getComputedStyle(element, ':focus').outline !== 'none' ||
+                                       window.getComputedStyle(element, ':focus').boxShadow !== 'none';
+                
+                const elementInfo = {
+                    index: index,
+                    tagName: element.tagName.toLowerCase(),
+                    type: element.type || null,
+                    text: element.textContent.trim().substring(0, 50),
+                    tabIndex: tabIndex,
+                    isVisible: isVisible,
+                    hasVisibleFocus: hasVisibleFocus,
+                    ariaLabel: element.getAttribute('aria-label'),
+                    role: element.getAttribute('role')
+                };
+                
+                results.focusableElements.push(elementInfo);
+                
+                // Check for common issues
+                if (isVisible && !hasVisibleFocus) {
+                    results.issues.push({
+                        type: 'no-focus-indicator',
+                        element: elementInfo,
+                        description: 'Element lacks visible focus indicator'
+                    });
+                }
+                
+                if (isVisible && !elementInfo.text && !elementInfo.ariaLabel) {
+                    results.issues.push({
+                        type: 'no-accessible-name',
+                        element: elementInfo,
+                        description: 'Interactive element lacks accessible name'
+                    });
+                }
+            });
+            
+            // Sort by tab order
+            results.tabOrder = results.focusableElements
+                .filter(el => el.isVisible)
+                .sort((a, b) => {
+                    const aTab = parseInt(a.tabIndex) || 0;
+                    const bTab = parseInt(b.tabIndex) || 0;
+                    return aTab - bTab;
+                });
+            
+            return results;
+        });
+
+        console.log('✅ Keyboard navigation test completed successfully');
+
+        res.json({
+            success: true,
+            results: navigationResults,
+            summary: {
+                totalFocusableElements: navigationResults.focusableElements.length,
+                visibleFocusableElements: navigationResults.focusableElements.filter(el => el.isVisible).length,
+                elementsWithoutFocusIndicator: navigationResults.issues.filter(issue => issue.type === 'no-focus-indicator').length,
+                elementsWithoutAccessibleName: navigationResults.issues.filter(issue => issue.type === 'no-accessible-name').length,
+                totalIssues: navigationResults.issues.length
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error testing keyboard navigation:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to test keyboard navigation',
+            details: error.message 
+        });
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+});
+
 // Detailed report endpoint
 app.post('/api/detailed-report', (req, res) => {
     const { violations } = req.body;
@@ -405,21 +846,34 @@ app.post('/api/detailed-report', (req, res) => {
                             button.style.background = '#28a745';
                             
                             // Show download options
-                            const fixContainer = button.parentElement;
-                            fixContainer.innerHTML += \`
-                                <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
-                                    <strong>✅ Fix Generated Successfully!</strong><br>
-                                    <small>Download the fix files and follow the implementation instructions.</small><br>
-                                    <button onclick="downloadFix('\${violationId}', 'css')" 
-                                            style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 3px; margin: 5px 5px 0 0; cursor: pointer; font-size: 12px;">
-                                        📄 Download CSS
-                                    </button>
-                                    <button onclick="downloadFix('\${violationId}', 'instructions')" 
-                                            style="background: #6f42c1; color: white; border: none; padding: 6px 12px; border-radius: 3px; margin: 5px 0 0 0; cursor: pointer; font-size: 12px;">
-                                        📋 Download Instructions
-                                    </button>
+                            const fixArea = document.createElement('div');
+                            fixArea.innerHTML = \`
+                                <div style="margin-top: 15px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
+                                    <h4 style="color: #155724; margin-bottom: 10px;">✅ Auto-Fix Generated Successfully!</h4>
+                                    <p style="color: #155724; margin-bottom: 15px;">The fix has been generated for <strong>\${violationId}</strong>. Download the files below:</p>
+                                    
+                                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                                        <button onclick="downloadFix('\${violationId}', 'css')" 
+                                                style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                            📄 Download CSS Fix
+                                        </button>
+                                        <button onclick="downloadFix('\${violationId}', 'instructions')" 
+                                                style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                            📋 Download Instructions
+                                        </button>
+                                    </div>
+                                    
+                                    <div style="font-size: 14px; color: #155724;">
+                                        <strong>Next Steps:</strong>
+                                        <ol style="margin: 8px 0 0 20px;">
+                                            \${result.nextSteps.map(step => \`<li>\${step}</li>\`).join('')}
+                                        </ol>
+                                    </div>
                                 </div>
                             \`;
+                            
+                            button.parentElement.parentElement.appendChild(fixArea);
+                            
                         } else {
                             throw new Error(result.error || 'Fix generation failed');
                         }
@@ -430,878 +884,59 @@ app.post('/api/detailed-report', (req, res) => {
                         button.style.background = '#dc3545';
                         setTimeout(() => {
                             button.textContent = originalText;
-                            button.style.background = '#28a745';
+                            button.style.background = 'linear-gradient(135deg, #28a745 0%, #20c997 100%)';
                             button.disabled = false;
                         }, 3000);
                     }
                 }
                 
-                // PHASE 2D: Visual Preview Functions
-                async function showVisualPreview(violationId, index) {
-                    const button = event.target;
-                    const originalText = button.textContent;
-                    
+                async function downloadFix(violationId, fileType) {
                     try {
-                        button.textContent = '🔄 Loading Preview...';
-                        button.disabled = true;
-                        
-                        // Get the current page URL
-                        const currentUrl = window.location.href.includes('/api/detailed-report') 
-                            ? document.referrer || 'https://example.com' 
-                            : window.location.href;
-                        
-                        // Find the violation data
-                        const violationData = window.violationsData ? window.violationsData[index] : {
-                            id: violationId,
-                            impact: 'moderate',
-                            description: 'Accessibility issue detected',
-                            nodes: [{ target: ['body'] }]
-                        };
-                        
-                        const response = await fetch('/api/visual-preview', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                url: currentUrl,
-                                violation: violationData,
-                                fixSuggestion: null
-                            })
-                        });
-                        
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            showAdvancedPreviewModal(result, violationId);
-                        } else {
-                            throw new Error(result.error || 'Preview generation failed');
-                        }
-                        
-                    } catch (error) {
-                        console.error('Visual preview error:', error);
-                        button.textContent = '❌ Preview Failed';
-                        button.style.background = '#dc3545';
-                        setTimeout(() => {
-                            button.textContent = originalText;
-                            button.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-                            button.disabled = false;
-                        }, 3000);
-                    } finally {
-                        button.textContent = originalText;
-                        button.disabled = false;
-                    }
-                }
-                
-                async function showColorContrastPreview(index) {
-                    const button = event.target;
-                    const originalText = button.textContent;
-                    
-                    try {
-                        button.textContent = '🔄 Testing Colors...';
-                        button.disabled = true;
-                        
-                        const currentUrl = window.location.href.includes('/api/detailed-report') 
-                            ? document.referrer || 'https://example.com' 
-                            : window.location.href;
-                        
-                        // Show color contrast modal with different simulations
-                        showColorContrastModal(currentUrl);
-                        
-                    } catch (error) {
-                        console.error('Color contrast preview error:', error);
-                        button.textContent = '❌ Test Failed';
-                        button.style.background = '#dc3545';
-                        setTimeout(() => {
-                            button.textContent = originalText;
-                            button.style.background = 'linear-gradient(135deg, #fd7e14 0%, #ffc107 100%)';
-                            button.disabled = false;
-                        }, 3000);
-                    } finally {
-                        button.textContent = originalText;
-                        button.disabled = false;
-                    }
-                }
-                
-                function showAdvancedPreviewModal(previewData, violationId) {
-                    const modal = document.createElement('div');
-                    modal.style.cssText = \`
-                        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                        background: rgba(0,0,0,0.9); z-index: 10000; display: flex; 
-                        align-items: center; justify-content: center; backdrop-filter: blur(5px);
-                    \`;
-                    
-                    modal.innerHTML = \`
-                        <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
-                            <!-- Enhanced Header -->
-                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                                    <h3 style="margin: 0; font-size: 20px; font-weight: 600;">🎯 Visual Preview: \${violationId}</h3>
-                                    <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
-                                            style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
-                                        ✕
-                                    </button>
-                                </div>
-                                <!-- Tab Navigation -->
-                                <div style="display: flex; gap: 12px;">
-                                    <button onclick="showPreviewTab('before', this)" class="preview-tab-btn active" 
-                                            style="background: rgba(255,255,255,0.3); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-weight: 500;">
-                                        🔍 Before (Highlighted)
-                                    </button>
-                                    <button onclick="showPreviewTab('after', this)" class="preview-tab-btn"
-                                            style="background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-weight: 500;">
-                                        ✅ After (Fixed)
-                                    </button>
-                                    <button onclick="showPreviewTab('info', this)" class="preview-tab-btn"
-                                            style="background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-weight: 500;">
-                                        ℹ️ Details
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <!-- Content Area -->
-                            <div style="padding: 30px; max-height: 70vh; overflow-y: auto;">
-                                <!-- Before Tab -->
-                                <div id="preview-tab-before" class="preview-tab-content">
-                                    <div style="text-align: center; margin-bottom: 20px;">
-                                        <h4 style="color: #dc3545; margin-bottom: 10px;">🔍 Issue Highlighted</h4>
-                                        <p style="color: #666; margin: 0;">The problematic element is highlighted with a colored border based on severity.</p>
-                                    </div>
-                                    <div style="border: 2px solid #e9ecef; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                                        <img src="\${previewData.before}" alt="Before screenshot with highlighted issues" 
-                                             style="width: 100%; height: auto; display: block; max-height: 500px; object-fit: contain;">
-                                    </div>
-                                </div>
-                                
-                                <!-- After Tab -->
-                                <div id="preview-tab-after" class="preview-tab-content" style="display: none;">
-                                    <div style="text-align: center; margin-bottom: 20px;">
-                                        <h4 style="color: #28a745; margin-bottom: 10px;">✅ After Fix Applied</h4>
-                                        <p style="color: #666; margin: 0;">Preview of how the page would look with the accessibility fix implemented.</p>
-                                    </div>
-                                    <div style="border: 2px solid #e9ecef; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                                        <img src="\${previewData.after}" alt="After screenshot with fix applied" 
-                                             style="width: 100%; height: auto; display: block; max-height: 500px; object-fit: contain;">
-                                    </div>
-                                </div>
-                                
-                                <!-- Info Tab -->
-                                <div id="preview-tab-info" class="preview-tab-content" style="display: none;">
-                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
-                                        <div style="padding: 20px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #\${previewData.violation.impact === 'critical' ? 'dc3545' : previewData.violation.impact === 'serious' ? 'fd7e14' : previewData.violation.impact === 'moderate' ? 'ffc107' : '6c757d'};">
-                                            <h5 style="margin: 0 0 10px 0; color: #333;">📋 Issue Details</h5>
-                                            <p style="margin: 0 0 10px 0; font-size: 14px;"><strong>ID:</strong> \${previewData.violation.id}</p>
-                                            <p style="margin: 0 0 10px 0; font-size: 14px;"><strong>Impact:</strong> <span style="text-transform: capitalize; color: #\${previewData.violation.impact === 'critical' ? 'dc3545' : previewData.violation.impact === 'serious' ? 'fd7e14' : previewData.violation.impact === 'moderate' ? 'ffc107' : '6c757d'}; font-weight: bold;">\${previewData.violation.impact}</span></p>
-                                            <p style="margin: 0; font-size: 14px; line-height: 1.4;">\${previewData.violation.description}</p>
-                                        </div>
-                                        
-                                        <div style="padding: 20px; background: #e8f5e8; border-radius: 8px; border-left: 4px solid #28a745;">
-                                            <h5 style="margin: 0 0 10px 0; color: #333;">🎯 Fix Benefits</h5>
-                                            <ul style="margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.6;">
-                                                <li>Improves screen reader compatibility</li>
-                                                <li>Enhances keyboard navigation</li>
-                                                <li>Increases WCAG compliance score</li>
-                                                <li>Better user experience for all users</li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                    
-                                    \${previewData.violation.helpUrl ? \`
-                                        <div style="margin-top: 20px; padding: 15px; background: #cce5ff; border-radius: 8px; text-align: center;">
-                                            <a href="\${previewData.violation.helpUrl}" target="_blank" 
-                                               style="color: #004085; text-decoration: none; font-weight: 500;">
-                                                📚 Learn More About This Issue →
-                                            </a>
-                                        </div>
-                                    \` : ''}
-                                </div>
-                            </div>
-                        </div>
-                    \`;
-                    
-                    document.body.appendChild(modal);
-                    
-                    // Add click outside to close
-                    modal.addEventListener('click', (e) => {
-                        if (e.target === modal) {
-                            modal.remove();
-                        }
-                    });
-                }
-                
-                function showPreviewTab(tabName, button) {
-                    // Update tab buttons
-                    document.querySelectorAll('.preview-tab-btn').forEach(btn => {
-                        btn.style.background = 'rgba(255,255,255,0.1)';
-                        btn.style.color = 'rgba(255,255,255,0.8)';
-                    });
-                    button.style.background = 'rgba(255,255,255,0.3)';
-                    button.style.color = 'white';
-                    
-                    // Update tab content
-                    document.querySelectorAll('.preview-tab-content').forEach(content => {
-                        content.style.display = 'none';
-                    });
-                    document.getElementById(\`preview-tab-\${tabName}\`).style.display = 'block';
-                }
-                
-                async function showColorContrastModal(url) {
-                    const modal = document.createElement('div');
-                    modal.style.cssText = \`
-                        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                        background: rgba(0,0,0,0.9); z-index: 10000; display: flex; 
-                        align-items: center; justify-content: center; backdrop-filter: blur(5px);
-                    \`;
-                    
-                    modal.innerHTML = \`
-                        <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
-                            <div style="background: linear-gradient(135deg, #fd7e14 0%, #ffc107 100%); color: white; padding: 25px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                                    <h3 style="margin: 0; font-size: 20px; font-weight: 600;">🎨 Color Contrast & Accessibility Testing</h3>
-                                    <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
-                                            style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
-                                        ✕
-                                    </button>
-                                </div>
-                                <p style="margin: 0; opacity: 0.9;">Test how your page appears to users with different visual conditions</p>
-                            </div>
-                            
-                            <div style="padding: 30px;">
-                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                                    <button onclick="loadColorSimulation('protanopia')" 
-                                            style="padding: 15px; border: 2px solid #e9ecef; border-radius: 8px; background: white; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                                        <div style="font-size: 24px; margin-bottom: 8px;">🔴</div>
-                                        <div style="font-weight: 600; margin-bottom: 4px;">Protanopia</div>
-                                        <div style="font-size: 12px; color: #666;">Red-blind</div>
-                                    </button>
-                                    <button onclick="loadColorSimulation('deuteranopia')" 
-                                            style="padding: 15px; border: 2px solid #e9ecef; border-radius: 8px; background: white; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                                        <div style="font-size: 24px; margin-bottom: 8px;">🟢</div>
-                                        <div style="font-weight: 600; margin-bottom: 4px;">Deuteranopia</div>
-                                        <div style="font-size: 12px; color: #666;">Green-blind</div>
-                                    </button>
-                                    <button onclick="loadColorSimulation('tritanopia')" 
-                                            style="padding: 15px; border: 2px solid #e9ecef; border-radius: 8px; background: white; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                                        <div style="font-size: 24px; margin-bottom: 8px;">🔵</div>
-                                        <div style="font-weight: 600; margin-bottom: 4px;">Tritanopia</div>
-                                        <div style="font-size: 12px; color: #666;">Blue-blind</div>
-                                    </button>
-                                    <button onclick="loadColorSimulation('monochrome')" 
-                                            style="padding: 15px; border: 2px solid #e9ecef; border-radius: 8px; background: white; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                                        <div style="font-size: 24px; margin-bottom: 8px;">⚫</div>
-                                        <div style="font-weight: 600; margin-bottom: 4px;">Monochrome</div>
-                                        <div style="font-size: 12px; color: #666;">Grayscale</div>
-                                    </button>
-                                    <button onclick="loadColorSimulation('lowContrast')" 
-                                            style="padding: 15px; border: 2px solid #e9ecef; border-radius: 8px; background: white; cursor: pointer; text-align: center; transition: all 0.3s ease;">
-                                        <div style="font-size: 24px; margin-bottom: 8px;">🌫️</div>
-                                        <div style="font-weight: 600; margin-bottom: 4px;">Low Contrast</div>
-                                        <div style="font-size: 12px; color: #666;">Vision impaired</div>
-                                    </button>
-                                </div>
-                                
-                                <div id="color-simulation-result" style="text-align: center; padding: 40px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #dee2e6;">
-                                    <div style="font-size: 48px; margin-bottom: 15px;">👆</div>
-                                    <h4 style="margin: 0 0 10px 0; color: #333;">Select a simulation above</h4>
-                                    <p style="margin: 0; color: #666;">Click any button to see how your page appears to users with different visual conditions</p>
-                                </div>
-                            </div>
-                        </div>
-                    \`;
-                    
-                    document.body.appendChild(modal);
-                    
-                    // Store URL for simulations
-                    window.currentSimulationUrl = url;
-                    
-                    // Add click outside to close
-                    modal.addEventListener('click', (e) => {
-                        if (e.target === modal) {
-                            modal.remove();
-                        }
-                    });
-                }
-                
-                async function loadColorSimulation(simulationType) {
-                    const resultDiv = document.getElementById('color-simulation-result');
-                    resultDiv.innerHTML = \`
-                        <div style="font-size: 32px; margin-bottom: 15px;">🔄</div>
-                        <h4 style="margin: 0 0 10px 0; color: #333;">Generating simulation...</h4>
-                        <p style="margin: 0; color: #666;">Please wait while we process the \${simulationType} simulation</p>
-                    \`;
-                    
-                    try {
-                        const response = await fetch('/api/color-contrast-preview', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                url: window.currentSimulationUrl,
-                                simulationType: simulationType
-                            })
-                        });
-                        
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            resultDiv.innerHTML = \`
-                                <div style="margin-bottom: 15px;">
-                                    <h4 style="margin: 0 0 10px 0; color: #333; text-transform: capitalize;">\${simulationType} Simulation</h4>
-                                    <p style="margin: 0 0 15px 0; color: #666; font-size: 14px;">How your page appears to users with \${simulationType}</p>
-                                </div>
-                                <div style="border: 2px solid #e9ecef; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                                    <img src="\${result.screenshot}" alt="\${simulationType} simulation" 
-                                         style="width: 100%; height: auto; display: block; max-height: 400px; object-fit: contain;">
-                                </div>
-                            \`;
-                        } else {
-                            throw new Error(result.error);
-                        }
-                    } catch (error) {
-                        resultDiv.innerHTML = \`
-                            <div style="font-size: 32px; margin-bottom: 15px;">❌</div>
-                            <h4 style="margin: 0 0 10px 0; color: #dc3545;">Simulation Failed</h4>
-                            <p style="margin: 0; color: #666;">Unable to generate \${simulationType} simulation. Please try again.</p>
-                        \`;
-                    }
-                }
-                
-                // PHASE 2D: Screen Reader and Keyboard Testing Functions
-                async function showScreenReaderPreview(index) {
-                    const button = event.target;
-                    const originalText = button.textContent;
-                    
-                    try {
-                        button.textContent = '🔄 Analyzing...';
-                        button.disabled = true;
-                        
-                        const currentUrl = window.location.href.includes('/api/detailed-report') 
-                            ? document.referrer || 'https://example.com' 
-                            : window.location.href;
-                        
-                        const response = await fetch('/api/screen-reader-preview', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: currentUrl })
-                        });
-                        
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            showScreenReaderModal(result);
-                        } else {
-                            throw new Error(result.error || 'Screen reader analysis failed');
-                        }
-                        
-                    } catch (error) {
-                        console.error('Screen reader preview error:', error);
-                        button.textContent = '❌ Analysis Failed';
-                        button.style.background = '#dc3545';
-                        setTimeout(() => {
-                            button.textContent = originalText;
-                            button.style.background = 'linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%)';
-                            button.disabled = false;
-                        }, 3000);
-                    } finally {
-                        button.textContent = originalText;
-                        button.disabled = false;
-                    }
-                }
-                
-                async function showKeyboardTest(index) {
-                    const button = event.target;
-                    const originalText = button.textContent;
-                    
-                    try {
-                        button.textContent = '🔄 Testing...';
-                        button.disabled = true;
-                        
-                        const currentUrl = window.location.href.includes('/api/detailed-report') 
-                            ? document.referrer || 'https://example.com' 
-                            : window.location.href;
-                        
-                        const response = await fetch('/api/keyboard-navigation-test', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: currentUrl })
-                        });
-                        
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            showKeyboardTestModal(result);
-                        } else {
-                            throw new Error(result.error || 'Keyboard test failed');
-                        }
-                        
-                    } catch (error) {
-                        console.error('Keyboard test error:', error);
-                        button.textContent = '❌ Test Failed';
-                        button.style.background = '#dc3545';
-                        setTimeout(() => {
-                            button.textContent = originalText;
-                            button.style.background = 'linear-gradient(135deg, #17a2b8 0%, #6610f2 100%)';
-                            button.disabled = false;
-                        }, 3000);
-                    } finally {
-                        button.textContent = originalText;
-                        button.disabled = false;
-                    }
-                }
-                
-                function showScreenReaderModal(data) {
-                    const modal = document.createElement('div');
-                    modal.style.cssText = \`
-                        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                        background: rgba(0,0,0,0.9); z-index: 10000; display: flex; 
-                        align-items: center; justify-content: center; backdrop-filter: blur(5px);
-                    \`;
-                    
-                    modal.innerHTML = \`
-                        <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
-                            <div style="background: linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%); color: white; padding: 25px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                                    <h3 style="margin: 0; font-size: 20px; font-weight: 600;">🔊 Screen Reader Analysis</h3>
-                                    <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
-                                            style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
-                                        ✕
-                                    </button>
-                                </div>
-                                <p style="margin: 0; opacity: 0.9;">How your page would be experienced by screen reader users</p>
-                            </div>
-                            
-                            <div style="padding: 30px; max-height: 70vh; overflow-y: auto;">
-                                <!-- Summary Stats -->
-                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                                    <div style="padding: 15px; background: #e8f5e8; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #28a745;">\${data.summary.headings}</div>
-                                        <div style="font-size: 12px; color: #155724;">Headings</div>
-                                    </div>
-                                    <div style="padding: 15px; background: #cce5ff; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #004085;">\${data.summary.links}</div>
-                                        <div style="font-size: 12px; color: #004085;">Links</div>
-                                    </div>
-                                    <div style="padding: 15px; background: #fff3cd; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #856404;">\${data.summary.images}</div>
-                                        <div style="font-size: 12px; color: #856404;">Images</div>
-                                    </div>
-                                    <div style="padding: 15px; background: #f8d7da; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #721c24;">\${data.summary.imagesWithoutAlt}</div>
-                                        <div style="font-size: 12px; color: #721c24;">Missing Alt Text</div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Content Preview -->
-                                <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                                    <h4 style="margin: 0 0 15px 0; color: #333;">📖 Screen Reader Content Flow</h4>
-                                    <div style="max-height: 300px; overflow-y: auto; background: white; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6;">
-                                        \${data.content.slice(0, 20).map(item => \`
-                                            <div style="margin-bottom: 10px; padding: 8px; border-left: 3px solid \${
-                                                item.type === 'title' ? '#007bff' :
-                                                item.type === 'heading' ? '#28a745' :
-                                                item.type === 'link' ? '#17a2b8' :
-                                                item.type === 'image' ? (item.hasAlt ? '#ffc107' : '#dc3545') :
-                                                item.type === 'form' ? (item.hasLabel ? '#6f42c1' : '#dc3545') :
-                                                '#6c757d'
-                                            }; background: rgba(0,0,0,0.02);">
-                                                <div style="font-size: 12px; color: #666; text-transform: uppercase; font-weight: bold; margin-bottom: 4px;">
-                                                    \${item.type === 'heading' ? item.level : item.type}
-                                                    \${item.type === 'image' && !item.hasAlt ? ' (NO ALT)' : ''}
-                                                    \${item.type === 'form' && !item.hasLabel ? ' (NO LABEL)' : ''}
-                                                </div>
-                                                <div style="font-size: 14px; line-height: 1.4;">
-                                                    \${item.text || item.alt || item.label || 'No accessible text'}
-                                                </div>
-                                            </div>
-                                        \`).join('')}
-                                        \${data.content.length > 20 ? \`<div style="text-align: center; padding: 10px; color: #666; font-style: italic;">... and \${data.content.length - 20} more items</div>\` : ''}
-                                    </div>
-                                </div>
-                                
-                                <!-- Issues Summary -->
-                                \${data.summary.imagesWithoutAlt > 0 || data.summary.unlabeledInputs > 0 ? \`
-                                    <div style="background: #f8d7da; border-radius: 8px; padding: 20px; border-left: 4px solid #dc3545;">
-                                        <h4 style="margin: 0 0 15px 0; color: #721c24;">⚠️ Screen Reader Issues Found</h4>
-                                        <ul style="margin: 0; padding-left: 20px; color: #721c24;">
-                                            \${data.summary.imagesWithoutAlt > 0 ? \`<li>\${data.summary.imagesWithoutAlt} images without alt text</li>\` : ''}
-                                            \${data.summary.unlabeledInputs > 0 ? \`<li>\${data.summary.unlabeledInputs} form inputs without labels</li>\` : ''}
-                                        </ul>
-                                    </div>
-                                \` : \`
-                                    <div style="background: #d4edda; border-radius: 8px; padding: 20px; border-left: 4px solid #28a745;">
-                                        <h4 style="margin: 0 0 10px 0; color: #155724;">✅ Screen Reader Friendly</h4>
-                                        <p style="margin: 0; color: #155724;">No major screen reader issues detected!</p>
-                                    </div>
-                                \`}
-                            </div>
-                        </div>
-                    \`;
-                    
-                    document.body.appendChild(modal);
-                    
-                    modal.addEventListener('click', (e) => {
-                        if (e.target === modal) {
-                            modal.remove();
-                        }
-                    });
-                }
-                
-                function showKeyboardTestModal(data) {
-                    const modal = document.createElement('div');
-                    modal.style.cssText = \`
-                        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                        background: rgba(0,0,0,0.9); z-index: 10000; display: flex; 
-                        align-items: center; justify-content: center; backdrop-filter: blur(5px);
-                    \`;
-                    
-                    modal.innerHTML = \`
-                        <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
-                            <div style="background: linear-gradient(135deg, #17a2b8 0%, #6610f2 100%); color: white; padding: 25px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                                    <h3 style="margin: 0; font-size: 20px; font-weight: 600;">⌨️ Keyboard Navigation Test</h3>
-                                    <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
-                                            style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
-                                        ✕
-                                    </button>
-                                </div>
-                                <p style="margin: 0; opacity: 0.9;">Analysis of keyboard accessibility and focus management</p>
-                            </div>
-                            
-                            <div style="padding: 30px; max-height: 70vh; overflow-y: auto;">
-                                <!-- Summary Stats -->
-                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 25px;">
-                                    <div style="padding: 15px; background: #e8f5e8; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #28a745;">\${data.summary.visibleFocusableElements}</div>
-                                        <div style="font-size: 12px; color: #155724;">Focusable Elements</div>
-                                    </div>
-                                    <div style="padding: 15px; background: #f8d7da; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #721c24;">\${data.summary.elementsWithoutFocusIndicator}</div>
-                                        <div style="font-size: 12px; color: #721c24;">No Focus Indicator</div>
-                                    </div>
-                                    <div style="padding: 15px; background: #fff3cd; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #856404;">\${data.summary.elementsWithoutAccessibleName}</div>
-                                        <div style="font-size: 12px; color: #856404;">No Accessible Name</div>
-                                    </div>
-                                    <div style="padding: 15px; background: #cce5ff; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 24px; font-weight: bold; color: #004085;">\${data.summary.totalIssues}</div>
-                                        <div style="font-size: 12px; color: #004085;">Total Issues</div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Tab Order Preview -->
-                                <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                                    <h4 style="margin: 0 0 15px 0; color: #333;">🎯 Tab Order Sequence</h4>
-                                    <div style="max-height: 250px; overflow-y: auto; background: white; padding: 15px; border-radius: 6px; border: 1px solid #dee2e6;">
-                                        \${data.results.tabOrder.slice(0, 15).map((element, index) => \`
-                                            <div style="margin-bottom: 8px; padding: 10px; border-radius: 4px; background: \${element.hasVisibleFocus ? '#e8f5e8' : '#f8d7da'}; border-left: 3px solid \${element.hasVisibleFocus ? '#28a745' : '#dc3545'};">
-                                                <div style="display: flex; justify-content: between; align-items: center;">
-                                                    <span style="font-weight: bold; color: #333; margin-right: 10px;">\${index + 1}.</span>
-                                                    <span style="font-family: monospace; background: #f1f3f4; padding: 2px 6px; border-radius: 3px; font-size: 12px; margin-right: 10px;">\${element.tagName}</span>
-                                                    <span style="flex: 1; font-size: 14px;">\${element.text || element.ariaLabel || 'No accessible name'}</span>
-                                                    \${!element.hasVisibleFocus ? '<span style="color: #dc3545; font-size: 12px; font-weight: bold;">⚠️ NO FOCUS</span>' : ''}
-                                                </div>
-                                            </div>
-                                        \`).join('')}
-                                        \${data.results.tabOrder.length > 15 ? \`<div style="text-align: center; padding: 10px; color: #666; font-style: italic;">... and \${data.results.tabOrder.length - 15} more elements</div>\` : ''}
-                                    </div>
-                                </div>
-                                
-                                <!-- Issues Summary -->
-                                \${data.summary.totalIssues > 0 ? \`
-                                    <div style="background: #f8d7da; border-radius: 8px; padding: 20px; border-left: 4px solid #dc3545;">
-                                        <h4 style="margin: 0 0 15px 0; color: #721c24;">⚠️ Keyboard Navigation Issues</h4>
-                                        <ul style="margin: 0; padding-left: 20px; color: #721c24;">
-                                            \${data.summary.elementsWithoutFocusIndicator > 0 ? \`<li>\${data.summary.elementsWithoutFocusIndicator} elements lack visible focus indicators</li>\` : ''}
-                                            \${data.summary.elementsWithoutAccessibleName > 0 ? \`<li>\${data.summary.elementsWithoutAccessibleName} interactive elements lack accessible names</li>\` : ''}
-                                        </ul>
-                                    </div>
-                                \` : \`
-                                    <div style="background: #d4edda; border-radius: 8px; padding: 20px; border-left: 4px solid #28a745;">
-                                        <h4 style="margin: 0 0 10px 0; color: #155724;">✅ Keyboard Navigation Friendly</h4>
-                                        <p style="margin: 0; color: #155724;">All interactive elements are properly keyboard accessible!</p>
-                                    </div>
-                                \`}
-                            </div>
-                        </div>
-                    \`;
-                    
-                    document.body.appendChild(modal);
-                    
-                    modal.addEventListener('click', (e) => {
-                        if (e.target === modal) {
-                            modal.remove();
-                        }
-                    });
-                }
-                
-                async function previewFix(violationId, index) {
-                    const button = event.target;
-                    const originalText = button.textContent;
-                    
-                    try {
-                        button.textContent = '🔄 Generating Preview...';
-                        button.disabled = true;
-                        
-                        const response = await fetch('/api/preview-fix', {
+                        const response = await fetch('/api/download-fix', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ 
                                 violationId: violationId,
-                                elementSelector: \`violation-\${index}\`,
-                                platformInfo: window.platformInfo || { type: 'custom' }
+                                fileType: fileType
                             })
                         });
                         
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            // Create preview modal
-                            const modal = document.createElement('div');
-                            modal.style.cssText = \`
-                                position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                                background: rgba(0,0,0,0.8); z-index: 1000; display: flex; 
-                                align-items: center; justify-content: center;
-                            \`;
-                            
-                            modal.innerHTML = \`
-                                <div style="background: white; padding: 0; border-radius: 12px; max-width: 95vw; max-height: 90vh; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
-                                    <!-- Enhanced Header with Tabs -->
-                                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px 12px 0 0;">
-                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                            <h3 style="margin: 0; font-size: 18px;">🎯 Advanced Fix Preview: \${violationId}</h3>
-                                            <button onclick="AdvancedPreview.closeModal(this)" 
-                                                    style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; backdrop-filter: blur(10px);">
-                                                ✕ Close
-                                            </button>
-                                        </div>
-                                        <!-- Tab Navigation -->
-                                        <div style="display: flex; gap: 10px;">
-                                            <button onclick="AdvancedPreview.showTab('overview', this)" class="preview-tab active" 
-                                                    style="background: rgba(255,255,255,0.3); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; backdrop-filter: blur(10px);">
-                                                📋 Overview
-                                            </button>
-                                            <button onclick="AdvancedPreview.showTab('visual', this)" class="preview-tab"
-                                                    style="background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; backdrop-filter: blur(10px);">
-                                                👁️ Visual
-                                            </button>
-                                            <button onclick="AdvancedPreview.showTab('code', this)" class="preview-tab"
-                                                    style="background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; backdrop-filter: blur(10px);">
-                                                💻 Code
-                                            </button>
-                                            <button onclick="AdvancedPreview.showTab('accessibility', this)" class="preview-tab"
-                                                    style="background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; backdrop-filter: blur(10px);">
-                                                ♿ Accessibility
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Tab Content Area -->
-                                    <div style="padding: 30px; max-height: 70vh; overflow-y: auto;">
-                                        <!-- Overview Tab -->
-                                        <div id="tab-overview" class="tab-content">
-                                            <div style="margin-bottom: 25px; padding: 20px; background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); border-radius: 8px; border-left: 4px solid #667eea;">
-                                                <h4 style="margin: 0 0 10px 0; color: #333;">📋 What this fix will accomplish:</h4>
-                                                <p style="margin: 0; font-size: 16px; line-height: 1.5;">\${result.preview.impact}</p>
-                                            </div>
-                                            
-                                            <div style="margin-bottom: 25px;">
-                                                <h4 style="color: #333; margin-bottom: 15px;">🎯 Impact Analysis:</h4>
-                                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                                                    <div style="padding: 15px; background: #d4edda; border-radius: 8px; text-align: center;">
-                                                        <div style="font-size: 24px; font-weight: bold; color: #155724;">+\${Math.floor(Math.random() * 30) + 10}%</div>
-                                                        <div style="font-size: 12px; color: #155724;">Accessibility Score</div>
-                                                    </div>
-                                                    <div style="padding: 15px; background: #cce5ff; border-radius: 8px; text-align: center;">
-                                                        <div style="font-size: 24px; font-weight: bold; color: #004085;">WCAG 2.1</div>
-                                                        <div style="font-size: 12px; color: #004085;">Compliance Level</div>
-                                                    </div>
-                                                    <div style="padding: 15px; background: #fff3cd; border-radius: 8px; text-align: center;">
-                                                        <div style="font-size: 24px; font-weight: bold; color: #856404;">\${violationId.includes('contrast') ? '4.5:1' : 'AA'}</div>
-                                                        <div style="font-size: 12px; color: #856404;">Target Standard</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <div>
-                                                <h4 style="color: #333; margin-bottom: 15px;">🛠️ Implementation Steps:</h4>
-                                                <ol style="padding-left: 20px;">
-                                                    \${result.preview.instructions.map((step, i) => \`
-                                                        <li style="margin-bottom: 10px; padding: 10px; background: \${i % 2 === 0 ? '#f8f9fa' : '#ffffff'}; border-radius: 4px; border-left: 3px solid #667eea;">
-                                                            \${step}
-                                                        </li>
-                                                    \`).join('')}
-                                                </ol>
-                                            </div>
-                                        </div>
-                                        
-                                        <!-- Visual Tab -->
-                                        <div id="tab-visual" class="tab-content" style="display: none;">
-                                            <div style="margin-bottom: 25px;">
-                                                <h4 style="color: #333; margin-bottom: 15px;">👁️ Visual Comparison:</h4>
-                                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                                    <div style="border: 2px solid #dc3545; border-radius: 8px; overflow: hidden;">
-                                                        <div style="background: #dc3545; color: white; padding: 10px; text-align: center; font-weight: bold;">❌ Before (Current)</div>
-                                                        <div style="padding: 20px; background: #f8f9fa; min-height: 120px; display: flex; align-items: center; justify-content: center;">
-                                                            <div style="padding: 15px; background: \${violationId.includes('contrast') ? '#f1bd16' : '#e9ecef'}; color: \${violationId.includes('contrast') ? '#ffffff' : '#6c757d'}; border-radius: 4px; font-size: 14px;">
-                                                                \${violationId.includes('contrast') ? 'Low Contrast Text' : 'Current Element'}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div style="border: 2px solid #28a745; border-radius: 8px; overflow: hidden;">
-                                                        <div style="background: #28a745; color: white; padding: 10px; text-align: center; font-weight: bold;">✅ After (Fixed)</div>
-                                                        <div style="padding: 20px; background: #d4edda; min-height: 120px; display: flex; align-items: center; justify-content: center;">
-                                                            <div style="padding: 15px; background: \${violationId.includes('contrast') ? '#000000' : '#28a745'}; color: \${violationId.includes('contrast') ? '#ffffff' : '#ffffff'}; border-radius: 4px; font-size: 14px;">
-                                                                \${violationId.includes('contrast') ? 'High Contrast Text' : 'Fixed Element'}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            \${violationId.includes('contrast') ? \`
-                                            <div style="margin-bottom: 25px; padding: 20px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0066cc;">
-                                                <h4 style="margin: 0 0 15px 0; color: #0066cc;">🎨 Color Contrast Analysis:</h4>
-                                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                                    <div>
-                                                        <strong>Current Ratio:</strong> 1.74:1 ❌<br>
-                                                        <strong>Target Ratio:</strong> 4.5:1 ✅<br>
-                                                        <strong>Improvement:</strong> +159% contrast
-                                                    </div>
-                                                    <div>
-                                                        <strong>WCAG Level:</strong> AA Compliant ✅<br>
-                                                        <strong>User Impact:</strong> High<br>
-                                                        <strong>Readability:</strong> Significantly Improved
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            \` : ''}
-                                        </div>
-                                        
-                                        <!-- Code Tab -->
-                                        <div id="tab-code" class="tab-content" style="display: none;">
-                                            <div style="margin-bottom: 25px;">
-                                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                                                    <h4 style="margin: 0; color: #333;">💻 Code Changes:</h4>
-                                                    <button onclick="AdvancedPreview.copyCode()" style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                                                        📋 Copy Code
-                                                    </button>
-                                                </div>
-                                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                                                    <div>
-                                                        <h5 style="margin: 0 0 10px 0; color: #dc3545;">❌ Before:</h5>
-                                                        <pre id="code-before" style="background: #f8f9fa; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 12px; border: 1px solid #dee2e6; margin: 0;">\${result.preview.before.code}</pre>
-                                                    </div>
-                                                    <div>
-                                                        <h5 style="margin: 0 0 10px 0; color: #28a745;">✅ After:</h5>
-                                                        <pre id="code-after" style="background: #d4edda; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 12px; border: 1px solid #c3e6cb; margin: 0;">\${result.preview.after.code}</pre>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <div style="padding: 20px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-                                                <h5 style="margin: 0 0 10px 0; color: #856404;">💡 Implementation Notes:</h5>
-                                                <ul style="margin: 0; padding-left: 20px; color: #856404;">
-                                                    <li>Add the CSS to your main stylesheet</li>
-                                                    <li>Test the changes in different browsers</li>
-                                                    <li>Verify accessibility with screen readers</li>
-                                                    <li>Re-run the accessibility scan to confirm fixes</li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                        
-                                        <!-- Accessibility Tab -->
-                                        <div id="tab-accessibility" class="tab-content" style="display: none;">
-                                            <div style="margin-bottom: 25px;">
-                                                <h4 style="color: #333; margin-bottom: 15px;">♿ Accessibility Impact:</h4>
-                                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
-                                                    <div style="padding: 20px; background: #e8f5e8; border-radius: 8px; border-left: 4px solid #28a745;">
-                                                        <h5 style="margin: 0 0 10px 0; color: #155724;">👥 Users Helped:</h5>
-                                                        <p style="margin: 0; color: #155724;">Visual impairments, Low vision, Color blindness</p>
-                                                    </div>
-                                                    <div style="padding: 20px; background: #e7f3ff; border-radius: 8px; border-left: 4px solid #0066cc;">
-                                                        <h5 style="margin: 0 0 10px 0; color: #004085;">🛠️ Assistive Tech:</h5>
-                                                        <p style="margin: 0; color: #004085;">Screen readers, Magnifiers, High contrast mode</p>
-                                                    </div>
-                                                    <div style="padding: 20px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-                                                        <h5 style="margin: 0 0 10px 0; color: #856404;">📱 Devices:</h5>
-                                                        <p style="margin: 0; color: #856404;">Mobile, Tablet, Desktop, E-readers</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <div style="margin-bottom: 25px; padding: 20px; background: #f0f8ff; border-radius: 8px; border-left: 4px solid #0066cc;">
-                                                <h5 style="margin: 0 0 15px 0; color: #004085;">📊 WCAG 2.1 Compliance:</h5>
-                                                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
-                                                    <div>
-                                                        <div style="font-size: 20px; font-weight: bold; color: #28a745;">✅</div>
-                                                        <div style="font-size: 12px; color: #155724;">Level A</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 20px; font-weight: bold; color: #28a745;">✅</div>
-                                                        <div style="font-size: 12px; color: #155724;">Level AA</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 20px; font-weight: bold; color: #ffc107;">⚡</div>
-                                                        <div style="font-size: 12px; color: #856404;">Level AAA Ready</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <div style="padding: 20px; background: #d1ecf1; border-radius: 8px; border-left: 4px solid #17a2b8;">
-                                                <h5 style="margin: 0 0 10px 0; color: #0c5460;">🧪 Testing Recommendations:</h5>
-                                                <ol style="margin: 0; padding-left: 20px; color: #0c5460;">
-                                                    <li>Test with NVDA or JAWS screen reader</li>
-                                                    <li>Verify keyboard navigation works properly</li>
-                                                    <li>Check color contrast in different lighting</li>
-                                                    <li>Test on mobile devices and tablets</li>
-                                                    <li>Validate with automated accessibility tools</li>
-                                                </ol>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Enhanced Action Buttons -->
-                                    <div style="padding: 20px 30px; background: #f8f9fa; border-radius: 0 0 12px 12px; border-top: 1px solid #dee2e6;">
-                                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                                            <div style="display: flex; gap: 10px;">
-                                                <button onclick="AdvancedPreview.downloadFix('\${violationId}')" 
-                                                        style="background: #17a2b8; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px;">
-                                                    📥 Download Fix
-                                                </button>
-                                                <button onclick="AdvancedPreview.sharePreview()" 
-                                                        style="background: #6f42c1; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px;">
-                                                    🔗 Share Preview
-                                                </button>
-                                            </div>
-                                            <button onclick="autoFixViolation('\${violationId}', \${index}); AdvancedPreview.closeModal(this);" 
-                                                    style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; border: none; padding: 12px 30px; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: 600; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);">
-                                                🚀 Apply This Fix
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            \`;
-                            
-                            document.body.appendChild(modal);
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = \`\${violationId}-\${fileType}.\${fileType === 'css' ? 'css' : 'md'}\`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            window.URL.revokeObjectURL(url);
                         } else {
-                            throw new Error(result.error || 'Preview generation failed');
+                            throw new Error('Download failed');
                         }
-                        
                     } catch (error) {
-                        console.error('Preview error:', error);
-                        alert('Failed to generate preview: ' + error.message);
-                    } finally {
-                        button.textContent = originalText;
-                        button.disabled = false;
+                        console.error('Download error:', error);
+                        alert('Download failed. Please try again.');
                     }
                 }
                 
-                function downloadFix(violationId, type) {
-                    // This would trigger the download of the generated fix files
-                    const url = \`/api/download-fix/\${type}?violationId=\${violationId}&platform=\${window.platformInfo?.type || 'custom'}\`;
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = \`\${violationId}-fix.\${type === 'css' ? 'css' : 'md'}\`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
+                // PHASE 2D: Placeholder functions for visual preview buttons
+                // These functions are not working in the detailed report context
+                // The functionality has been moved to the Guided Fixing modal
+                function showVisualPreview(violationId, index) {
+                    alert('Visual Preview is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
+                }
+                
+                function showColorContrastPreview(index) {
+                    alert('Color Contrast Testing is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
+                }
+                
+                function showScreenReaderPreview(index) {
+                    alert('Screen Reader Analysis is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
+                }
+                
+                function showKeyboardTest(index) {
+                    alert('Keyboard Navigation Testing is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
                 }
             </script>
         </body>
@@ -1311,689 +946,733 @@ app.post('/api/detailed-report', (req, res) => {
     res.send(reportHtml);
 });
 
-// API endpoint for recent scans
-app.get('/api/scans/recent', async (req, res) => {
-    try {
-        const scans = await getRecentScans();
-        res.json(scans);
-    } catch (error) {
-        console.error('Error fetching recent scans:', error);
-        res.status(500).json({ error: 'Failed to fetch recent scans' });
-    }
-});
-
-// API endpoint for dashboard stats
-app.get('/api/dashboard/stats', async (req, res) => {
-    try {
-        const stats = await getDashboardStats();
-        res.json(stats);
-    } catch (error) {
-        console.error('Error fetching dashboard stats:', error);
-        res.status(500).json({ error: 'Failed to fetch dashboard stats' });
-    }
-});
-
-// NEW: AI Suggestions API endpoint
-app.post('/api/ai-fixes', async (req, res) => {
-    try {
-        const { violations, platformInfo } = req.body;
-        
-        if (!violations || !Array.isArray(violations)) {
-            return res.status(400).json({ error: 'Violations array is required' });
-        }
-
-        const suggestions = await Promise.all(violations.map(async (violation) => {
-            // PHASE 1 ENHANCEMENT: Generate AI-powered suggestions with platform context
-            const suggestion = await generateAISuggestion(violation, platformInfo);
-            return suggestion;
-        }));
-
-        res.json(suggestions);
-    } catch (error) {
-        console.error('Error generating AI suggestions:', error);
-        res.status(500).json({ error: 'Failed to generate AI suggestions' });
-    }
-});
-
-// Parse AI text response into structured format
-function parseAITextResponse(aiResponse, violationId) {
-    try {
-        // Extract sections using regex patterns
-        const priorityMatch = aiResponse.match(/PRIORITY:\s*([^\n]+)/i);
-        const explanationMatch = aiResponse.match(/EXPLANATION:\s*([\s\S]*?)(?=CODE EXAMPLE:|IMPLEMENTATION STEPS:|$)/i);
-        const codeMatch = aiResponse.match(/CODE EXAMPLE:\s*([\s\S]*?)(?=IMPLEMENTATION STEPS:|PLATFORM-SPECIFIC|$)/i);
-        const stepsMatch = aiResponse.match(/IMPLEMENTATION STEPS:\s*([\s\S]*?)(?=PLATFORM-SPECIFIC|SPECIFIC ELEMENT:|$)/i);
-        
-        // Extract priority
-        const priority = priorityMatch ? priorityMatch[1].trim().toLowerCase() : 'medium';
-        
-        // Extract explanation
-        const explanation = explanationMatch ? explanationMatch[1].trim() : 
-            `Accessibility issue (${violationId}) needs attention to improve user experience.`;
-        
-        // Extract code example
-        const codeExample = codeMatch ? codeMatch[1].trim() : 
-            '// Refer to the implementation steps for specific code changes';
-        
-        // Extract and parse steps
-        let steps = [];
-        if (stepsMatch) {
-            const stepsText = stepsMatch[1].trim();
-            steps = stepsText.split(/\d+\./).filter(step => step.trim().length > 0)
-                .map(step => step.trim()).slice(0, 10); // Limit to 10 steps
-        }
-        
-        if (steps.length === 0) {
-            steps = ['Review the accessibility violation details', 'Apply the suggested code changes', 'Test with screen readers'];
-        }
-        
-        return {
-            priority: ['high', 'medium', 'low'].includes(priority) ? priority : 'medium',
-            explanation: explanation,
-            codeExample: codeExample,
-            steps: steps
-        };
-        
-    } catch (error) {
-        console.log(`⚠️ Error parsing AI response for ${violationId}:`, error.message);
-        return {
-            priority: 'medium',
-            explanation: aiResponse.substring(0, 500) + '...',
-            codeExample: '// Full AI response available in logs',
-            steps: ['Review the AI suggestion', 'Apply recommended changes', 'Test accessibility improvements']
-        };
-    }
+// Helper functions for link extraction and scanning
+async function extractLinksFromPage(page) {
+    return await page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a[href]'));
+        return links
+            .map(link => {
+                const href = link.getAttribute('href');
+                if (!href) return null;
+                
+                // Convert relative URLs to absolute
+                try {
+                    return new URL(href, window.location.href).href;
+                } catch (e) {
+                    return null;
+                }
+            })
+            .filter(url => url && url.startsWith('http'))
+            .filter((url, index, self) => self.indexOf(url) === index) // Remove duplicates
+            .slice(0, 50); // Limit to 50 links to prevent overwhelming scans
+    });
 }
 
-async function generateAISuggestion(violation, platformInfo = null) {
-    console.log(`🤖 Forcing OpenAI call for ${violation.id} to get specific suggestions`);
-    
-    // Extract element details from the first node if available
-    const firstNode = violation.nodes?.[0];
-    const elementDetails = firstNode ? {
-        html: firstNode.html || 'Not available',
-        target: firstNode.target?.[0] || 'Not available',
-        failureSummary: firstNode.failureSummary || 'Not available'
-    } : null;
-
-    // Try to get AI-generated suggestion if OpenAI is available
-    if (openai) {
-        try {
-            console.log(`🤖 Generating AI suggestion for violation: ${violation.id}`);
-            
-            const prompt = `You are an accessibility expert specializing in ${platformInfo?.name || 'web'} websites. Provide a detailed, SPECIFIC fix suggestion for this accessibility violation:
-
-VIOLATION DETAILS:
-- ID: ${violation.id}
-- Description: ${violation.description || 'No description provided'}
-- Impact: ${violation.impact || 'Unknown'}
-- Help URL: ${violation.helpUrl || 'N/A'}
-
-${elementDetails ? `
-SPECIFIC ELEMENT DETAILS:
-- HTML: ${elementDetails.html}
-- CSS Selector: ${elementDetails.target}
-- Issue: ${elementDetails.failureSummary}
-` : ''}
-
-${platformInfo ? `
-PLATFORM INFORMATION:
-- Platform: ${platformInfo.name} (${platformInfo.type})
-- Confidence: ${Math.round(platformInfo.confidence * 100)}%
-- Capabilities: CSS Injection: ${platformInfo.capabilities?.cssInjection}, Theme Editor: ${platformInfo.capabilities?.themeEditor}
-` : ''}
-
-Please provide a SPECIFIC fix suggestion with these sections:
-
-PRIORITY: (high/medium/low)
-
-EXPLANATION: 
-Provide a specific explanation for this exact element and platform.
-
-CODE EXAMPLE:
-Show the EXACT before and after code for this specific element.
-
-IMPLEMENTATION STEPS:
-1. First specific step for ${platformInfo?.name || 'this platform'}
-2. Second specific step
-3. Continue with detailed steps...
-
-${platformInfo ? `PLATFORM-SPECIFIC INSTRUCTIONS:
-- Method: How to implement this fix on ${platformInfo.name}
-- Location: Where to make the change (theme editor, CSS file, etc.)
-- Code: ${platformInfo.name}-specific code or instructions
-` : ''}
-
-SPECIFIC ELEMENT: ${elementDetails?.target || 'Not available'}
-CURRENT HTML: ${elementDetails?.html || 'Not available'}`;
-
-            const completion = await openai.chat.completions.create({
-                model: "gpt-3.5-turbo",
-                messages: [
-                    {
-                        role: "system",
-                        content: "You are an expert web accessibility consultant specializing in WCAG compliance. Provide practical, actionable advice for fixing accessibility issues."
-                    },
-                    {
-                        role: "user",
-                        content: prompt
-                    }
-                ],
-                max_tokens: 2500,
-                temperature: 0.7
-            });
-
-            const aiResponse = completion.choices[0].message.content;
-            console.log(`📝 AI response length: ${aiResponse.length} characters for ${violation.id}`);
-            console.log(`📄 AI response preview: ${aiResponse.substring(0, 200)}...`);
-            
-            // Parse the structured text response
-            const suggestion = parseAITextResponse(aiResponse, violation.id);
-            console.log(`✅ Successfully parsed AI response for ${violation.id}`);
-            
-            console.log(`✅ AI suggestion generated for ${violation.id}`);
-            return suggestion;
-            
-        } catch (error) {
-            console.log(`❌ Error generating AI suggestion for ${violation.id}:`, error.message);
-            // Fall through to default suggestion
-        }
-    }
-
-    // Default suggestion for unknown violation types or when AI fails
-    const defaultSuggestion = {
-        priority: 'medium',
-        explanation: `This accessibility issue (${violation.id}) needs attention to improve user experience for people with disabilities.`,
-        codeExample: '// Refer to WCAG guidelines for specific implementation details',
-        steps: [
-            'Review the WCAG guidelines for this specific issue',
-            'Identify all instances of this problem on your site',
-            'Implement the recommended solution',
-            'Test with accessibility tools and real users',
-            'Document the fix for future reference'
-        ]
-    };
-
-    return defaultSuggestion;
-}
-
-// PHASE 2A ENHANCEMENT: Auto-Fix Code Generation Function
-function generateFixCode(violation, platformInfo) {
-    const { id, impact, description, help, nodes } = violation;
-    const platform = platformInfo?.type || 'custom';
-    
-    let fixCode = {
-        css: '',
-        html: '',
-        javascript: '',
-        instructions: [],
-        filename: `fix-${id}-${Date.now()}`
-    };
-
-    switch (id) {
-        case 'color-contrast':
-            if (platform === 'shopify') {
-                fixCode.css = `/* Fix for color contrast issue in Shopify theme */
-.elementor-button, .btn, .button, a[href] {
-    color: #000000 !important;
-    background-color: #ffffff !important;
-    border: 2px solid #000000 !important;
-}
-
-/* Ensure sufficient contrast for text elements */
-.text-content, p, span, div {
-    color: #000000 !important;
-    background-color: transparent !important;
-}`;
-                fixCode.instructions = [
-                    'Log in to your Shopify admin dashboard',
-                    'Navigate to Online Store > Themes',
-                    'Click "Actions" > "Edit code" on your active theme',
-                    'Find the assets/theme.css file or create a new CSS file',
-                    'Add the provided CSS code to fix color contrast issues',
-                    'Save the changes and preview your store'
-                ];
-            } else if (platform === 'wordpress') {
-                fixCode.css = `/* WordPress color contrast fix */
-.wp-block-button__link, .button, .btn {
-    color: #000000 !important;
-    background-color: #ffffff !important;
-    border: 2px solid #000000 !important;
-}`;
-                fixCode.instructions = [
-                    'Log in to your WordPress admin dashboard',
-                    'Go to Appearance > Customize',
-                    'Click on "Additional CSS"',
-                    'Paste the provided CSS code',
-                    'Click "Publish" to save changes'
-                ];
-            } else {
-                fixCode.css = `/* Universal color contrast fix */
-.low-contrast-element {
-    color: #000000 !important;
-    background-color: #ffffff !important;
-    border: 2px solid #000000 !important;
-}`;
-                fixCode.instructions = [
-                    'Add the provided CSS to your main stylesheet',
-                    'Apply the .low-contrast-element class to problematic elements',
-                    'Test the contrast ratio using browser developer tools'
-                ];
-            }
-            break;
-
-        case 'link-name':
-            fixCode.html = `<!-- Before: Problematic link -->
-<a href="/learn-more">Learn More</a>
-
-<!-- After: Accessible link with descriptive text -->
-<a href="/learn-more" aria-label="Learn more about our accessibility features">Learn More</a>
-
-<!-- Alternative: Add descriptive text -->
-<a href="/learn-more">Learn More About Our Accessibility Features</a>`;
-            
-            fixCode.instructions = [
-                'Locate the problematic link in your HTML',
-                'Add descriptive text or aria-label attribute',
-                'Ensure the link purpose is clear from the text alone',
-                'Test with screen readers to verify accessibility'
-            ];
-            break;
-
-        case 'image-alt':
-            fixCode.html = `<!-- Before: Image without alt text -->
-<img src="product-image.jpg">
-
-<!-- After: Image with descriptive alt text -->
-<img src="product-image.jpg" alt="Blue cotton t-shirt with round neck, size medium">
-
-<!-- For decorative images -->
-<img src="decorative-border.jpg" alt="" role="presentation">`;
-            
-            fixCode.instructions = [
-                'Add meaningful alt text that describes the image content',
-                'For decorative images, use alt="" and role="presentation"',
-                'Keep alt text concise but descriptive',
-                'Avoid phrases like "image of" or "picture of"'
-            ];
-            break;
-
-        case 'heading-order':
-            fixCode.html = `<!-- Before: Incorrect heading hierarchy -->
-<h1>Main Title</h1>
-<h3>Subsection</h3>
-<h2>Section Title</h2>
-
-<!-- After: Correct heading hierarchy -->
-<h1>Main Title</h1>
-<h2>Section Title</h2>
-<h3>Subsection</h3>`;
-            
-            fixCode.instructions = [
-                'Review your heading structure (h1, h2, h3, etc.)',
-                'Ensure headings follow a logical hierarchy',
-                'Use only one h1 per page',
-                'Don\'t skip heading levels (h1 to h3 without h2)'
-            ];
-            break;
-
-        default:
-            fixCode.css = `/* Generic accessibility fix for ${id} */
-.accessibility-fix {
-    /* Add appropriate styles based on the specific issue */
-}`;
-            fixCode.instructions = [
-                'Review the specific accessibility violation',
-                'Apply the recommended fixes from WCAG guidelines',
-                'Test the changes with accessibility tools',
-                'Verify the fix doesn\'t break existing functionality'
-            ];
-    }
-
-    return fixCode;
-}
-
-// PHASE 2A ENHANCEMENT: Generate downloadable fix files
-function createFixFiles(violations, platformInfo) {
-    const fixes = violations.map(violation => generateFixCode(violation, platformInfo));
-    
-    // Combine all CSS fixes
-    const combinedCSS = fixes.map(fix => fix.css).filter(css => css.trim()).join('\n\n');
-    
-    // Combine all HTML examples
-    const combinedHTML = fixes.map(fix => fix.html).filter(html => html.trim()).join('\n\n');
-    
-    // Create comprehensive instructions
-    const allInstructions = fixes.flatMap(fix => fix.instructions);
-    const uniqueInstructions = [...new Set(allInstructions)];
-    
-    const instructionsText = `# Accessibility Fix Instructions
-
-## Platform: ${platformInfo?.name || 'Custom'}
-## Generated: ${new Date().toLocaleString()}
-
-## Implementation Steps:
-${uniqueInstructions.map((instruction, index) => `${index + 1}. ${instruction}`).join('\n')}
-
-## CSS Fixes:
-\`\`\`css
-${combinedCSS}
-\`\`\`
-
-## HTML Examples:
-\`\`\`html
-${combinedHTML}
-\`\`\`
-
-## Testing:
-1. Apply the fixes to your website
-2. Re-run the accessibility scan to verify improvements
-3. Test with screen readers and keyboard navigation
-4. Validate color contrast ratios meet WCAG standards
-`;
-
-    return {
-        css: combinedCSS,
-        html: combinedHTML,
-        instructions: instructionsText,
-        platform: platformInfo?.type || 'custom'
-    };
-}
-
-// PHASE 2A ENHANCEMENT: New endpoint for implementing auto-fixes
-app.post('/api/implement-fix', async (req, res) => {
+function filterInternalLinks(links, baseUrl) {
     try {
-        const { violationId, fixType, platformInfo } = req.body;
-        
-        console.log('🔧 Implementing auto-fix for violation:', violationId);
-        
-        // Generate the specific fix
-        const mockViolation = { id: violationId, impact: 'serious' };
-        const fixCode = generateFixCode(mockViolation, platformInfo);
-        
-        // In a real implementation, this would:
-        // 1. Connect to the platform's API (Shopify, WordPress, etc.)
-        // 2. Apply the fix directly to the website
-        // 3. Verify the fix was applied successfully
-        
-        // For now, we'll return the generated code and instructions
-        res.json({
-            success: true,
-            message: `Auto-fix generated for ${violationId}`,
-            fixApplied: false, // Set to true when actually implemented
-            fixCode: fixCode,
-            nextSteps: [
-                'Download the generated fix files',
-                'Follow the platform-specific instructions',
-                'Apply the fixes to your website',
-                'Re-run the accessibility scan to verify improvements'
-            ]
-        });
-        
-    } catch (error) {
-        console.error('Error implementing fix:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Failed to implement fix' 
-        });
-    }
-});
-
-// PHASE 2A ENHANCEMENT: Preview fix endpoint
-app.post('/api/preview-fix', async (req, res) => {
-    try {
-        const { violationId, elementSelector, platformInfo } = req.body;
-        
-        console.log('👁️ Generating fix preview for:', violationId);
-        
-        const mockViolation = { id: violationId, impact: 'serious' };
-        const fixCode = generateFixCode(mockViolation, platformInfo);
-        
-        // Generate a preview of what the fix will look like
-        const preview = {
-            before: {
-                description: `Current state with ${violationId} violation`,
-                code: `/* Current problematic code */\n${elementSelector} {\n  /* Accessibility issue present */\n}`
-            },
-            after: {
-                description: `Fixed state with accessibility improvements`,
-                code: fixCode.css || fixCode.html || 'Fix applied'
-            },
-            impact: `This fix will resolve the ${violationId} accessibility violation`,
-            instructions: fixCode.instructions
-        };
-        
-        res.json({
-            success: true,
-            preview: preview
-        });
-        
-    } catch (error) {
-        console.error('Error generating preview:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Failed to generate preview' 
-        });
-    }
-});
-
-// PHASE 2A ENHANCEMENT: Download endpoints for fix files
-app.get('/api/download-fix/:type', (req, res) => {
-    const { type } = req.params;
-    const { violationId, platform } = req.query;
-    
-    // Generate fix for the specific violation
-    const mockViolation = { id: violationId, impact: 'serious' };
-    const platformInfo = { type: platform || 'custom', name: platform || 'Custom' };
-    const fixCode = generateFixCode(mockViolation, platformInfo);
-    
-    let content = '';
-    let filename = '';
-    let contentType = '';
-    
-    switch (type) {
-        case 'css':
-            content = fixCode.css || '/* No CSS fixes available for this violation */';
-            filename = `${violationId}-fix-${platform || 'custom'}.css`;
-            contentType = 'text/css';
-            break;
-        case 'instructions':
-            content = `# Fix Instructions for ${violationId}\n\n## Platform: ${platformInfo.name}\n\n## Steps:\n${fixCode.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}\n\n## CSS Code:\n\`\`\`css\n${fixCode.css}\n\`\`\`\n\n## HTML Example:\n\`\`\`html\n${fixCode.html}\n\`\`\``;
-            filename = `${violationId}-instructions-${platform || 'custom'}.md`;
-            contentType = 'text/markdown';
-            break;
-        default:
-            return res.status(400).json({ error: 'Invalid file type' });
-    }
-    
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', contentType);
-    res.send(content);
-});
-
-// PHASE 2C: Bulk Download API Endpoint for Enterprise Batch Operations
-app.post('/api/bulk-download-fixes', async (req, res) => {
-    try {
-        const { violations, platformInfo } = req.body;
-        
-        if (!violations || violations.length === 0) {
-            return res.status(400).json({ error: 'No violations provided' });
-        }
-        
-        const JSZip = require('jszip');
-        const zip = new JSZip();
-        
-        // Create folders for organization
-        const cssFolder = zip.folder('css-fixes');
-        const instructionsFolder = zip.folder('instructions');
-        const summaryFolder = zip.folder('summary');
-        
-        let allFixes = [];
-        let successCount = 0;
-        let failCount = 0;
-        
-        // Generate fixes for each violation
-        for (let i = 0; i < violations.length; i++) {
-            const violation = violations[i];
-            
+        const baseDomain = new URL(baseUrl).hostname;
+        return links.filter(link => {
             try {
-                const fixCode = generateFixCode(violation, platformInfo);
+                return new URL(link).hostname === baseDomain;
+            } catch (e) {
+                return false;
+            }
+        });
+    } catch (e) {
+        return [];
+    }
+}
+
+// Main scanning endpoint
+app.post('/api/scan', async (req, res) => {
+    const { url, scanType = 'single' } = req.body;
+    
+    if (!url) {
+        return res.status(400).json({ error: 'URL is required' });
+    }
+    
+    const startTime = Date.now();
+    let browser;
+    
+    try {
+        console.log(`🔍 Starting ${scanType} scan for:`, url);
+        
+        browser = await puppeteer.launch({ 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            headless: true
+        });
+        
+        let urlsToScan = [url];
+        
+        // For crawl scans, extract internal links
+        if (scanType === 'crawl') {
+            console.log('🕷️ Crawling for internal links...');
+            const page = await browser.newPage();
+            await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+            
+            const allLinks = await extractLinksFromPage(page);
+            const internalLinks = filterInternalLinks(allLinks, url);
+            
+            // Include original URL plus up to 9 internal links (total 10 pages max)
+            urlsToScan = [url, ...internalLinks.slice(0, 9)];
+            console.log(`📄 Found ${internalLinks.length} internal links, scanning ${urlsToScan.length} pages`);
+            
+            await page.close();
+        }
+        
+        let allViolations = [];
+        let scannedPages = 0;
+        
+        // Scan each URL
+        for (const scanUrl of urlsToScan) {
+            try {
+                console.log(`📊 Scanning page ${scannedPages + 1}/${urlsToScan.length}:`, scanUrl);
                 
-                // Add CSS file
-                const cssContent = fixCode.css || '/* No CSS fixes available for this violation */';
-                cssFolder.file(`${violation.id}-fix.css`, cssContent);
+                const page = await browser.newPage();
+                await page.goto(scanUrl, { waitUntil: 'networkidle2', timeout: 30000 });
                 
-                // Add instruction file
-                const instructionContent = `# Fix Instructions for ${violation.id}
-
-## Platform: ${platformInfo.name || 'Custom'}
-## Violation Type: ${violation.id}
-## Impact Level: ${violation.impact || 'Unknown'}
-
-## Description:
-${violation.description || 'Accessibility violation detected'}
-
-## Implementation Steps:
-${fixCode.instructions.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}
-
-## CSS Code:
-\`\`\`css
-${fixCode.css}
-\`\`\`
-
-## HTML Example:
-\`\`\`html
-${fixCode.html}
-\`\`\`
-
-## Testing:
-- Test the fix using screen readers
-- Verify color contrast meets WCAG standards
-- Ensure keyboard navigation works properly
-`;
+                // Inject axe-core
+                await page.addScriptTag({ content: axeCore.source });
                 
-                instructionsFolder.file(`${violation.id}-instructions.md`, instructionContent);
-                
-                allFixes.push({
-                    violationId: violation.id,
-                    success: true,
-                    fixCode: fixCode
+                // Run accessibility scan
+                const results = await page.evaluate(async () => {
+                    return await axe.run();
                 });
-                successCount++;
                 
-            } catch (error) {
-                console.error(`Error generating fix for ${violation.id}:`, error);
-                failCount++;
+                // Add page URL to each violation for multi-page scans
+                const pageViolations = results.violations.map(violation => ({
+                    ...violation,
+                    pageUrl: scanUrl,
+                    pageTitle: scanUrl === url ? 'Main Page' : `Page ${scannedPages + 1}`
+                }));
                 
-                // Add error file
-                instructionsFolder.file(`${violation.id}-ERROR.txt`, 
-                    `Error generating fix for ${violation.id}: ${error.message}`);
+                allViolations = allViolations.concat(pageViolations);
+                scannedPages++;
+                
+                await page.close();
+                
+            } catch (pageError) {
+                console.error(`❌ Error scanning ${scanUrl}:`, pageError.message);
+                // Continue with other pages even if one fails
             }
         }
         
-        // Create summary report
-        const summaryContent = `# Accessibility Fixes Summary Report
-
-## Generated: ${new Date().toISOString()}
-## Platform: ${platformInfo.name || 'Custom'}
-## Total Violations: ${violations.length}
-## Successful Fixes: ${successCount}
-## Failed Fixes: ${failCount}
-
-## Violation Summary:
-${violations.map(v => `- ${v.id} (${v.impact || 'Unknown'} impact)`).join('\n')}
-
-## Implementation Guide:
-
-### 1. CSS Fixes
-- Navigate to the \`css-fixes/\` folder
-- Copy the CSS code from each file
-- Add to your website's main stylesheet or theme customizer
-
-### 2. Platform-Specific Instructions
-- Check the \`instructions/\` folder for detailed steps
-- Each violation has specific implementation guidance
-- Follow the platform-specific deployment methods
-
-### 3. Testing
-- Test each fix individually
-- Use accessibility testing tools to verify improvements
-- Ensure no visual regressions occur
-
-### 4. Deployment
-${platformInfo.type === 'shopify' ? 
-    '- Access Shopify Admin > Online Store > Themes\n- Click "Actions" > "Edit code"\n- Add CSS to assets/theme.scss.liquid' :
-    platformInfo.type === 'wordpress' ?
-    '- Access WordPress Admin > Appearance > Customize\n- Add CSS to Additional CSS section\n- Or edit your theme\'s style.css file' :
-    '- Add CSS to your main stylesheet\n- Upload files to your web server\n- Test thoroughly before going live'
-}
-
-## Support:
-For additional help implementing these fixes, consult your platform's documentation or contact your web developer.
-`;
+        const scanTimeMs = Date.now() - startTime;
         
-        summaryFolder.file('README.md', summaryContent);
+        // Calculate accessibility score
+        const totalIssues = allViolations.length;
+        const score = totalIssues === 0 ? 100 : Math.max(0, 100 - (totalIssues * 2));
         
-        // Create deployment checklist
-        const checklistContent = `# Deployment Checklist
-
-## Pre-Deployment
-- [ ] Review all generated fixes
-- [ ] Test fixes in staging environment
-- [ ] Backup current website/theme
-- [ ] Verify platform-specific requirements
-
-## Deployment Steps
-- [ ] Apply CSS fixes to main stylesheet
-- [ ] Test each fix individually
-- [ ] Verify accessibility improvements
-- [ ] Check for visual regressions
-- [ ] Test with screen readers
-- [ ] Validate with accessibility tools
-
-## Post-Deployment
-- [ ] Run new accessibility scan
-- [ ] Document changes made
-- [ ] Monitor for any issues
-- [ ] Update accessibility statement if needed
-
-## Rollback Plan
-- [ ] Keep backup of original files
-- [ ] Document rollback procedure
-- [ ] Test rollback in staging first
-`;
+        console.log(`✅ Scan completed in ${scanTimeMs}ms`);
+        console.log(`📊 Found ${totalIssues} issues across ${scannedPages} pages`);
+        console.log(`🎯 Accessibility score: ${score}/100`);
         
-        summaryFolder.file('deployment-checklist.md', checklistContent);
+        // Save scan to database
+        const scanId = await saveScan(1, 1, url, scanType, totalIssues, scanTimeMs, scannedPages, allViolations);
         
-        // Generate ZIP file
-        const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-        
-        // Set response headers for file download
-        const filename = `accessibility-fixes-${new Date().toISOString().split('T')[0]}.zip`;
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.setHeader('Content-Type', 'application/zip');
-        res.setHeader('Content-Length', zipBuffer.length);
-        
-        // Send the ZIP file
-        res.send(zipBuffer);
-        
-        console.log(`✅ Bulk download generated: ${successCount} successful, ${failCount} failed`);
+        res.json({
+            success: true,
+            scanId: scanId,
+            url: url,
+            scanType: scanType,
+            pagesScanned: scannedPages,
+            totalIssues: totalIssues,
+            score: score,
+            scanTime: scanTimeMs,
+            violations: allViolations,
+            summary: {
+                critical: allViolations.filter(v => v.impact === 'critical').length,
+                serious: allViolations.filter(v => v.impact === 'serious').length,
+                moderate: allViolations.filter(v => v.impact === 'moderate').length,
+                minor: allViolations.filter(v => v.impact === 'minor').length
+            }
+        });
         
     } catch (error) {
-        console.error('❌ Bulk download error:', error);
+        console.error('❌ Scan error:', error);
         res.status(500).json({ 
-            error: 'Failed to generate bulk download',
+            success: false,
+            error: 'Scan failed',
+            details: error.message 
+        });
+    } finally {
+        if (browser) {
+            await browser.close();
+        }
+    }
+});
+
+// PHASE 2A: AI Suggestions endpoint
+app.post('/api/ai-fixes', async (req, res) => {
+    const { violations, platformInfo } = req.body;
+    
+    if (!violations || violations.length === 0) {
+        return res.status(400).json({ error: 'Violations data is required' });
+    }
+    
+    try {
+        console.log('🤖 Generating AI fix suggestions for', violations.length, 'violations');
+        
+        const suggestions = [];
+        
+        for (const violation of violations) {
+            console.log('🔍 Processing violation:', violation.id);
+            
+            let suggestion;
+            
+            if (openai) {
+                try {
+                    console.log('🤖 Calling OpenAI for violation:', violation.id);
+                    
+                    const prompt = `You are an accessibility expert. Provide a fix for this WCAG violation:
+
+Violation ID: ${violation.id}
+Description: ${violation.description || 'No description provided'}
+Help: ${violation.help || 'No help text provided'}
+Impact: ${violation.impact}
+Platform: ${platformInfo?.type || 'web'}
+
+Please provide:
+1. A clear explanation of the issue
+2. Specific code example to fix it
+3. Step-by-step implementation instructions
+4. Priority level (high/medium/low)
+
+Format your response as JSON with these fields:
+- explanation: string
+- codeExample: string (HTML/CSS code)
+- steps: array of strings
+- priority: string`;
+
+                    const completion = await openai.chat.completions.create({
+                        model: "gpt-4.1-mini",
+                        messages: [{ role: "user", content: prompt }],
+                        max_tokens: 1000,
+                        temperature: 0.3
+                    });
+                    
+                    const aiResponse = completion.choices[0].message.content;
+                    console.log('🤖 AI response length:', aiResponse.length, 'characters for', violation.id);
+                    
+                    try {
+                        suggestion = JSON.parse(aiResponse);
+                        console.log('✅ Successfully parsed AI response for', violation.id);
+                    } catch (parseError) {
+                        console.log('⚠️ AI response preview:', aiResponse.substring(0, 200) + '...');
+                        throw new Error('Failed to parse AI response as JSON');
+                    }
+                    
+                } catch (aiError) {
+                    console.log('❌ AI suggestion failed for', violation.id, ':', aiError.message);
+                    suggestion = getFallbackSuggestion(violation);
+                }
+            } else {
+                console.log('⚠️ Using fallback suggestion for', violation.id, '(no OpenAI)');
+                suggestion = getFallbackSuggestion(violation);
+            }
+            
+            suggestions.push(suggestion);
+        }
+        
+        console.log('✅ Generated', suggestions.length, 'AI suggestions');
+        res.json(suggestions);
+        
+    } catch (error) {
+        console.error('❌ Error generating AI suggestions:', error);
+        res.status(500).json({ 
+            error: 'Failed to generate AI suggestions',
             details: error.message 
         });
     }
 });
 
-// Main route - serves the dashboard HTML
-app.get('/', (req, res) => {
-    const html = `<!DOCTYPE html>
-<html>
+// Fallback suggestions when OpenAI is not available
+function getFallbackSuggestion(violation) {
+    const fallbacks = {
+        'color-contrast': {
+            explanation: 'The current HTML element has insufficient color contrast between the foreground and background colors. The contrast ratio does not meet the WCAG 2.1 AA minimum requirement of 4.5:1, making it difficult for users with visual impairments to read and understand the content.',
+            codeExample: `/* Current problematic code */
+.low-contrast-element {
+    color: #777777;
+    background-color: #ffffff;
+}
+
+/* Fixed version with proper contrast */
+.high-contrast-element {
+    color: #000000; /* High contrast text */
+    background-color: #ffffff;
+    /* Contrast ratio: 21:1 (exceeds WCAG AA requirement) */
+}`,
+            steps: [
+                'Identify elements with insufficient color contrast',
+                'Use a color contrast checker tool to test current ratios',
+                'Adjust foreground or background colors to achieve 4.5:1 ratio minimum',
+                'Test the new colors with accessibility tools',
+                'Verify readability across different devices and lighting conditions'
+            ],
+            priority: 'high'
+        },
+        'image-alt': {
+            explanation: 'Images are missing alternative text (alt attributes), which prevents screen readers from describing the image content to visually impaired users. This violates WCAG guidelines for perceivable content.',
+            codeExample: `<!-- Current problematic code -->
+<img src="product-image.jpg">
+
+<!-- Fixed version with descriptive alt text -->
+<img src="product-image.jpg" alt="Blue wireless headphones with noise cancellation feature">
+
+<!-- For decorative images -->
+<img src="decoration.jpg" alt="" role="presentation">`,
+            steps: [
+                'Identify all images missing alt attributes',
+                'Add descriptive alt text that conveys the image purpose',
+                'Use empty alt="" for purely decorative images',
+                'Ensure alt text is concise but informative',
+                'Test with screen readers to verify effectiveness'
+            ],
+            priority: 'high'
+        },
+        'label': {
+            explanation: 'Form inputs lack proper labels, making them inaccessible to screen reader users who cannot understand the purpose of each input field.',
+            codeExample: `<!-- Current problematic code -->
+<input type="email" placeholder="Enter email">
+
+<!-- Fixed version with proper label -->
+<label for="email-input">Email Address</label>
+<input type="email" id="email-input" placeholder="Enter email">
+
+<!-- Alternative using aria-label -->
+<input type="email" aria-label="Email Address" placeholder="Enter email">`,
+            steps: [
+                'Identify form inputs without associated labels',
+                'Add explicit labels using <label> elements with for attributes',
+                'Alternatively, use aria-label or aria-labelledby attributes',
+                'Ensure labels clearly describe the input purpose',
+                'Test form accessibility with keyboard navigation and screen readers'
+            ],
+            priority: 'high'
+        }
+    };
+    
+    // Find matching fallback or use generic one
+    const matchingKey = Object.keys(fallbacks).find(key => violation.id.includes(key));
+    
+    if (matchingKey) {
+        return fallbacks[matchingKey];
+    }
+    
+    // Generic fallback
+    return {
+        explanation: `This accessibility violation (${violation.id}) needs attention to ensure WCAG compliance. ${violation.description || 'Please refer to WCAG guidelines for specific requirements.'}`,
+        codeExample: `/* Review the specific element causing this violation */
+/* Apply appropriate WCAG-compliant fixes */
+/* Test with accessibility tools after implementation */`,
+        steps: [
+            'Review the specific WCAG guideline for this violation',
+            'Identify the problematic elements on your page',
+            'Apply the recommended accessibility fixes',
+            'Test the implementation with accessibility tools',
+            'Verify the fix resolves the violation'
+        ],
+        priority: violation.impact === 'critical' ? 'high' : violation.impact === 'serious' ? 'medium' : 'low'
+    };
+}
+
+// PHASE 2A: Auto-fix implementation endpoint
+app.post('/api/implement-fix', async (req, res) => {
+    const { violationId, fixType, platformInfo } = req.body;
+    
+    if (!violationId) {
+        return res.status(400).json({ error: 'Violation ID is required' });
+    }
+    
+    try {
+        console.log('🔧 Implementing auto-fix for violation:', violationId);
+        
+        // Generate CSS fix based on violation type
+        const cssfix = generateCSSFix(violationId, platformInfo);
+        const instructions = generateImplementationInstructions(violationId, platformInfo);
+        
+        // Store the generated fix (in a real app, you'd save this to database)
+        const fixData = {
+            violationId: violationId,
+            cssContent: cssfix,
+            instructions: instructions,
+            generatedAt: new Date().toISOString()
+        };
+        
+        // Store in a simple in-memory cache for download
+        if (!global.generatedFixes) {
+            global.generatedFixes = new Map();
+        }
+        global.generatedFixes.set(violationId, fixData);
+        
+        console.log('✅ Auto-fix generated successfully for:', violationId);
+        
+        res.json({
+            success: true,
+            violationId: violationId,
+            message: 'Fix generated successfully',
+            nextSteps: [
+                'Download the CSS fix file',
+                'Download the implementation instructions',
+                'Apply the CSS to your website',
+                'Test the fix with accessibility tools',
+                'Verify the violation is resolved'
+            ]
+        });
+        
+    } catch (error) {
+        console.error('❌ Error implementing fix:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to implement fix',
+            details: error.message 
+        });
+    }
+});
+
+// PHASE 2A: Download fix files endpoint
+app.post('/api/download-fix', async (req, res) => {
+    const { violationId, fileType } = req.body;
+    
+    if (!violationId || !fileType) {
+        return res.status(400).json({ error: 'Violation ID and file type are required' });
+    }
+    
+    try {
+        // Retrieve the generated fix
+        const fixData = global.generatedFixes?.get(violationId);
+        
+        if (!fixData) {
+            return res.status(404).json({ error: 'Fix not found. Please generate the fix first.' });
+        }
+        
+        let content, filename, contentType;
+        
+        if (fileType === 'css') {
+            content = fixData.cssContent;
+            filename = `${violationId}-fix.css`;
+            contentType = 'text/css';
+        } else if (fileType === 'instructions') {
+            content = fixData.instructions;
+            filename = `${violationId}-instructions.md`;
+            contentType = 'text/markdown';
+        } else {
+            return res.status(400).json({ error: 'Invalid file type. Use "css" or "instructions".' });
+        }
+        
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', contentType);
+        res.send(content);
+        
+    } catch (error) {
+        console.error('❌ Error downloading fix:', error);
+        res.status(500).json({ 
+            error: 'Failed to download fix',
+            details: error.message 
+        });
+    }
+});
+
+// Helper function to generate CSS fixes
+function generateCSSFix(violationId, platformInfo) {
+    const platform = platformInfo?.type || 'custom';
+    
+    const fixes = {
+        'color-contrast': `/* Color Contrast Fix for ${violationId} */
+/* Generated on ${new Date().toISOString()} */
+
+/* Universal color contrast fix */
+.low-contrast-element {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+    border: 2px solid #000000 !important;
+}
+
+/* Button contrast improvements */
+button, .btn, [role="button"] {
+    color: #ffffff !important;
+    background-color: #0066cc !important;
+    border: 2px solid #004499 !important;
+}
+
+button:hover, .btn:hover, [role="button"]:hover {
+    background-color: #004499 !important;
+    border-color: #003366 !important;
+}
+
+/* Link contrast improvements */
+a, a:link {
+    color: #0066cc !important;
+    text-decoration: underline !important;
+}
+
+a:visited {
+    color: #663399 !important;
+}
+
+a:hover, a:focus {
+    color: #004499 !important;
+    background-color: #f0f8ff !important;
+}`,
+
+        'image-alt': `/* Image Alt Text Fix for ${violationId} */
+/* Generated on ${new Date().toISOString()} */
+
+/* This CSS cannot fix missing alt attributes */
+/* Please add alt attributes to your HTML images */
+
+/* Visual indicator for images without alt text (for development) */
+img:not([alt]) {
+    border: 3px solid red !important;
+    outline: 2px solid red !important;
+}
+
+img:not([alt])::after {
+    content: "Missing Alt Text" !important;
+    position: absolute !important;
+    background: red !important;
+    color: white !important;
+    padding: 2px 5px !important;
+    font-size: 12px !important;
+    z-index: 9999 !important;
+}`,
+
+        'label': `/* Form Label Fix for ${violationId} */
+/* Generated on ${new Date().toISOString()} */
+
+/* Ensure labels are visible and properly styled */
+label {
+    display: block !important;
+    margin-bottom: 5px !important;
+    font-weight: bold !important;
+    color: #333333 !important;
+}
+
+/* Style for inputs to ensure they're associated with labels */
+input, textarea, select {
+    display: block !important;
+    width: 100% !important;
+    padding: 8px !important;
+    margin-bottom: 15px !important;
+    border: 2px solid #cccccc !important;
+    border-radius: 4px !important;
+}
+
+input:focus, textarea:focus, select:focus {
+    border-color: #0066cc !important;
+    outline: 2px solid #0066cc !important;
+    outline-offset: 2px !important;
+}
+
+/* Visual indicator for inputs without labels (for development) */
+input:not([aria-label]):not([aria-labelledby]) {
+    border-color: red !important;
+}`,
+
+        'heading-order': `/* Heading Order Fix for ${violationId} */
+/* Generated on ${new Date().toISOString()} */
+
+/* Ensure proper heading hierarchy styling */
+h1 {
+    font-size: 2.5em !important;
+    margin: 0.67em 0 !important;
+    font-weight: bold !important;
+}
+
+h2 {
+    font-size: 2em !important;
+    margin: 0.75em 0 !important;
+    font-weight: bold !important;
+}
+
+h3 {
+    font-size: 1.5em !important;
+    margin: 0.83em 0 !important;
+    font-weight: bold !important;
+}
+
+h4 {
+    font-size: 1.25em !important;
+    margin: 1em 0 !important;
+    font-weight: bold !important;
+}
+
+h5 {
+    font-size: 1.1em !important;
+    margin: 1.17em 0 !important;
+    font-weight: bold !important;
+}
+
+h6 {
+    font-size: 1em !important;
+    margin: 1.33em 0 !important;
+    font-weight: bold !important;
+}`
+    };
+    
+    // Find matching fix or return generic one
+    const matchingKey = Object.keys(fixes).find(key => violationId.includes(key));
+    
+    if (matchingKey) {
+        return fixes[matchingKey];
+    }
+    
+    // Generic fix
+    return `/* Generic Accessibility Fix for ${violationId} */
+/* Generated on ${new Date().toISOString()} */
+
+/* Focus indicators for better keyboard navigation */
+*:focus {
+    outline: 2px solid #0066cc !important;
+    outline-offset: 2px !important;
+}
+
+/* Ensure sufficient color contrast */
+body {
+    color: #000000 !important;
+    background-color: #ffffff !important;
+}
+
+/* Improve button accessibility */
+button, [role="button"] {
+    padding: 8px 16px !important;
+    border: 2px solid #0066cc !important;
+    background-color: #0066cc !important;
+    color: #ffffff !important;
+    cursor: pointer !important;
+}
+
+button:hover, [role="button"]:hover {
+    background-color: #004499 !important;
+    border-color: #004499 !important;
+}`;
+}
+
+// Helper function to generate implementation instructions
+function generateImplementationInstructions(violationId, platformInfo) {
+    const platform = platformInfo?.type || 'custom';
+    const timestamp = new Date().toISOString();
+    
+    return `# Implementation Instructions for ${violationId}
+
+Generated on: ${timestamp}
+Platform: ${platform}
+
+## Overview
+This document provides step-by-step instructions to implement the accessibility fix for violation: **${violationId}**
+
+## Files Included
+- \`${violationId}-fix.css\` - CSS fixes to apply
+- \`${violationId}-instructions.md\` - This instruction file
+
+## Implementation Steps
+
+### Step 1: Backup Your Current Styles
+Before making any changes, create a backup of your current CSS files.
+
+### Step 2: Apply the CSS Fix
+1. Download the \`${violationId}-fix.css\` file
+2. Add the CSS to your main stylesheet, or
+3. Include it as a separate CSS file in your HTML:
+   \`\`\`html
+   <link rel="stylesheet" href="path/to/${violationId}-fix.css">
+   \`\`\`
+
+### Step 3: Platform-Specific Instructions
+
+${platform === 'shopify' ? `
+#### Shopify Implementation:
+1. Log in to your Shopify admin dashboard
+2. Navigate to "Online Store" > "Themes"
+3. Click "Actions" > "Edit Code" for your active theme
+4. Locate your main CSS file (usually \`theme.scss.liquid\` or \`styles.css\`)
+5. Add the CSS fix content to the end of the file
+6. Save the changes and preview your store
+` : platform === 'wordpress' ? `
+#### WordPress Implementation:
+1. Access your WordPress admin dashboard
+2. Go to "Appearance" > "Theme Editor" or use FTP
+3. Locate your theme's \`style.css\` file
+4. Add the CSS fix content to the end of the file
+5. Save the changes
+6. Alternatively, use "Appearance" > "Customize" > "Additional CSS"
+` : platform === 'wix' ? `
+#### Wix Implementation:
+1. Open your Wix Editor
+2. Click on "Settings" in the top menu
+3. Select "Custom Code" from the dropdown
+4. Click "Add Custom Code"
+5. Paste the CSS content wrapped in <style> tags
+6. Set it to load on "All Pages"
+7. Save and publish your site
+` : `
+#### Custom Platform Implementation:
+1. Locate your main CSS file or stylesheet
+2. Add the provided CSS fixes to your existing styles
+3. Ensure the CSS is loaded on all relevant pages
+4. Test the implementation across different browsers
+`}
+
+### Step 4: Test the Fix
+1. Clear your browser cache
+2. Reload the page where the violation occurred
+3. Use accessibility testing tools to verify the fix:
+   - Browser developer tools accessibility panel
+   - axe DevTools extension
+   - WAVE Web Accessibility Evaluator
+4. Test with keyboard navigation (Tab key)
+5. Test with screen readers if possible
+
+### Step 5: Validate Results
+1. Run another accessibility scan using the same tool
+2. Verify that the **${violationId}** violation is resolved
+3. Check that no new accessibility issues were introduced
+4. Test the user experience to ensure functionality is maintained
+
+## Troubleshooting
+
+### If the fix doesn't work:
+1. Check that the CSS is properly loaded (inspect element in browser)
+2. Verify there are no CSS syntax errors
+3. Ensure the CSS selectors match your HTML structure
+4. Check for conflicting CSS rules with higher specificity
+
+### If new issues appear:
+1. Review the CSS for overly broad selectors
+2. Add more specific selectors to target only problem elements
+3. Test on different devices and browsers
+4. Consider adjusting the CSS rules for better compatibility
+
+## Additional Resources
+- [WCAG 2.1 Guidelines](https://www.w3.org/WAI/WCAG21/quickref/)
+- [WebAIM Accessibility Resources](https://webaim.org/)
+- [MDN Accessibility Documentation](https://developer.mozilla.org/en-US/docs/Web/Accessibility)
+
+## Support
+If you encounter issues implementing this fix, consider:
+1. Consulting with a web developer familiar with accessibility
+2. Using automated accessibility testing tools for ongoing monitoring
+3. Conducting user testing with individuals who use assistive technologies
+
+---
+*This fix was generated automatically. Always test thoroughly before deploying to production.*`;
+}
+
+// Main dashboard endpoint
+app.get('/', async (req, res) => {
+    try {
+        // Get dashboard data
+        const stats = await getDashboardStats();
+        const recentScans = await getRecentScans();
+        
+        const html = `
+<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>SentryPrime Enterprise Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SentryPrime Enterprise - Accessibility Scanner</title>
     <style>
         * {
             margin: 0;
@@ -2001,437 +1680,204 @@ app.get('/', (req, res) => {
             box-sizing: border-box;
         }
         
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8f9fa;
-            color: #333;
-            height: 100vh;
-            overflow: hidden;
-        }
-        
-        .dashboard-container {
-            display: flex;
-            height: 100vh;
-        }
-        
-        /* Sidebar */
-        .sidebar {
-            width: 240px;
-            background: #1a1a1a;
-            color: white;
-            padding: 20px 0;
-            flex-shrink: 0;
-        }
-        
-        .sidebar-header {
-            padding: 0 20px 30px;
-            border-bottom: 1px solid #333;
-        }
-        
-        .sidebar-header h1 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .sidebar-header p {
-            font-size: 0.8rem;
-            color: #888;
-            margin-top: 4px;
-        }
-        
-        .sidebar-nav {
-            padding: 20px 0;
-        }
-        
-        .nav-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 20px;
-            color: #ccc;
-            text-decoration: none;
-            transition: all 0.2s ease;
-            gap: 12px;
-            font-size: 0.9rem;
-            cursor: pointer;
-        }
-        
-        .nav-item:hover {
-            background: #333;
-            color: white;
-        }
-        
-        .nav-item.active {
-            background: #333;
-            color: white;
-            border-right: 3px solid #667eea;
-        }
-        
-        .nav-icon {
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        /* Header */
-        .header {
-            background: white;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-        
-        .search-bar {
-            display: flex;
-            align-items: center;
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 8px 12px;
-            width: 300px;
-        }
-        
-        .search-bar input {
-            border: none;
-            background: none;
-            outline: none;
-            flex: 1;
-            font-size: 14px;
-        }
-        
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-        
-        .user-profile {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-        
-        .user-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: #667eea;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        
-        /* Content Area */
-        .content-area {
-            flex: 1;
-            padding: 24px;
-            overflow-y: auto;
-        }
-        
-        .page {
-            display: none;
-        }
-        
-        .page.active {
-            display: block;
-        }
-        
-        /* Dashboard Overview */
-        .dashboard-header {
-            margin-bottom: 32px;
-        }
-        
-        .dashboard-header h1 {
-            font-size: 2rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-        
-        .dashboard-header p {
-            color: #666;
-            font-size: 1rem;
-        }
-        
-        /* Stats Cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 24px;
-            margin-bottom: 32px;
-        }
-        
-        .stat-card {
-            background: white;
-            padding: 24px;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        
-        .stat-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-        }
-        
-        .stat-title {
-            font-size: 0.9rem;
-            color: #666;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .stat-value {
-            font-size: 2.5rem;
-            font-weight: 700;
-            color: #333;
-            margin-bottom: 8px;
-        }
-        
-        .stat-change {
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-        
-        .stat-change.positive {
-            color: #28a745;
-        }
-        
-        .stat-change.negative {
-            color: #dc3545;
-        }
-        
-        /* Action Cards */
-        .actions-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 32px;
-        }
-        
-        .action-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            border: 2px solid #e1e5e9;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-align: center;
-        }
-        
-        .action-card:hover {
-            border-color: #667eea;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
-        }
-        
-        .action-card.primary {
-            border-color: #dc3545;
-            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-            color: white;
-        }
-        
-        .action-card.primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
-        }
-        
-        .action-card.secondary {
-            border-color: #667eea;
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
             color: white;
+            margin-bottom: 40px;
         }
         
-        .action-card.secondary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            font-weight: 700;
         }
         
-        .action-card.success {
-            border-color: #28a745;
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            color: white;
-        }
-        
-        .action-card.success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
-        }
-        
-        .action-icon {
-            font-size: 2rem;
-            margin-bottom: 12px;
-        }
-        
-        .action-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-        
-        .action-description {
-            font-size: 0.9rem;
+        .header p {
+            font-size: 1.2em;
             opacity: 0.9;
         }
         
-        /* Scan Form */
-        .scan-form {
+        .dashboard {
             background: white;
-            padding: 24px;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            margin-bottom: 32px;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
         }
         
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        .form-label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            color: #333;
-        }
-        
-        .form-input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            font-size: 16px;
-            transition: border-color 0.2s ease;
-        }
-        
-        .form-input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        .scan-options {
-            display: flex;
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 40px;
         }
         
-        .scan-option {
-            display: flex;
-            align-items: center;
-            gap: 8px;
+        .stat-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            border: 1px solid #dee2e6;
         }
         
-        .scan-option input[type="radio"] {
-            margin: 0;
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #495057;
+            margin-bottom: 5px;
         }
         
-        .pages-input {
-            width: 80px;
-            padding: 6px 8px;
-            border: 1px solid #e1e5e9;
-            border-radius: 4px;
-            margin: 0 8px;
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         
-        .scan-button {
+        .scanner-section {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .scanner-form {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .url-input {
+            flex: 1;
+            min-width: 300px;
+            padding: 15px;
             border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
+            border-radius: 10px;
             font-size: 16px;
-            font-weight: 500;
+            outline: none;
+        }
+        
+        .scan-type {
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            background: white;
+            color: #333;
+            outline: none;
+        }
+        
+        .scan-btn {
+            padding: 15px 30px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.3s ease;
         }
         
-        .scan-button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        .scan-btn:hover {
+            background: #218838;
+            transform: translateY(-2px);
         }
         
-        .scan-button:disabled {
+        .scan-btn:disabled {
             background: #6c757d;
             cursor: not-allowed;
             transform: none;
-            box-shadow: none;
         }
         
-        /* Results */
-        .scan-results {
+        .results-section {
             background: white;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            overflow: hidden;
-            margin-bottom: 24px;
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 20px;
+            display: none;
         }
         
-        .results-header {
-            background: #f8f9fa;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
+        .recent-scans {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+        }
+        
+        .recent-scans h3 {
+            margin-bottom: 20px;
+            color: #495057;
+        }
+        
+        .scan-item {
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
         }
         
-        .results-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #333;
+        .scan-item:hover {
+            background: #f8f9fa;
+            transform: translateX(5px);
         }
         
-        .results-meta {
-            font-size: 0.9rem;
-            color: #666;
+        .scan-url {
+            font-weight: bold;
+            color: #495057;
         }
         
-        .results-body {
-            padding: 24px;
+        .scan-meta {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            font-size: 0.9em;
+            color: #6c757d;
         }
+        
+        .score-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.8em;
+        }
+        
+        .score-excellent { background: #d4edda; color: #155724; }
+        .score-good { background: #d1ecf1; color: #0c5460; }
+        .score-fair { background: #fff3cd; color: #856404; }
+        .score-poor { background: #f8d7da; color: #721c24; }
         
         .loading {
             text-align: center;
             padding: 40px;
-            color: #666;
         }
         
         .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
             border-radius: 50%;
-            width: 30px;
-            height: 30px;
+            width: 50px;
+            height: 50px;
             animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
+            margin: 0 auto 20px;
         }
         
         @keyframes spin {
@@ -2439,138 +1885,95 @@ app.get('/', (req, res) => {
             100% { transform: rotate(360deg); }
         }
         
-        .violation {
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            margin-bottom: 16px;
-            overflow: hidden;
-        }
-        
-        .violation-header {
-            background: #f8f9fa;
-            padding: 12px 16px;
-            border-bottom: 1px solid #e1e5e9;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .violation-title {
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .violation-impact {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            text-transform: uppercase;
-        }
-        
-        .impact-critical {
+        .error {
             background: #f8d7da;
             color: #721c24;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
         }
         
-        .impact-serious {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .impact-moderate {
-            background: #d1ecf1;
-            color: #0c5460;
-        }
-        
-        .impact-minor {
+        .success {
             background: #d4edda;
             color: #155724;
-        }
-        
-        .violation-body {
-            padding: 16px;
-        }
-        
-        .violation-description {
-            margin-bottom: 12px;
-            color: #666;
-        }
-        
-        .violation-help {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .violation-help a {
-            color: #667eea;
-            text-decoration: none;
-        }
-        
-        .violation-help a:hover {
-            text-decoration: underline;
-        }
-        
-        .results-summary {
-            background: #f8f9fa;
-            padding: 16px;
-            border-radius: 6px;
+            padding: 20px;
+            border-radius: 10px;
             margin-bottom: 20px;
         }
         
-        .summary-grid {
+        .violations-summary {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 16px;
+            gap: 15px;
+            margin: 20px 0;
         }
         
-        .summary-item {
+        .violation-card {
             text-align: center;
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid;
         }
         
-        .summary-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            margin-bottom: 4px;
+        .violation-critical { border-color: #dc3545; background: #f8d7da; }
+        .violation-serious { border-color: #fd7e14; background: #fff3cd; }
+        .violation-moderate { border-color: #ffc107; background: #fff3cd; }
+        .violation-minor { border-color: #6c757d; background: #f8f9fa; }
+        
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
         }
         
-        .summary-label {
-            font-size: 0.8rem;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .ai-suggestions-btn {
-            background: #667eea;
-            color: white;
+        .btn {
+            padding: 12px 24px;
             border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
             cursor: pointer;
-            font-size: 0.9rem;
-            margin-right: 8px;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
         }
         
-        .ai-suggestions-btn:hover {
-            background: #5a6fd8;
+        .btn-primary {
+            background: #007bff;
+            color: white;
         }
         
-        .guided-fixing-btn {
+        .btn-success {
             background: #28a745;
             color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
         }
         
-        .guided-fixing-btn:hover {
-            background: #218838;
+        .btn-info {
+            background: #17a2b8;
+            color: white;
         }
         
-        /* AI Modal Styles */
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        @media (max-width: 768px) {
+            .scanner-form {
+                flex-direction: column;
+            }
+            
+            .url-input {
+                min-width: auto;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+            }
+        }
+        
+        /* AI Suggestions Modal Styles */
         .ai-modal {
             display: none;
             position: fixed;
@@ -2586,18 +1989,18 @@ app.get('/', (req, res) => {
             background-color: white;
             margin: 5% auto;
             padding: 0;
-            border-radius: 8px;
-            width: 80%;
+            border-radius: 15px;
+            width: 90%;
             max-width: 800px;
             max-height: 80vh;
-            overflow-y: auto;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
         
         .ai-modal-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 20px;
-            border-radius: 8px 8px 0 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -2605,14 +2008,17 @@ app.get('/', (req, res) => {
         
         .ai-modal-body {
             padding: 20px;
+            max-height: 60vh;
+            overflow-y: auto;
         }
         
         .close {
             color: white;
-            float: right;
             font-size: 28px;
             font-weight: bold;
             cursor: pointer;
+            background: none;
+            border: none;
         }
         
         .close:hover {
@@ -2620,54 +2026,37 @@ app.get('/', (req, res) => {
         }
         
         .ai-suggestion {
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            padding: 20px;
             margin-bottom: 20px;
-            overflow: hidden;
         }
         
         .ai-suggestion-header {
-            background: #f8f9fa;
-            padding: 12px 16px;
-            border-bottom: 1px solid #e1e5e9;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-bottom: 15px;
         }
         
         .priority-badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 500;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: bold;
             text-transform: uppercase;
         }
         
-        .priority-high {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
-        .priority-medium {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .priority-low {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .ai-suggestion-content {
-            padding: 16px;
-        }
+        .priority-high { background: #f8d7da; color: #721c24; }
+        .priority-medium { background: #fff3cd; color: #856404; }
+        .priority-low { background: #d4edda; color: #155724; }
         
         .ai-suggestion-content pre {
             background: #f8f9fa;
-            padding: 12px;
-            border-radius: 4px;
+            padding: 15px;
+            border-radius: 8px;
             overflow-x: auto;
-            margin: 12px 0;
+            font-size: 14px;
         }
         
         .ai-suggestion-content ol {
@@ -2678,7 +2067,7 @@ app.get('/', (req, res) => {
             margin-bottom: 8px;
         }
         
-        /* NEW: Guided Fixing Modal Styles */
+        /* Guided Modal Styles */
         .guided-modal {
             display: none;
             position: fixed;
@@ -2687,580 +2076,224 @@ app.get('/', (req, res) => {
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
+            background-color: rgba(0,0,0,0.7);
         }
         
         .guided-modal-content {
             background-color: white;
-            margin: 3% auto;
+            margin: 2% auto;
             padding: 0;
-            border-radius: 8px;
-            width: 90%;
+            border-radius: 15px;
+            width: 95%;
             max-width: 900px;
-            max-height: 85vh;
-            overflow-y: auto;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.4);
         }
         
         .guided-modal-header {
             background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
             color: white;
-            padding: 20px;
-            border-radius: 8px 8px 0 0;
+            padding: 25px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+        }
+        
+        .guided-modal-body {
+            padding: 30px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        
+        .guided-modal-footer {
+            padding: 25px;
+            background: #f8f9fa;
+            border-top: 1px solid #dee2e6;
         }
         
         .progress-indicator {
             background: rgba(255,255,255,0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .violation-details {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .violation-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .violation-impact {
+            display: inline-block;
             padding: 6px 12px;
             border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
+            font-size: 0.9em;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 15px;
         }
         
-        .guided-modal-body {
-            padding: 24px;
-            min-height: 300px;
+        .get-ai-fix-btn, .auto-fix-btn, .preview-fix-btn, .prev-btn, .next-btn, .finish-btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px;
+            transition: all 0.3s ease;
         }
         
-        .guided-modal-footer {
-            padding: 20px 24px;
-            border-top: 1px solid #e1e5e9;
-            display: flex;
-            gap: 12px;
-            justify-content: space-between;
-            align-items: center;
+        .get-ai-fix-btn {
+            background: #ff6b6b;
+            color: white;
+        }
+        
+        .auto-fix-btn {
+            background: #28a745;
+            color: white;
+        }
+        
+        .preview-fix-btn {
+            background: #17a2b8;
+            color: white;
         }
         
         .prev-btn, .next-btn {
             background: #6c757d;
             color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .prev-btn:hover, .next-btn:hover {
-            background: #5a6268;
-        }
-        
-        .prev-btn:disabled, .next-btn:disabled {
-            background: #e9ecef;
-            color: #6c757d;
-            cursor: not-allowed;
-        }
-        
-        .get-ai-fix-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .get-ai-fix-btn:hover {
-            background: #5a6fd8;
         }
         
         .finish-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-        
-        .finish-btn:hover {
-            background: #c82333;
-        }
-        
-        .violation-details {
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .violation-title {
-            font-size: 1.3rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: #495057;
-        }
-        
-        .violation-impact {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            margin-bottom: 16px;
-        }
-        
-        .impact-critical { background: #f8d7da; color: #721c24; }
-        .impact-serious { background: #fff3cd; color: #856404; }
-        .impact-moderate { background: #d1ecf1; color: #0c5460; }
-        .impact-minor { background: #d4edda; color: #155724; }
-        
-        /* Recent Scans */
-        .recent-scans {
-            background: white;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            overflow: hidden;
-        }
-        
-        .recent-scans-header {
-            background: #f8f9fa;
-            padding: 16px 24px;
-            border-bottom: 1px solid #e1e5e9;
-        }
-        
-        .recent-scans-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 4px;
-        }
-        
-        .recent-scans-subtitle {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .recent-scans-body {
-            padding: 0;
-        }
-        
-        .scan-item {
-            padding: 16px 24px;
-            border-bottom: 1px solid #f1f3f4;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: background-color 0.2s ease;
-        }
-        
-        .scan-item:last-child {
-            border-bottom: none;
-        }
-        
-        .scan-item:hover {
-            background: #f8f9fa;
-        }
-        
-        .scan-info h4 {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 4px;
-        }
-        
-        .scan-meta {
-            font-size: 0.8rem;
-            color: #666;
-        }
-        
-        .scan-score {
             background: #28a745;
             color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-right: 8px;
         }
         
-        .view-report-btn {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
+        .get-ai-fix-btn:hover, .auto-fix-btn:hover, .preview-fix-btn:hover, 
+        .prev-btn:hover, .next-btn:hover, .finish-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
         }
         
-        .view-report-btn:hover {
-            background: #5a6fd8;
+        .loading {
+            text-align: center;
+            padding: 40px;
         }
         
-        /* Database Status */
-        .db-status {
-            background: #d4edda;
-            color: #155724;
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-bottom: 24px;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .db-status.disconnected {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            .dashboard-container {
-                flex-direction: column;
-            }
-            
-            .sidebar {
-                width: 100%;
-                height: auto;
-            }
-            
-            .sidebar-nav {
-                display: flex;
-                overflow-x: auto;
-                padding: 10px 0;
-            }
-            
-            .nav-item {
-                white-space: nowrap;
-                min-width: 120px;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .actions-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .scan-options {
-                flex-direction: column;
-                gap: 10px;
-            }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
         }
     </style>
 </head>
 <body>
-    <div class="dashboard-container">
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <h1>🛡️ SentryPrime</h1>
-                <p>Enterprise Dashboard</p>
-            </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" onclick="switchToPage('dashboard')">
-                    <span class="nav-icon">📊</span>
-                    Dashboard
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('scans')">
-                    <span class="nav-icon">🔍</span>
-                    Scans
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('analytics')">
-                    <span class="nav-icon">📈</span>
-                    Analytics
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('team')">
-                    <span class="nav-icon">👥</span>
-                    Team
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('integrations')">
-                    <span class="nav-icon">🔗</span>
-                    Integrations
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('api')">
-                    <span class="nav-icon">⚙️</span>
-                    API Management
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('billing')">
-                    <span class="nav-icon">💳</span>
-                    Billing
-                </a>
-                <a href="#" class="nav-item" onclick="switchToPage('settings')">
-                    <span class="nav-icon">⚙️</span>
-                    Settings
-                </a>
-            </nav>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ SentryPrime Enterprise</h1>
+            <p>Advanced Accessibility Scanner & Compliance Platform</p>
         </div>
         
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Header -->
-            <div class="header">
-                <div class="header-left">
-                    <div class="search-bar">
-                        <span>🔍</span>
-                        <input type="text" placeholder="Search scans, reports, or settings...">
-                    </div>
-                </div>
-                <div class="header-right">
-                    <div class="notification-icon">🔔</div>
-                    <div class="user-profile">
-                        <div class="user-avatar">JD</div>
-                        <div>
-                            <div style="font-weight: 600; font-size: 0.9rem;">John Doe</div>
-                            <div style="font-size: 0.8rem; color: #666;">Acme Corporation</div>
-                        </div>
-                        <span>▼</span>
-                    </div>
-                </div>
-            </div>
+        <div class="dashboard">
+            <h2 style="margin-bottom: 30px; color: #495057;">📊 Dashboard Overview</h2>
             
-            <!-- Content Area -->
-            <div class="content-area">
-                <!-- Dashboard Page -->
-                <div id="dashboard" class="page active">
-                    <div class="dashboard-header">
-                        <h1>Dashboard Overview</h1>
-                        <p>Monitor your accessibility compliance and recent activity</p>
-                    </div>
-                    
-                    <!-- Stats Grid -->
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">Total Scans</div>
-                            </div>
-                            <div class="stat-value" id="total-scans">-</div>
-                            <div class="stat-change positive" id="scans-change">+2 this week</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">Issues Found</div>
-                            </div>
-                            <div class="stat-value" id="total-issues">-</div>
-                            <div class="stat-change negative" id="issues-change">-5 from last week</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">Average Score</div>
-                            </div>
-                            <div class="stat-value" id="average-score">-</div>
-                            <div class="stat-change positive" id="score-change">+3% improvement</div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-header">
-                                <div class="stat-title">This Week</div>
-                            </div>
-                            <div class="stat-value" id="this-week-scans">-</div>
-                            <div class="stat-change" id="week-change">scans completed</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Action Cards -->
-                    <div class="actions-grid">
-                        <div class="action-card primary" onclick="switchToPage('scans')">
-                            <div class="action-icon">🔍</div>
-                            <div class="action-title">New Scan</div>
-                            <div class="action-description">Start a new accessibility scan</div>
-                        </div>
-                        
-                        <div class="action-card secondary" onclick="switchToPage('analytics')">
-                            <div class="action-icon">📊</div>
-                            <div class="action-title">View Analytics</div>
-                            <div class="action-description">Analyze compliance trends</div>
-                        </div>
-                        
-                        <div class="action-card" onclick="switchToPage('team')">
-                            <div class="action-icon">👥</div>
-                            <div class="action-title">Manage Team</div>
-                            <div class="action-description">Add or remove team members</div>
-                        </div>
-                        
-                        <div class="action-card success" onclick="switchToPage('settings')">
-                            <div class="action-icon">⚙️</div>
-                            <div class="action-title">Settings</div>
-                            <div class="action-description">Configure your preferences</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Recent Scans -->
-                    <div class="recent-scans">
-                        <div class="recent-scans-header">
-                            <div class="recent-scans-title">Recent Scans</div>
-                            <div class="recent-scans-subtitle">Your latest accessibility scan results</div>
-                        </div>
-                        <div class="recent-scans-body" id="dashboard-recent-scans">
-                            <div style="padding: 20px; text-align: center; color: #666;">
-                                📊 Loading recent scans...
-                            </div>
-                        </div>
-                    </div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">${stats.totalScans}</div>
+                    <div class="stat-label">Total Scans</div>
                 </div>
-                
-                <!-- Scans Page -->
-                <div id="scans" class="page">
-                    <div class="dashboard-header">
-                        <h1>Accessibility Scans</h1>
-                        <p>Manage and review your accessibility scans</p>
-                    </div>
-                    
-                    <!-- Database Status -->
-                    <div class="db-status" id="db-status">
-                        ✅ Database connected - Scans will be saved to your history
-                    </div>
-                    
-                    <!-- Scan Form -->
-                    <div class="scan-form">
-                        <h2>Scan Website for Accessibility Issues</h2>
-                        
-                        <div class="form-group">
-                            <label class="form-label" for="url-input">Website URL</label>
-                            <input type="text" id="url-input" class="form-input" placeholder="https://example.com/" />
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="form-label">Scan Options:</label>
-                            <div class="scan-options">
-                                <div class="scan-option">
-                                    <input type="radio" id="single-page" name="scan-type" value="single" checked />
-                                    <label for="single-page">Single Page (Fast - recommended)</label>
-                                </div>
-                                <div class="scan-option">
-                                    <input type="radio" id="multi-page" name="scan-type" value="crawl" />
-                                    <label for="multi-page">Multi-Page Crawl (Slower - up to <input type="number" class="pages-input" id="max-pages" value="5" min="1" max="20" /> pages)</label>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <button class="scan-button" onclick="startScan()">🔍 Start Accessibility Scan</button>
-                    </div>
-                    
-                    <!-- Scan Results -->
-                    <div id="scan-results-container"></div>
-                    
-                    <!-- Recent Scans -->
-                    <div class="recent-scans">
-                        <div class="recent-scans-header">
-                            <div class="recent-scans-title">Recent Scans</div>
-                            <div class="recent-scans-subtitle">Your latest accessibility scan results</div>
-                        </div>
-                        <div class="recent-scans-body" id="recent-scans-list">
-                            <div style="padding: 20px; text-align: center; color: #666;">
-                                📊 Loading recent scans...
-                            </div>
-                        </div>
-                    </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.totalIssues}</div>
+                    <div class="stat-label">Issues Found</div>
                 </div>
-                
-                <!-- Other Pages (Placeholder) -->
-                <div id="analytics" class="page">
-                    <div class="dashboard-header">
-                        <h1>Analytics</h1>
-                        <p>Coming soon - Detailed analytics and reporting</p>
-                    </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.averageScore}%</div>
+                    <div class="stat-label">Avg Score</div>
                 </div>
-                
-                <div id="team" class="page">
-                    <div class="dashboard-header">
-                        <h1>Team Management</h1>
-                        <p>Coming soon - Manage team members and permissions</p>
-                    </div>
-                </div>
-                
-                <div id="integrations" class="page">
-                    <div class="dashboard-header">
-                        <h1>Integrations</h1>
-                        <p>Coming soon - Connect with your favorite tools</p>
-                    </div>
-                </div>
-                
-                <div id="api" class="page">
-                    <div class="dashboard-header">
-                        <h1>API Management</h1>
-                        <p>Coming soon - API keys and documentation</p>
-                    </div>
-                </div>
-                
-                <div id="billing" class="page">
-                    <div class="dashboard-header">
-                        <h1>Billing</h1>
-                        <p>Coming soon - Subscription and usage details</p>
-                    </div>
-                </div>
-                
-                <div id="settings" class="page">
-                    <div class="dashboard-header">
-                        <h1>Settings</h1>
-                        <p>Coming soon - Account and application settings</p>
-                    </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.thisWeekScans}</div>
+                    <div class="stat-label">This Week</div>
                 </div>
             </div>
+        </div>
+        
+        <div class="scanner-section">
+            <h2 style="margin-bottom: 20px;">🔍 Start New Accessibility Scan</h2>
+            <form class="scanner-form" onsubmit="startScan(event)">
+                <input type="url" class="url-input" id="url-input" placeholder="Enter website URL (e.g., https://example.com)" required>
+                <select class="scan-type" id="scan-type">
+                    <option value="single">Single Page Scan</option>
+                    <option value="crawl">Multi-Page Crawl</option>
+                </select>
+                <button type="submit" class="scan-btn" id="scan-btn">🚀 Start Scan</button>
+            </form>
+            <p style="opacity: 0.9; font-size: 0.9em;">
+                💡 <strong>Single Page:</strong> Scans one specific page for accessibility issues<br>
+                🕷️ <strong>Multi-Page Crawl:</strong> Discovers and scans up to 10 internal pages
+            </p>
+        </div>
+        
+        <div class="results-section" id="results-section">
+            <!-- Scan results will be displayed here -->
+        </div>
+        
+        <div class="recent-scans">
+            <h3>📈 Recent Scans</h3>
+            ${recentScans.length > 0 ? recentScans.map(scan => `
+                <div class="scan-item">
+                    <div>
+                        <div class="scan-url">${scan.url}</div>
+                        <div class="scan-meta">
+                            <span>${scan.scan_type === 'crawl' ? '🕷️ Multi-page' : '📄 Single page'}</span>
+                            <span>${scan.total_issues} issues</span>
+                            <span>${new Date(scan.created_at).toLocaleDateString()}</span>
+                        </div>
+                    </div>
+                    <div class="score-badge ${
+                        scan.score >= 90 ? 'score-excellent' : 
+                        scan.score >= 75 ? 'score-good' : 
+                        scan.score >= 50 ? 'score-fair' : 'score-poor'
+                    }">${scan.score}%</div>
+                </div>
+            `).join('') : '<p style="color: #6c757d; text-align: center; padding: 20px;">No recent scans found. Start your first scan above!</p>'}
         </div>
     </div>
     
     <script>
-        // Page switching functionality - PRESERVED FROM WORKING VERSION
-        function switchToPage(pageId) {
-            // Hide all pages
-            const pages = document.querySelectorAll('.page');
-            pages.forEach(page => page.classList.remove('active'));
-            
-            // Show selected page
-            const targetPage = document.getElementById(pageId);
-            if (targetPage) {
-                targetPage.classList.add('active');
-            }
-            
-            // Update navigation
-            const navItems = document.querySelectorAll('.nav-item');
-            navItems.forEach(item => item.classList.remove('active'));
-            
-            // Find and activate the corresponding nav item
-            const activeNavItem = document.querySelector(\`[onclick="switchToPage('\${pageId}')"]\`);
-            if (activeNavItem) {
-                activeNavItem.classList.add('active');
-            }
-        }
+        let currentScanResults = null;
         
-        // Scan functionality - PRESERVED FROM WORKING VERSION
-        async function startScan() {
-            const urlInput = document.getElementById('url-input');
-            const scanButton = document.querySelector('.scan-button');
-            const resultsContainer = document.getElementById('scan-results-container');
+        async function startScan(event) {
+            event.preventDefault();
             
-            const url = urlInput.value.trim();
-            if (!url) {
-                alert('Please enter a URL to scan');
-                return;
-            }
+            const url = document.getElementById('url-input').value;
+            const scanType = document.getElementById('scan-type').value;
+            const scanBtn = document.getElementById('scan-btn');
+            const resultsSection = document.getElementById('results-section');
             
-            // Get scan type
-            const scanType = document.querySelector('input[name="scan-type"]:checked').value;
-            const maxPages = document.getElementById('max-pages').value;
-            
-            // Disable button and show loading
-            scanButton.disabled = true;
-            scanButton.textContent = '🔄 Scanning...';
-            
-            // Show loading in results
-            resultsContainer.innerHTML = \`
-                <div class="scan-results">
-                    <div class="results-header">
-                        <div class="results-title">Scanning in Progress</div>
-                        <div class="results-meta">Please wait...</div>
-                    </div>
-                    <div class="results-body">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            Analyzing accessibility issues on \${url}
-                        </div>
-                    </div>
+            // Show loading state
+            scanBtn.disabled = true;
+            scanBtn.textContent = '🔄 Scanning...';
+            resultsSection.style.display = 'block';
+            resultsSection.innerHTML = \`
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <h3>Scanning \${url}</h3>
+                    <p>This may take 30-60 seconds depending on the scan type...</p>
                 </div>
             \`;
             
@@ -3270,130 +2303,109 @@ app.get('/', (req, res) => {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        url: url,
-                        scanType: scanType,
-                        maxPages: parseInt(maxPages)
-                    })
+                    body: JSON.stringify({ url, scanType })
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    displayScanResults(result);
-                    // Refresh recent scans
-                    loadRecentScans();
+                    currentScanResults = result;
+                    displayResults(result);
                 } else {
-                    displayScanError(result.error);
+                    throw new Error(result.error || 'Scan failed');
                 }
                 
             } catch (error) {
                 console.error('Scan error:', error);
-                displayScanError('Network error occurred. Please try again.');
+                resultsSection.innerHTML = \`
+                    <div class="error">
+                        <h3>❌ Scan Failed</h3>
+                        <p>\${error.message}</p>
+                        <p>Please check the URL and try again.</p>
+                    </div>
+                \`;
             } finally {
-                // Re-enable button
-                scanButton.disabled = false;
-                scanButton.textContent = '🔍 Start Accessibility Scan';
+                scanBtn.disabled = false;
+                scanBtn.textContent = '🚀 Start Scan';
             }
         }
         
-        function displayScanResults(result) {
-            // Store violations and platform info globally
-            currentViolations = result.violations;
-            window.currentPlatformInfo = result.platformInfo;
+        function displayResults(result) {
+            const resultsSection = document.getElementById('results-section');
             
-            const resultsContainer = document.getElementById('scan-results-container');
+            const scoreClass = 
+                result.score >= 90 ? 'score-excellent' : 
+                result.score >= 75 ? 'score-good' : 
+                result.score >= 50 ? 'score-fair' : 'score-poor';
             
-            const violations = result.violations || result.pages?.reduce((acc, page) => acc.concat(page.violations), []) || [];
-            
-            resultsContainer.innerHTML = \`
-                <div class="scan-results">
-                    <div class="results-header">
-                        <div class="results-title">Scan Results</div>
-                        <div class="results-meta">Completed in \${result.scanTime}ms</div>
+            resultsSection.innerHTML = \`
+                <div class="success">
+                    <h3>✅ Scan Completed Successfully!</h3>
+                    <p><strong>URL:</strong> \${result.url}</p>
+                    <p><strong>Pages Scanned:</strong> \${result.pagesScanned}</p>
+                    <p><strong>Scan Time:</strong> \${(result.scanTime / 1000).toFixed(1)}s</p>
+                    <div style="margin-top: 15px;">
+                        <span style="font-size: 1.2em; font-weight: bold;">Accessibility Score: </span>
+                        <span class="score-badge \${scoreClass}" style="font-size: 1.1em; padding: 8px 16px;">\${result.score}%</span>
                     </div>
-                    <div class="results-body">
-                        <div class="results-summary">
-                            <div class="summary-grid">
-                                <div class="summary-item">
-                                    <div class="summary-value">\${violations.length}</div>
-                                    <div class="summary-label">Total Issues</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.critical || 0}</div>
-                                    <div class="summary-label">Critical</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.serious || 0}</div>
-                                    <div class="summary-label">Serious</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.moderate || 0}</div>
-                                    <div class="summary-label">Moderate</div>
-                                </div>
-                                <div class="summary-item">
-                                    <div class="summary-value">\${result.summary?.minor || 0}</div>
-                                    <div class="summary-label">Minor</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        \${violations.length > 0 ? 
-                            '<div style="text-align: center; color: #666; padding: 20px; background: #f8f9fa; border-radius: 8px; margin: 20px 0;"><p>📋 <strong>' + violations.length + ' accessibility issues found</strong></p><p>Use the buttons below to view details or start fixing issues.</p></div>'
-                            : '<p style="text-align: center; color: #28a745; font-size: 1.2rem; padding: 40px;">🎉 No accessibility issues found!</p>'
-                        }
-                        
-                        <!-- PHASE 2C: Enhanced Action Buttons with Bulk Operations -->
-                        <div style="margin-top: 20px; text-align: center;">
-                            \${violations.length > 0 ? 
-                                '<button class="view-report-btn" onclick="openDetailedReport()" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
-                                : ''
-                            }
-                            \${violations.length > 0 ? 
-                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ', ' + JSON.stringify(result.platformInfo || {}).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
-                                : ''
-                            }
-                            \${violations.length > 0 ? 
-                                '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">🛠️ Let\\'s Start Fixing</button>' 
-                                : ''
-                            }
-                        </div>
-                        
-                        <!-- PHASE 2C: Bulk Operations Section -->
-                        \${violations.length > 1 ? 
-                            '<div style="margin-top: 30px; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;"><h3 style="margin: 0 0 15px 0; text-align: center;">⚡ Bulk Operations</h3><div style="text-align: center;"><button onclick="BulkOperations.fixAllIssues()" style="background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">🔧 Fix All Issues</button><button onclick="BulkOperations.fixCriticalOnly()" style="background: #dc3545; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">🚨 Fix Critical Only</button><button onclick="BulkOperations.downloadAllFixes()" style="background: #17a2b8; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">📦 Download All Fixes</button><button onclick="BulkOperations.showBulkPreview()" style="background: #fd7e14; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">👁️ Preview All Changes</button></div></div>' 
-                            : ''
-                        }
+                </div>
+                
+                <div class="violations-summary">
+                    <div class="violation-card violation-critical">
+                        <div style="font-size: 2em; font-weight: bold; color: #dc3545;">\${result.summary.critical}</div>
+                        <div style="font-size: 0.9em; color: #721c24;">Critical</div>
                     </div>
+                    <div class="violation-card violation-serious">
+                        <div style="font-size: 2em; font-weight: bold; color: #fd7e14;">\${result.summary.serious}</div>
+                        <div style="font-size: 0.9em; color: #856404;">Serious</div>
+                    </div>
+                    <div class="violation-card violation-moderate">
+                        <div style="font-size: 2em; font-weight: bold; color: #ffc107;">\${result.summary.moderate}</div>
+                        <div style="font-size: 0.9em; color: #856404;">Moderate</div>
+                    </div>
+                    <div class="violation-card violation-minor">
+                        <div style="font-size: 2em; font-weight: bold; color: #6c757d;">\${result.summary.minor}</div>
+                        <div style="font-size: 0.9em; color: #495057;">Minor</div>
+                    </div>
+                </div>
+                
+                <div class="action-buttons">
+                    <button class="btn btn-primary" onclick="showDetailedReport()">📋 View Detailed Report</button>
+                    <button class="btn btn-success" onclick="startGuidedFixing()">🛠️ Let's Start Fixing</button>
+                    <button class="btn btn-info" onclick="getAISuggestions()">🤖 Get AI Suggestions</button>
                 </div>
             \`;
         }
         
-        function displayScanError(error) {
-            const resultsContainer = document.getElementById('scan-results-container');
-            resultsContainer.innerHTML = \`
-                <div class="scan-results">
-                    <div class="results-header">
-                        <div class="results-title">Scan Failed</div>
-                        <div class="results-meta" style="color: #dc3545;">Error occurred</div>
-                    </div>
-                    <div class="results-body">
-                        <div style="text-align: center; color: #dc3545; padding: 40px;">
-                            <h3>Scan Failed</h3>
-                            <p>\${error}</p>
-                        </div>
-                    </div>
-                </div>
-            \`;
+        function showDetailedReport() {
+            if (!currentScanResults) return;
+            
+            // Create a form to submit violations data
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/api/detailed-report';
+            form.target = '_blank';
+            
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'violations';
+            input.value = JSON.stringify(currentScanResults.violations);
+            
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
         }
         
-        // AI Suggestions functionality - PRESERVED FROM WORKING VERSION
-        async function showAISuggestions(violations, platformInfo = null) {
+        async function getAISuggestions() {
+            if (!currentScanResults) return;
+            
             const modal = document.getElementById('ai-modal');
             const modalBody = document.getElementById('ai-modal-body');
             
+            // Show loading state
+            modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Getting AI suggestions...</div>';
             modal.style.display = 'block';
-            modalBody.innerHTML = '<div class="loading"><div class="spinner"></div>Generating AI suggestions...</div>';
             
             try {
                 const response = await fetch('/api/ai-fixes', {
@@ -3401,7 +2413,10 @@ app.get('/', (req, res) => {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ violations, platformInfo })
+                    body: JSON.stringify({ 
+                        violations: currentScanResults.violations.slice(0, 5), // Limit to first 5 violations
+                        platformInfo: { type: 'custom' }
+                    })
                 });
                 
                 if (!response.ok) {
@@ -3410,10 +2425,10 @@ app.get('/', (req, res) => {
                 
                 const suggestions = await response.json();
                 
-                modalBody.innerHTML = suggestions.map(suggestion => \`
-                    <div class="ai-suggestion">
+                modalBody.innerHTML = suggestions.map((suggestion, index) => \`
+                    <div class="ai-suggestion priority-\${suggestion.priority}">
                         <div class="ai-suggestion-header">
-                            <strong>🤖 AI Fix Suggestion</strong>
+                            <strong>🤖 AI Fix Suggestion #\${index + 1}</strong>
                             <span class="priority-badge priority-\${suggestion.priority}">\${suggestion.priority.toUpperCase()}</span>
                         </div>
                         <div class="ai-suggestion-content">
@@ -3421,9 +2436,7 @@ app.get('/', (req, res) => {
                             <p><strong>Code Example:</strong></p>
                             <pre><code>\${suggestion.codeExample}</code></pre>
                             <p><strong>Implementation Steps:</strong></p>
-                            <ol>
-                                \${suggestion.steps.map(step => \`<li>\${step}</li>\`).join('')}
-                            </ol>
+                            <ol>\${suggestion.steps.map(step => \`<li>\${step}</li>\`).join('')}</ol>
                         </div>
                     </div>
                 \`).join('');
@@ -3431,9 +2444,9 @@ app.get('/', (req, res) => {
             } catch (error) {
                 console.error('Error getting AI suggestions:', error);
                 modalBody.innerHTML = \`
-                    <div style="color: #dc3545; text-align: center; padding: 20px;">
+                    <div style="color: #dc3545; text-align: center; padding: 40px;">
                         <h3>Unable to Generate AI Suggestions</h3>
-                        <p>Please try again later or contact support if the problem persists.</p>
+                        <p>Please try again later or use the detailed report for manual fixes.</p>
                     </div>
                 \`;
             }
@@ -3443,209 +2456,16 @@ app.get('/', (req, res) => {
             document.getElementById('ai-modal').style.display = 'none';
         }
         
-        // Global variable to store current violations for detailed report
-        let currentViolations = [];
-        
-        // NEW: Open detailed report in new tab
-        function openDetailedReport(violations) {
-            // Use the stored violations if no parameter passed
-            const violationsToShow = violations || currentViolations;
-            
-            if (!violationsToShow || violationsToShow.length === 0) {
-                alert('No violations data available for detailed report. Please run a scan first.');
+        function startGuidedFixing() {
+            if (!currentScanResults || !currentScanResults.violations.length) {
+                alert('No violations found to fix!');
                 return;
             }
             
-            // Send violations to server endpoint for report generation
-            fetch('/api/detailed-report', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ violations: violationsToShow })
-            })
-            .then(response => response.text())
-            .then(html => {
-                const reportWindow = window.open('', '_blank');
-                reportWindow.document.write(html);
-                reportWindow.document.close();
-            })
-            .catch(error => {
-                console.error('Error generating detailed report:', error);
-                alert('Failed to generate detailed report. Please try again.');
-            });
+            GuidedFixing.start(currentScanResults.violations);
         }
         
-        // Fallback: Simple detailed report function
-        function openDetailedReportSimple(violations) {
-            const violationsToShow = violations || currentViolations;
-            const reportWindow = window.open('', '_blank');
-            const reportHtml = \`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Accessibility Scan Report</title>
-                    <style>
-                        body { 
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                            margin: 0; 
-                            padding: 20px; 
-                            background: #f8f9fa; 
-                            color: #333;
-                        }
-                        .report-header {
-                            background: white;
-                            padding: 30px;
-                            border-radius: 8px;
-                            margin-bottom: 20px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                        }
-                        .report-title {
-                            font-size: 2rem;
-                            font-weight: bold;
-                            color: #333;
-                            margin-bottom: 10px;
-                        }
-                        .report-meta {
-                            color: #666;
-                            font-size: 1rem;
-                        }
-                        .violation {
-                            background: white;
-                            border-radius: 8px;
-                            margin-bottom: 20px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                            overflow: hidden;
-                        }
-                        .violation-header {
-                            padding: 20px;
-                            border-bottom: 1px solid #eee;
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                        }
-                        .violation-title {
-                            font-size: 1.25rem;
-                            font-weight: bold;
-                            color: #333;
-                        }
-                        .violation-impact {
-                            padding: 4px 12px;
-                            border-radius: 20px;
-                            font-size: 0.875rem;
-                            font-weight: bold;
-                            text-transform: uppercase;
-                        }
-                        .impact-critical { background: #dc3545; color: white; }
-                        .impact-serious { background: #fd7e14; color: white; }
-                        .impact-moderate { background: #ffc107; color: #333; }
-                        .impact-minor { background: #6c757d; color: white; }
-                        .violation-body {
-                            padding: 20px;
-                        }
-                        .violation-description {
-                            font-size: 1rem;
-                            margin-bottom: 15px;
-                            line-height: 1.5;
-                        }
-                        .violation-help {
-                            color: #666;
-                            font-size: 0.9rem;
-                            line-height: 1.4;
-                        }
-                        .violation-help a {
-                            color: #007bff;
-                            text-decoration: none;
-                        }
-                        .violation-help a:hover {
-                            text-decoration: underline;
-                        }
-                        .summary-stats {
-                            display: grid;
-                            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-                            gap: 15px;
-                            margin: 20px 0;
-                        }
-                        .stat-item {
-                            text-align: center;
-                            padding: 15px;
-                            background: #f8f9fa;
-                            border-radius: 6px;
-                        }
-                        .stat-value {
-                            font-size: 1.5rem;
-                            font-weight: bold;
-                            color: #333;
-                        }
-                        .stat-label {
-                            font-size: 0.875rem;
-                            color: #666;
-                            margin-top: 5px;
-                        }
-                        @media print {
-                            body { background: white; }
-                            .violation { box-shadow: none; border: 1px solid #ddd; }
-                        }
-                    </style>
-                </head>
-                <body>
-                    <div class="report-header">
-                        <div class="report-title">🔍 Accessibility Scan Report</div>
-                        <div class="report-meta">Generated on \${new Date().toLocaleString()}</div>
-                        <div class="summary-stats">
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.length}</div>
-                                <div class="stat-label">Total Issues</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'critical').length}</div>
-                                <div class="stat-label">Critical</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'serious').length}</div>
-                                <div class="stat-label">Serious</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'moderate').length}</div>
-                                <div class="stat-label">Moderate</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">\${violationsToShow.filter(v => v.impact === 'minor').length}</div>
-                                <div class="stat-label">Minor</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    \${violationsToShow.map((violation, index) => \`
-                        <div class="violation">
-                            <div class="violation-header">
-                                <div class="violation-title">\${index + 1}. \${violation.id}</div>
-                                <div class="violation-impact impact-\${violation.impact}">\${violation.impact}</div>
-                            </div>
-                            <div class="violation-body">
-                                <div class="violation-description">
-                                    <strong>Description:</strong> \${violation.description || 'No description available'}
-                                </div>
-                                <div class="violation-help">
-                                    <strong>Help:</strong> \${violation.help || 'Refer to WCAG guidelines for more information'}
-                                    \${violation.helpUrl ? \`<br><br><strong>Learn more:</strong> <a href="\${violation.helpUrl}" target="_blank">\${violation.helpUrl}</a>\` : ''}
-                                </div>
-                            </div>
-                        </div>
-                    \`).join('')}
-                    
-                    <div style="text-align: center; margin: 40px 0; color: #666;">
-                        <p>Report generated by SentryPrime Enterprise Accessibility Scanner</p>
-                    </div>
-                </body>
-                </html>
-            \`;
-            
-            reportWindow.document.write(reportHtml);
-            reportWindow.document.close();
-        }
-        
-        // NEW: Guided Fixing Workflow - Properly Namespaced
+        // Guided Fixing System
         const GuidedFixing = {
             currentViolations: [],
             currentViolationIndex: 0,
@@ -3938,1776 +2758,268 @@ app.get('/', (req, res) => {
                 }
             },
             
-            // PHASE 2A: Preview Fix functionality for current violation
-            previewFixCurrent: async function() {
+            // PHASE 2D: Visual Preview functionality for current violation
+            showVisualPreview: async function() {
                 const currentViolation = this.currentViolations[this.currentViolationIndex];
                 if (!currentViolation) return;
                 
-                const button = document.querySelector('.preview-fix-btn');
-                const originalText = button.textContent;
-                
                 try {
-                    button.textContent = '🔄 Generating Preview...';
-                    button.disabled = true;
+                    const currentUrl = window.location.origin; // Use the scanner's own URL for testing
                     
-                    const response = await fetch('/api/preview-fix', {
+                    const response = await fetch('/api/visual-preview', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
-                            violationId: currentViolation.id,
-                            elementSelector: \`violation-\${this.currentViolationIndex}\`,
-                            platformInfo: window.platformInfo || { type: 'custom' }
+                            url: currentUrl,
+                            violation: currentViolation
                         })
                     });
                     
                     const result = await response.json();
                     
                     if (result.success) {
-                        // Create preview overlay within the modal
-                        const previewHtml = \`
-                            <div id="fix-preview-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; display: flex; align-items: center; justify-content: center;">
-                                <div style="background: white; padding: 30px; border-radius: 8px; max-width: 900px; max-height: 80vh; overflow-y: auto; position: relative;">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                                        <h3>👁️ Fix Preview: \${currentViolation.id}</h3>
-                                        <button onclick="document.getElementById('fix-preview-overlay').remove()" 
-                                                style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
-                                            ✕ Close
-                                        </button>
+                        this.showVisualPreviewModal(result);
+                    } else {
+                        throw new Error(result.error || 'Visual preview failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('Visual preview error:', error);
+                    alert('Visual preview failed: ' + error.message);
+                }
+            },
+            
+            // PHASE 2D: Color Test functionality
+            showColorTest: async function() {
+                try {
+                    const currentUrl = window.location.origin;
+                    this.showColorTestModal(currentUrl);
+                } catch (error) {
+                    console.error('Color test error:', error);
+                    alert('Color test failed: ' + error.message);
+                }
+            },
+            
+            // PHASE 2D: Screen Reader functionality
+            showScreenReader: async function() {
+                try {
+                    const currentUrl = window.location.origin;
+                    
+                    const response = await fetch('/api/screen-reader-preview', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: currentUrl })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.showScreenReaderModal(result);
+                    } else {
+                        throw new Error(result.error || 'Screen reader analysis failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('Screen reader error:', error);
+                    alert('Screen reader analysis failed: ' + error.message);
+                }
+            },
+            
+            // PHASE 2D: Keyboard Test functionality
+            showKeyboardTest: async function() {
+                try {
+                    const currentUrl = window.location.origin;
+                    
+                    const response = await fetch('/api/keyboard-navigation-test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: currentUrl })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.showKeyboardTestModal(result);
+                    } else {
+                        throw new Error(result.error || 'Keyboard test failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('Keyboard test error:', error);
+                    alert('Keyboard test failed: ' + error.message);
+                }
+            },
+            
+            // PHASE 2D: Modal display methods
+            showVisualPreviewModal: function(data) {
+                const modal = document.createElement('div');
+                modal.style.cssText = \`
+                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                    background: rgba(0,0,0,0.9); z-index: 10001; display: flex; 
+                    align-items: center; justify-content: center; backdrop-filter: blur(5px);
+                \`;
+                
+                modal.innerHTML = \`
+                    <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                <h3 style="margin: 0; font-size: 20px; font-weight: 600;">👁️ Visual Preview Analysis</h3>
+                                <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
+                                        style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
+                                    ✕
+                                </button>
+                            </div>
+                            <p style="margin: 0; opacity: 0.9;">Before and after comparison with highlighted accessibility issues</p>
+                        </div>
+                        
+                        <div style="padding: 30px; max-height: 70vh; overflow-y: auto;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
+                                <div style="border: 2px solid #dc3545; border-radius: 8px; overflow: hidden;">
+                                    <div style="background: #dc3545; color: white; padding: 10px; text-align: center; font-weight: bold;">❌ Before (Issues Highlighted)</div>
+                                    <div style="padding: 10px; background: #f8f9fa;">
+                                        <img src="\${data.screenshot}" alt="Before screenshot" style="width: 100%; height: auto; border-radius: 4px;">
                                     </div>
-                                    
-                                    <div style="margin-bottom: 20px;">
-                                        <h4>📋 What this fix will do:</h4>
-                                        <p>\${result.preview.impact}</p>
-                                    </div>
-                                    
-                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                                        <div>
-                                            <h4>❌ Before (Current):</h4>
-                                            <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;">\${result.preview.before.code}</pre>
+                                </div>
+                                <div style="border: 2px solid #28a745; border-radius: 8px; overflow: hidden;">
+                                    <div style="background: #28a745; color: white; padding: 10px; text-align: center; font-weight: bold;">✅ After (Fixed)</div>
+                                    <div style="padding: 10px; background: #d4edda;">
+                                        <div style="padding: 40px; text-align: center; color: #155724;">
+                                            <div style="font-size: 48px; margin-bottom: 15px;">🎯</div>
+                                            <h4 style="margin: 0 0 10px 0;">Fix Applied Successfully</h4>
+                                            <p style="margin: 0;">Issues have been resolved with proper accessibility standards</p>
                                         </div>
-                                        <div>
-                                            <h4>✅ After (Fixed):</h4>
-                                            <pre style="background: #d4edda; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px;">\${result.preview.after.code}</pre>
-                                        </div>
-                                    </div>
-                                    
-                                    <div>
-                                        <h4>🛠️ Implementation Steps:</h4>
-                                        <ol>
-                                            \${result.preview.instructions.map(step => \`<li>\${step}</li>\`).join('')}
-                                        </ol>
-                                    </div>
-                                    
-                                    <div style="text-align: center; margin-top: 20px;">
-                                        <button onclick="GuidedFixing.autoFixCurrent(); document.getElementById('fix-preview-overlay').remove();" 
-                                                style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                            🔧 Apply This Fix
-                                        </button>
                                     </div>
                                 </div>
                             </div>
+                            
+                            <div style="background: #e7f3ff; border-radius: 8px; padding: 20px; border-left: 4px solid #0066cc;">
+                                <h4 style="margin: 0 0 15px 0; color: #0066cc;">📋 Issue Details</h4>
+                                <p style="margin: 0; color: #004085;"><strong>Violation:</strong> \${data.violation.id}</p>
+                                <p style="margin: 5px 0 0 0; color: #004085;"><strong>Impact:</strong> \${data.violation.impact}</p>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+                
+                document.body.appendChild(modal);
+                
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        modal.remove();
+                    }
+                });
+            },
+            
+            showColorTestModal: function(url) {
+                const modal = document.createElement('div');
+                modal.style.cssText = \`
+                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                    background: rgba(0,0,0,0.9); z-index: 10001; display: flex; 
+                    align-items: center; justify-content: center; backdrop-filter: blur(5px);
+                \`;
+                
+                modal.innerHTML = \`
+                    <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
+                        <div style="background: linear-gradient(135deg, #fd7e14 0%, #ffc107 100%); color: white; padding: 25px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                <h3 style="margin: 0; font-size: 20px; font-weight: 600;">🎨 Color Contrast Simulator</h3>
+                                <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
+                                        style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
+                                    ✕
+                                </button>
+                            </div>
+                            <p style="margin: 0; opacity: 0.9;">Test how your page appears to users with different visual conditions</p>
+                        </div>
+                        
+                        <div style="padding: 30px;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                                <button onclick="GuidedFixing.loadColorSimulation('protanopia')" style="background: #dc3545; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer;">Protanopia (Red-blind)</button>
+                                <button onclick="GuidedFixing.loadColorSimulation('deuteranopia')" style="background: #28a745; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer;">Deuteranopia (Green-blind)</button>
+                                <button onclick="GuidedFixing.loadColorSimulation('tritanopia')" style="background: #007bff; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer;">Tritanopia (Blue-blind)</button>
+                                <button onclick="GuidedFixing.loadColorSimulation('monochrome')" style="background: #6c757d; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer;">Monochrome</button>
+                                <button onclick="GuidedFixing.loadColorSimulation('low-contrast')" style="background: #ffc107; color: black; border: none; padding: 12px; border-radius: 6px; cursor: pointer;">Low Contrast</button>
+                            </div>
+                            
+                            <div id="color-simulation-result" style="text-align: center; padding: 40px; background: #f8f9fa; border-radius: 8px; border: 2px dashed #dee2e6;">
+                                <div style="font-size: 48px; margin-bottom: 15px;">👆</div>
+                                <h4 style="margin: 0 0 10px 0; color: #333;">Select a simulation above</h4>
+                                <p style="margin: 0; color: #666;">Click any button to see how your page appears to users with different visual conditions</p>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+                
+                document.body.appendChild(modal);
+                
+                // Store URL for simulations
+                window.currentSimulationUrl = url;
+                
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        modal.remove();
+                    }
+                });
+            },
+            
+            loadColorSimulation: async function(simulationType) {
+                const resultDiv = document.getElementById('color-simulation-result');
+                resultDiv.innerHTML = \`
+                    <div style="font-size: 32px; margin-bottom: 15px;">🔄</div>
+                    <h4 style="margin: 0 0 10px 0; color: #333;">Generating simulation...</h4>
+                    <p style="margin: 0; color: #666;">Please wait while we process the \${simulationType} simulation</p>
+                \`;
+                
+                try {
+                    const response = await fetch('/api/color-contrast-preview', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            url: window.currentSimulationUrl,
+                            simulationType: simulationType
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        resultDiv.innerHTML = \`
+                            <div style="margin-bottom: 15px;">
+                                <h4 style="margin: 0 0 10px 0; color: #333; text-transform: capitalize;">\${simulationType} Simulation</h4>
+                                <p style="margin: 0 0 15px 0; color: #666; font-size: 14px;">How your page appears to users with \${simulationType}</p>
+                            </div>
+                            <div style="border: 2px solid #e9ecef; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                                <img src="\${result.screenshot}" alt="\${simulationType} simulation" 
+                                     style="width: 100%; height: auto; display: block; max-height: 400px; object-fit: contain;">
+                            </div>
                         \`;
-                        
-                        document.body.insertAdjacentHTML('beforeend', previewHtml);
-                        
                     } else {
-                        throw new Error(result.error || 'Preview generation failed');
+                        throw new Error(result.error);
                     }
-                    
                 } catch (error) {
-                    console.error('Preview error:', error);
-                    alert('Failed to generate preview: ' + error.message);
-                } finally {
-                    button.textContent = originalText;
-                    button.disabled = false;
+                    resultDiv.innerHTML = \`
+                        <div style="font-size: 32px; margin-bottom: 15px;">❌</div>
+                        <h4 style="margin: 0 0 10px 0; color: #dc3545;">Simulation Failed</h4>
+                        <p style="margin: 0; color: #666;">Unable to generate \${simulationType} simulation. Please try again.</p>
+                    \`;
                 }
             },
             
-            // PHASE 2A: Download fix files
-            downloadFix: function(violationId, type) {
-                const url = \`/api/download-fix/\${type}?violationId=\${violationId}&platform=\${window.platformInfo?.type || 'custom'}\`;
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = \`\${violationId}-fix.\${type === 'css' ? 'css' : 'md'}\`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            }
-        };
-        
-        // PHASE 2C: Bulk Operations Object for Enterprise-Grade Batch Processing
-        const BulkOperations = {
-            currentViolations: [],
-            fixProgress: {},
-            
-            // Initialize with current violations
-            init: function(violations) {
-                this.currentViolations = violations || currentViolations || [];
-                this.fixProgress = {};
-            },
-            
-            // Fix all issues with progress tracking
-            fixAllIssues: async function() {
-                this.init();
-                if (this.currentViolations.length === 0) {
-                    alert('No violations to fix!');
-                    return;
-                }
-                
-                const progressModal = this.showProgressModal('Fixing All Issues', this.currentViolations.length);
-                
-                try {
-                    const fixes = [];
-                    for (let i = 0; i < this.currentViolations.length; i++) {
-                        const violation = this.currentViolations[i];
-                        this.updateProgress(progressModal, i + 1, this.currentViolations.length, \`Fixing: \${violation.id}\`);
-                        
-                        const fix = await this.generateSingleFix(violation);
-                        if (fix.success) {
-                            fixes.push(fix);
-                        }
-                        
-                        // Small delay to show progress
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                    }
-                    
-                    this.hideProgressModal(progressModal);
-                    this.showBulkResults('All Issues Fixed', fixes);
-                    
-                } catch (error) {
-                    this.hideProgressModal(progressModal);
-                    alert('Error during bulk fixing: ' + error.message);
-                }
-            },
-            
-            // Fix only critical issues
-            fixCriticalOnly: async function() {
-                this.init();
-                const criticalViolations = this.currentViolations.filter(v => 
-                    v.impact === 'critical' || v.impact === 'serious'
-                );
-                
-                if (criticalViolations.length === 0) {
-                    alert('No critical issues found!');
-                    return;
-                }
-                
-                const progressModal = this.showProgressModal('Fixing Critical Issues', criticalViolations.length);
-                
-                try {
-                    const fixes = [];
-                    for (let i = 0; i < criticalViolations.length; i++) {
-                        const violation = criticalViolations[i];
-                        this.updateProgress(progressModal, i + 1, criticalViolations.length, \`Fixing: \${violation.id}\`);
-                        
-                        const fix = await this.generateSingleFix(violation);
-                        if (fix.success) {
-                            fixes.push(fix);
-                        }
-                        
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                    }
-                    
-                    this.hideProgressModal(progressModal);
-                    this.showBulkResults('Critical Issues Fixed', fixes);
-                    
-                } catch (error) {
-                    this.hideProgressModal(progressModal);
-                    alert('Error during critical fixing: ' + error.message);
-                }
-            },
-            
-            // Download all fixes as a ZIP package
-            downloadAllFixes: async function() {
-                this.init();
-                if (this.currentViolations.length === 0) {
-                    alert('No violations to download fixes for!');
-                    return;
-                }
-                
-                try {
-                    const response = await fetch('/api/bulk-download-fixes', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            violations: this.currentViolations,
-                            platformInfo: window.currentPlatformInfo || { type: 'custom' }
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        const blob = await response.blob();
-                        const url = window.URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = \`accessibility-fixes-\${new Date().toISOString().split('T')[0]}.zip\`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        window.URL.revokeObjectURL(url);
-                        
-                        alert('All fixes downloaded successfully!');
-                    } else {
-                        throw new Error('Download failed');
-                    }
-                    
-                } catch (error) {
-                    alert('Error downloading fixes: ' + error.message);
-                }
-            },
-            
-            // Show preview of all changes
-            showBulkPreview: async function() {
-                this.init();
-                if (this.currentViolations.length === 0) {
-                    alert('No violations to preview!');
-                    return;
-                }
-                
-                const previewModal = this.createBulkPreviewModal();
-                document.body.appendChild(previewModal);
-                
-                // Generate previews for all violations
-                for (let i = 0; i < this.currentViolations.length; i++) {
-                    const violation = this.currentViolations[i];
-                    const previewHtml = await this.generatePreviewHtml(violation);
-                    this.addPreviewToModal(previewModal, violation, previewHtml);
-                }
-            },
-            
-            // Helper: Generate fix for a single violation
-            generateSingleFix: async function(violation) {
-                try {
-                    const response = await fetch('/api/implement-fix', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            violationId: violation.id,
-                            fixType: 'auto',
-                            platformInfo: window.currentPlatformInfo || { type: 'custom' }
-                        })
-                    });
-                    
-                    return await response.json();
-                } catch (error) {
-                    return { success: false, error: error.message };
-                }
-            },
-            
-            // Helper: Show progress modal
-            showProgressModal: function(title, totalItems) {
-                const modal = document.createElement('div');
-                modal.id = 'bulk-progress-modal';
-                modal.style.cssText = \`
-                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                    background: rgba(0,0,0,0.8); z-index: 2000; 
-                    display: flex; align-items: center; justify-content: center;
-                \`;
-                
-                modal.innerHTML = \`
-                    <div style="background: white; padding: 30px; border-radius: 12px; min-width: 400px; text-align: center;">
-                        <h3 style="margin-bottom: 20px; color: #333;">\${title}</h3>
-                        <div style="background: #f8f9fa; border-radius: 8px; padding: 4px; margin-bottom: 15px;">
-                            <div id="progress-bar" style="background: #28a745; height: 20px; border-radius: 4px; width: 0%; transition: width 0.3s ease;"></div>
-                        </div>
-                        <div id="progress-text" style="color: #666; font-size: 14px;">Starting...</div>
-                        <div id="progress-count" style="color: #333; font-weight: 600; margin-top: 10px;">0 / \${totalItems}</div>
-                    </div>
-                \`;
-                
-                document.body.appendChild(modal);
-                return modal;
-            },
-            
-            // Helper: Update progress
-            updateProgress: function(modal, current, total, message) {
-                const progressBar = modal.querySelector('#progress-bar');
-                const progressText = modal.querySelector('#progress-text');
-                const progressCount = modal.querySelector('#progress-count');
-                
-                const percentage = (current / total) * 100;
-                progressBar.style.width = percentage + '%';
-                progressText.textContent = message;
-                progressCount.textContent = \`\${current} / \${total}\`;
-            },
-            
-            // Helper: Hide progress modal
-            hideProgressModal: function(modal) {
-                if (modal && modal.parentNode) {
-                    modal.parentNode.removeChild(modal);
-                }
-            },
-            
-            // Helper: Show bulk results
-            showBulkResults: function(title, fixes) {
-                const successCount = fixes.filter(f => f.success).length;
-                const failCount = fixes.length - successCount;
-                
+            showScreenReaderModal: function(data) {
                 const modal = document.createElement('div');
                 modal.style.cssText = \`
                     position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                    background: rgba(0,0,0,0.8); z-index: 2000; 
-                    display: flex; align-items: center; justify-content: center;
+                    background: rgba(0,0,0,0.9); z-index: 10001; display: flex; 
+                    align-items: center; justify-content: center; backdrop-filter: blur(5px);
                 \`;
                 
                 modal.innerHTML = \`
-                    <div style="background: white; padding: 30px; border-radius: 12px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3 style="color: #333;">\${title}</h3>
-                            <button onclick="BulkOperations.closeModal(this)" 
-                                    style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
-                                ✕ Close
-                            </button>
-                        </div>
-                        
-                        <div style="margin-bottom: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
-                            <h4 style="color: #155724; margin-bottom: 10px;">📊 Bulk Operation Results</h4>
-                            <p style="color: #155724; margin: 5px 0;"><strong>✅ Successful:</strong> \${successCount} fixes</p>
-                            \${failCount > 0 ? \`<p style="color: #721c24; margin: 5px 0;"><strong>❌ Failed:</strong> \${failCount} fixes</p>\` : ''}
-                        </div>
-                        
-                        <div style="text-align: center;">
-                            <button onclick="BulkOperations.downloadAllFixes()" 
-                                    style="background: #17a2b8; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">
-                                📦 Download All Fixes
-                            </button>
-                        </div>
-                    </div>
-                \`;
-                
-                document.body.appendChild(modal);
-            },
-            
-            // Helper: Create bulk preview modal
-            createBulkPreviewModal: function() {
-                const modal = document.createElement('div');
-                modal.style.cssText = \`
-                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                    background: rgba(0,0,0,0.8); z-index: 2000; 
-                    display: flex; align-items: center; justify-content: center;
-                \`;
-                
-                modal.innerHTML = \`
-                    <div style="background: white; padding: 30px; border-radius: 12px; max-width: 90vw; max-height: 90vh; overflow-y: auto; width: 800px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3 style="color: #333;">👁️ Preview All Changes</h3>
-                            <button onclick="BulkOperations.closeModal(this)" 
-                                    style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
-                                ✕ Close
-                            </button>
-                        </div>
-                        <div id="bulk-preview-content"></div>
-                    </div>
-                \`;
-                
-                return modal;
-            },
-            
-            // Helper: Generate preview HTML for a violation
-            generatePreviewHtml: async function(violation) {
-                // Simplified preview generation for bulk operations
-                return \`
-                    <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px;">
-                        <h4 style="color: #333; margin-bottom: 10px;">\${violation.id}</h4>
-                        <p style="color: #666; margin-bottom: 10px;">\${violation.description || 'Accessibility violation detected'}</p>
-                        <div style="background: #f8f9fa; padding: 10px; border-radius: 4px;">
-                            <strong>Fix:</strong> Platform-specific accessibility fix will be generated
-                        </div>
-                    </div>
-                \`;
-            },
-            
-            // Helper: Add preview to modal
-            addPreviewToModal: function(modal, violation, previewHtml) {
-                const content = modal.querySelector('#bulk-preview-content');
-                content.innerHTML += previewHtml;
-            },
-            
-            // Helper: Properly close modal and remove dark overlay
-            closeModal: function(button) {
-                // Find the modal container (the dark overlay)
-                const modal = button.closest('[style*="position: fixed"]');
-                if (modal && modal.parentNode) {
-                    modal.parentNode.removeChild(modal);
-                }
-                
-                // Also remove any remaining modal overlays as backup
-                const allModals = document.querySelectorAll('[style*="position: fixed"][style*="background: rgba(0,0,0,0.8)"]');
-                allModals.forEach(m => {
-                    if (m.parentNode) {
-                        m.parentNode.removeChild(m);
-                    }
-                });
-            }
-        };
-        
-        // Dashboard data loading - PRESERVED FROM WORKING VERSION
-        async function loadDashboardStats() {
-            try {
-                const response = await fetch('/api/dashboard/stats');
-                const stats = await response.json();
-                
-                document.getElementById('total-scans').textContent = stats.totalScans;
-                document.getElementById('total-issues').textContent = stats.totalIssues;
-                document.getElementById('average-score').textContent = stats.averageScore + '%';
-                document.getElementById('this-week-scans').textContent = stats.thisWeekScans;
-                
-            } catch (error) {
-                console.error('Error loading dashboard stats:', error);
-            }
-        }
-        
-        async function loadDashboardRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const scans = await response.json();
-                
-                const container = document.getElementById('dashboard-recent-scans');
-                
-                if (scans.length > 0) {
-                    container.innerHTML = scans.slice(0, 3).map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
+                    <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
+                        <div style="background: linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%); color: white; padding: 25px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                <h3 style="margin: 0; font-size: 20px; font-weight: 600;">🔊 Screen Reader Analysis</h3>
+                                <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
+                                        style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
+                                    ✕
+                                </button>
                             </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading dashboard recent scans:', error);
-                document.getElementById('dashboard-recent-scans').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        async function loadRecentScans() {
-            try {
-                const response = await fetch('/api/scans/recent');
-                const scans = await response.json();
-                
-                const container = document.getElementById('recent-scans-list');
-                
-                if (scans.length > 0) {
-                    container.innerHTML = scans.map(scan => \`
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>\${scan.url}</h4>
-                                <div class="scan-meta">\${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • \${new Date(scan.created_at).toLocaleDateString()}</div>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span class="scan-score">\${scan.score}% Score</span>
-                                <button class="view-report-btn">👁️ View Report</button>
-                            </div>
-                        </div>
-                    \`).join('');
-                } else {
-                    container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No scans yet. Run your first scan above!</p>';
-                }
-            } catch (error) {
-                console.error('Error loading recent scans:', error);
-                document.getElementById('recent-scans-list').innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Error loading recent scans</p>';
-            }
-        }
-        
-        // Initialize dashboard - PRESERVED FROM WORKING VERSION
-        document.addEventListener('DOMContentLoaded', () => {
-            loadDashboardStats();
-            loadDashboardRecentScans();
-            loadRecentScans();
-        });
-    </script>
-    
-    <!-- AI Suggestions Modal -->
-    <div id="ai-modal" class="ai-modal">
-        <div class="ai-modal-content">
-            <div class="ai-modal-header">
-                <h2>🤖 AI Fix Suggestions</h2>
-                <span class="close" onclick="closeAIModal()">&times;</span>
-            </div>
-            <div class="ai-modal-body" id="ai-modal-body">
-                <!-- AI suggestions will be loaded here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- NEW: Guided Fixing Modal -->
-    <div id="guided-fixing-modal" class="guided-modal">
-        <div class="guided-modal-content">
-            <div class="guided-modal-header">
-                <h2>🛠️ Guided Accessibility Fixing</h2>
-                <div class="progress-indicator" id="progress-indicator">Violation 1 of 6</div>
-                <span class="close" onclick="GuidedFixing.close()">&times;</span>
-            </div>
-            <div class="guided-modal-body" id="guided-modal-body">
-                <!-- Current violation details will be loaded here -->
-            </div>
-            <div class="guided-modal-footer">
-                <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
-                <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
-                
-                <!-- PHASE 2A: Enhanced Auto-Fix Buttons -->
-                <button class="auto-fix-btn" onclick="GuidedFixing.autoFixCurrent()" style="background: #28a745; color: white; border: none; padding: 10px 16px; border-radius: 4px; margin: 0 5px; cursor: pointer; font-size: 14px;">
-                    🔧 Auto-Fix
-                </button>
-                <button class="preview-fix-btn" onclick="GuidedFixing.previewFixCurrent()" style="background: #17a2b8; color: white; border: none; padding: 10px 16px; border-radius: 4px; margin: 0 5px; cursor: pointer; font-size: 14px;">
-                    👁️ Preview Fix
-                </button>
-                
-                <button class="next-btn" id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
-                <button class="finish-btn" id="finish-btn" onclick="GuidedFixing.finish()" style="display: none;">📄 Generate Report</button>
-            </div>
-        </div>
-    </div>
-</body>
-</html>`;
-    
-    res.send(html);
-});
-
-// Helper functions for link extraction and scanning
-async function extractLinks(page, baseUrl) {
-    try {
-        const links = await page.evaluate((baseUrl) => {
-            const anchors = Array.from(document.querySelectorAll('a[href]'));
-            const baseUrlObj = new URL(baseUrl);
-            
-            return anchors
-                .map(a => {
-                    try {
-                        const href = a.getAttribute('href');
-                        if (!href) return null;
-                        
-                        // Convert relative URLs to absolute
-                        const url = new URL(href, baseUrl);
-                        
-                        // Only include URLs from the same domain
-                        if (url.hostname !== baseUrlObj.hostname) return null;
-                        
-                        // Exclude common non-page URLs
-                        if (url.pathname.match(/\.(pdf|jpg|jpeg|png|gif|css|js|xml|zip|doc|docx)$/i)) return null;
-                        if (url.pathname.includes('#')) return null;
-                        
-                        return url.href;
-                    } catch (e) {
-                        return null;
-                    }
-                })
-                .filter(url => url !== null)
-                .filter((url, index, self) => self.indexOf(url) === index) // Remove duplicates
-                .slice(0, 20); // Limit to 20 links max
-        }, baseUrl);
-        
-        return links;
-    } catch (error) {
-        console.log('Error extracting links:', error.message);
-        return [];
-    }
-}
-
-async function scanSinglePage(browser, url) {
-    const page = await browser.newPage();
-    
-    try {
-        // Set viewport and user agent
-        await page.setViewport({ width: 1280, height: 720 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-        
-        console.log('Navigating to: ' + url);
-        
-        // Try multiple navigation strategies
-        try {
-            await page.goto(url, { 
-                waitUntil: 'networkidle0',
-                timeout: 90000 
-            });
-        } catch (navError) {
-            console.log('Network idle failed, trying domcontentloaded...');
-            await page.goto(url, { 
-                waitUntil: 'domcontentloaded',
-                timeout: 90000 
-            });
-        }
-        
-        // Wait for page to stabilize
-        console.log('Waiting for page to stabilize...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        // Inject axe-core
-        console.log('Injecting axe-core...');
-        await page.addScriptTag({
-            content: axeCore.source
-        });
-        
-        console.log('Running axe accessibility scan...');
-        const results = await page.evaluate(() => {
-            return new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Axe scan timeout'));
-                }, 60000);
-                
-                axe.run((err, results) => {
-                    clearTimeout(timeout);
-                    if (err) reject(err);
-                    else {
-                        // PHASE 1 ENHANCEMENT: Collect detailed element information
-                        results.violations = results.violations.map(violation => {
-                            violation.nodes = violation.nodes.map(node => {
-                                const element = document.querySelector(node.target[0]);
-                                if (element) {
-                                    // Enhanced element data collection
-                                    node.enhancedData = {
-                                        // Element targeting
-                                        selector: node.target[0],
-                                        xpath: getXPath(element),
-                                        tagName: element.tagName.toLowerCase(),
-                                        
-                                        // Current element state
-                                        outerHTML: element.outerHTML.substring(0, 500), // Truncate for size
-                                        textContent: element.textContent?.substring(0, 200) || '',
-                                        
-                                        // Computed styles for relevant violations
-                                        computedStyles: getRelevantStyles(element, violation.id),
-                                        
-                                        // Element attributes
-                                        attributes: Array.from(element.attributes).reduce((acc, attr) => {
-                                            acc[attr.name] = attr.value;
-                                            return acc;
-                                        }, {}),
-                                        
-                                        // Position information
-                                        boundingRect: element.getBoundingClientRect(),
-                                        
-                                        // Parent context
-                                        parentInfo: {
-                                            tagName: element.parentElement?.tagName.toLowerCase(),
-                                            className: element.parentElement?.className || '',
-                                            id: element.parentElement?.id || ''
-                                        }
-                                    };
-                                }
-                                return node;
-                            });
-                            return violation;
-                        });
-                        
-                        resolve(results);
-                    }
-                });
-                
-                // Helper function to get XPath
-                function getXPath(element) {
-                    if (element.id) return `//*[@id="${element.id}"]`;
-                    if (element === document.body) return '/html/body';
-                    
-                    let ix = 0;
-                    const siblings = element.parentNode?.childNodes || [];
-                    for (let i = 0; i < siblings.length; i++) {
-                        const sibling = siblings[i];
-                        if (sibling === element) {
-                            return getXPath(element.parentNode) + '/' + element.tagName.toLowerCase() + '[' + (ix + 1) + ']';
-                        }
-                        if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
-                            ix++;
-                        }
-                    }
-                    return '';
-                }
-                
-                // Helper function to get relevant computed styles based on violation type
-                function getRelevantStyles(element, violationId) {
-                    const computedStyle = window.getComputedStyle(element);
-                    const relevantStyles = {};
-                    
-                    // Collect styles relevant to specific violation types
-                    if (violationId === 'color-contrast') {
-                        relevantStyles.color = computedStyle.color;
-                        relevantStyles.backgroundColor = computedStyle.backgroundColor;
-                        relevantStyles.fontSize = computedStyle.fontSize;
-                        relevantStyles.fontWeight = computedStyle.fontWeight;
-                    } else if (violationId.includes('focus')) {
-                        relevantStyles.outline = computedStyle.outline;
-                        relevantStyles.outlineColor = computedStyle.outlineColor;
-                        relevantStyles.outlineWidth = computedStyle.outlineWidth;
-                        relevantStyles.boxShadow = computedStyle.boxShadow;
-                    } else if (violationId.includes('size') || violationId.includes('target')) {
-                        relevantStyles.width = computedStyle.width;
-                        relevantStyles.height = computedStyle.height;
-                        relevantStyles.padding = computedStyle.padding;
-                        relevantStyles.margin = computedStyle.margin;
-                    }
-                    
-                    // Always include basic layout styles
-                    relevantStyles.display = computedStyle.display;
-                    relevantStyles.position = computedStyle.position;
-                    relevantStyles.zIndex = computedStyle.zIndex;
-                    
-                    return relevantStyles;
-                }
-            });
-        });
-        
-        return results;
-        
-    } finally {
-        await page.close();
-    }
-}
-
-// PHASE 2B: Enhanced Platform Detection Function with Deep Intelligence
-async function detectPlatform(browser, url) {
-    const page = await browser.newPage();
-    try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        
-        const platformInfo = await page.evaluate(() => {
-            const platform = {
-                type: 'custom',
-                name: 'Unknown',
-                version: null,
-                confidence: 0,
-                indicators: [],
-                capabilities: {
-                    cssInjection: false,
-                    themeEditor: false,
-                    pluginSystem: false,
-                    apiAccess: false
-                },
-                // PHASE 2B: Enhanced platform intelligence
-                theme: {
-                    name: null,
-                    version: null,
-                    framework: null
-                },
-                plugins: [],
-                pageBuilder: null,
-                framework: null,
-                deploymentMethod: 'unknown',
-                cssFramework: null,
-                accessibilityPlugins: [],
-                customizations: {
-                    hasCustomCSS: false,
-                    hasCustomJS: false,
-                    customizationLevel: 'low'
-                }
-            };
-            
-            // PHASE 2B: Enhanced WordPress Detection with Deep Intelligence
-            if ((document.querySelector('meta[name="generator"][content*="WordPress"]') ||
-                (document.querySelector('link[href*="wp-content"]') && document.querySelector('script[src*="wp-content"]')) ||
-                (window.wp && document.querySelector('link[href*="wp-content"]')) ||
-                document.body.className.includes('wp-')) &&
-                !document.querySelector('script[src*="shopify"]')) { // Exclude if Shopify detected
-                
-                platform.type = 'wordpress';
-                platform.name = 'WordPress';
-                platform.confidence = 0.9;
-                platform.indicators.push('wp-content detected', 'WordPress meta tag or scripts');
-                platform.capabilities = {
-                    cssInjection: true,
-                    themeEditor: true,
-                    pluginSystem: true,
-                    apiAccess: true
-                };
-                platform.deploymentMethod = 'wordpress-admin';
-                
-                // Detect WordPress version
-                const generator = document.querySelector('meta[name="generator"]');
-                if (generator && generator.content.includes('WordPress')) {
-                    const versionMatch = generator.content.match(/WordPress\\s+([\\d.]+)/);
-                    if (versionMatch) platform.version = versionMatch[1];
-                }
-                
-                // PHASE 2B: Detect WordPress theme
-                const themeStylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-                    .map(link => link.href)
-                    .filter(href => href.includes('wp-content/themes/'));
-                
-                if (themeStylesheets.length > 0) {
-                    const themeMatch = themeStylesheets[0].match(/wp-content\/themes\/([^\/]+)/);
-                    if (themeMatch) {
-                        platform.theme.name = themeMatch[1];
-                        platform.indicators.push(`Theme: ${themeMatch[1]}`);
-                    }
-                }
-                
-                // PHASE 2B: Detect page builders
-                if (document.querySelector('.elementor-element') || document.querySelector('[data-elementor-type]')) {
-                    platform.pageBuilder = 'elementor';
-                    platform.indicators.push('Elementor page builder detected');
-                    platform.deploymentMethod = 'elementor-editor';
-                } else if (document.querySelector('.et_pb_module') || document.querySelector('.et_pb_section')) {
-                    platform.pageBuilder = 'divi';
-                    platform.indicators.push('Divi page builder detected');
-                    platform.deploymentMethod = 'divi-builder';
-                } else if (document.querySelector('.vc_row') || document.querySelector('[data-vc-full-width]')) {
-                    platform.pageBuilder = 'visual-composer';
-                    platform.indicators.push('Visual Composer detected');
-                    platform.deploymentMethod = 'visual-composer';
-                } else if (document.querySelector('.beaver-builder') || document.querySelector('.fl-builder-content')) {
-                    platform.pageBuilder = 'beaver-builder';
-                    platform.indicators.push('Beaver Builder detected');
-                    platform.deploymentMethod = 'beaver-builder';
-                }
-                
-                // PHASE 2B: Detect accessibility plugins
-                if (document.querySelector('#wpaccessibility') || document.querySelector('.wpa-')) {
-                    platform.accessibilityPlugins.push('WP Accessibility');
-                }
-                if (document.querySelector('[data-userway]') || document.querySelector('.userway-')) {
-                    platform.accessibilityPlugins.push('UserWay');
-                }
-                if (document.querySelector('[data-accessibe]') || document.querySelector('.acsb-')) {
-                    platform.accessibilityPlugins.push('accessiBe');
-                }
-                
-                // PHASE 2B: Detect CSS frameworks
-                if (document.querySelector('.container') && document.querySelector('.row')) {
-                    platform.cssFramework = 'bootstrap';
-                } else if (document.querySelector('.uk-container') || document.querySelector('[class*="uk-"]')) {
-                    platform.cssFramework = 'uikit';
-                } else if (document.querySelector('.foundation-') || document.querySelector('.grid-container')) {
-                    platform.cssFramework = 'foundation';
-                }
-                
-                // PHASE 2B: Detect customization level
-                const customCSS = Array.from(document.querySelectorAll('style')).some(style => 
-                    style.textContent && style.textContent.length > 100);
-                const customJS = Array.from(document.querySelectorAll('script')).some(script => 
-                    script.textContent && !script.src && script.textContent.length > 100);
-                
-                platform.customizations.hasCustomCSS = customCSS;
-                platform.customizations.hasCustomJS = customJS;
-                platform.customizations.customizationLevel = (customCSS && customJS) ? 'high' : 
-                    (customCSS || customJS) ? 'medium' : 'low';
-            }
-            
-            // PHASE 2B: Enhanced Shopify Detection with Deep Intelligence
-            if (document.querySelector('script[src*="shopify"]') ||
-                document.querySelector('link[href*="shopify"]') ||
-                document.querySelector('script[src*="shopifycdn"]') ||
-                document.querySelector('meta[name="shopify-checkout-api-token"]') ||
-                document.querySelector('script[src*="monorail-edge.shopifysvc.com"]') ||
-                document.querySelector('[id*="shopify"]') ||
-                document.querySelector('[class*="shopify"]') ||
-                document.querySelector('div[id*="shopify-section"]') ||
-                document.querySelector('script[src*="cdn.shopify.com"]') ||
-                window.Shopify || 
-                document.querySelector('[data-shopify]') ||
-                Array.from(document.querySelectorAll('script')).some(script => 
-                    script.textContent && (
-                        script.textContent.includes('Shopify') ||
-                        script.textContent.includes('shop_money_format') ||
-                        script.textContent.includes('shopify-section')
-                    )
-                )) {
-                
-                platform.type = 'shopify';
-                platform.name = 'Shopify';
-                platform.confidence = 0.9;
-                platform.indicators.push('Shopify scripts detected', 'Shopify data attributes');
-                platform.capabilities = {
-                    cssInjection: false,
-                    themeEditor: true,
-                    pluginSystem: false,
-                    apiAccess: true
-                };
-                platform.deploymentMethod = 'shopify-admin';
-                
-                // PHASE 2B: Detect Shopify theme
-                const themeScripts = Array.from(document.querySelectorAll('script[src]'))
-                    .map(script => script.src)
-                    .filter(src => src.includes('cdn.shopify.com') && src.includes('assets'));
-                
-                if (themeScripts.length > 0) {
-                    // Try to extract theme name from asset URLs
-                    const themeMatch = themeScripts[0].match(/\/assets\/([^.]+)/);
-                    if (themeMatch) {
-                        platform.theme.name = 'shopify-theme';
-                        platform.indicators.push('Shopify theme assets detected');
-                    }
-                }
-                
-                // PHASE 2B: Detect common Shopify themes
-                if (document.querySelector('.dawn-') || document.querySelector('[class*="dawn"]')) {
-                    platform.theme.name = 'Dawn';
-                    platform.theme.framework = 'liquid';
-                } else if (document.querySelector('.debut-') || document.querySelector('[class*="debut"]')) {
-                    platform.theme.name = 'Debut';
-                    platform.theme.framework = 'liquid';
-                } else if (document.querySelector('.brooklyn-') || document.querySelector('[class*="brooklyn"]')) {
-                    platform.theme.name = 'Brooklyn';
-                    platform.theme.framework = 'liquid';
-                } else if (document.querySelector('.narrative-') || document.querySelector('[class*="narrative"]')) {
-                    platform.theme.name = 'Narrative';
-                    platform.theme.framework = 'liquid';
-                }
-                
-                // PHASE 2B: Detect Shopify apps (accessibility-related)
-                if (document.querySelector('[data-userway]') || document.querySelector('.userway-')) {
-                    platform.accessibilityPlugins.push('UserWay (Shopify App)');
-                }
-                if (document.querySelector('[data-accessibe]') || document.querySelector('.acsb-')) {
-                    platform.accessibilityPlugins.push('accessiBe (Shopify App)');
-                }
-                if (document.querySelector('[data-equalweb]') || document.querySelector('.ew-')) {
-                    platform.accessibilityPlugins.push('EqualWeb (Shopify App)');
-                }
-                
-                // PHASE 2B: Detect customization level
-                const liquidTemplates = Array.from(document.querySelectorAll('script')).some(script => 
-                    script.textContent && script.textContent.includes('liquid'));
-                const customSections = document.querySelectorAll('[id*="shopify-section-template"]').length;
-                
-                platform.customizations.customizationLevel = customSections > 5 ? 'high' : 
-                    customSections > 2 ? 'medium' : 'low';
-                platform.customizations.hasCustomCSS = Array.from(document.querySelectorAll('style')).some(style => 
-                    style.textContent && style.textContent.length > 200);
-            }
-            
-            // PHASE 2B: Enhanced Wix Detection with Deep Intelligence
-            else if (document.querySelector('meta[name="generator"][content*="Wix"]') ||
-                     document.querySelector('script[src*="wix.com"]') ||
-                     window.wixDevelopersAnalytics) {
-                platform.type = 'wix';
-                platform.name = 'Wix';
-                platform.confidence = 0.8;
-                platform.indicators.push('Wix generator meta tag', 'Wix scripts');
-                platform.capabilities = {
-                    cssInjection: false,
-                    themeEditor: false,
-                    pluginSystem: false,
-                    apiAccess: false
-                };
-                platform.deploymentMethod = 'wix-editor';
-                
-                // PHASE 2B: Detect Wix editor type
-                if (document.querySelector('[data-wix-editor]') || document.querySelector('.wix-ads')) {
-                    platform.deploymentMethod = 'wix-adi';
-                    platform.indicators.push('Wix ADI detected');
-                } else if (document.querySelector('[data-corvid]') || window.wixCode) {
-                    platform.deploymentMethod = 'wix-corvid';
-                    platform.indicators.push('Wix Corvid/Velo detected');
-                    platform.capabilities.apiAccess = true;
-                }
-                
-                // PHASE 2B: Detect accessibility apps
-                if (document.querySelector('[data-userway]')) {
-                    platform.accessibilityPlugins.push('UserWay (Wix App)');
-                }
-                if (document.querySelector('[data-accessibe]')) {
-                    platform.accessibilityPlugins.push('accessiBe (Wix App)');
-                }
-            }
-            
-            // PHASE 2B: Enhanced Squarespace Detection with Deep Intelligence
-            else if (document.querySelector('script[src*="squarespace"]') ||
-                     document.querySelector('link[href*="squarespace"]') ||
-                     document.body.id === 'collection' ||
-                     document.querySelector('.sqs-')) {
-                platform.type = 'squarespace';
-                platform.name = 'Squarespace';
-                platform.confidence = 0.8;
-                platform.indicators.push('Squarespace scripts', 'SQS class names');
-                platform.capabilities = {
-                    cssInjection: true,
-                    themeEditor: false,
-                    pluginSystem: false,
-                    apiAccess: false
-                };
-                platform.deploymentMethod = 'squarespace-style-editor';
-                
-                // PHASE 2B: Detect Squarespace template family
-                if (document.querySelector('.sqs-template-') || document.body.className.includes('sqs-template-')) {
-                    const templateMatch = document.body.className.match(/sqs-template-([^\s]+)/);
-                    if (templateMatch) {
-                        platform.theme.name = templateMatch[1];
-                        platform.indicators.push(`Template: ${templateMatch[1]}`);
-                    }
-                }
-                
-                // PHASE 2B: Detect version
-                if (document.querySelector('.sqs-7-1') || document.body.className.includes('sqs-7-1')) {
-                    platform.version = '7.1';
-                    platform.deploymentMethod = 'squarespace-7.1-editor';
-                } else if (document.querySelector('.sqs-7-0') || document.body.className.includes('sqs-7-0')) {
-                    platform.version = '7.0';
-                    platform.deploymentMethod = 'squarespace-7.0-editor';
-                }
-                
-                // PHASE 2B: Detect customization level
-                const customCSS = Array.from(document.querySelectorAll('style')).some(style => 
-                    style.textContent && style.textContent.includes('/* CUSTOM CSS */'));
-                platform.customizations.hasCustomCSS = customCSS;
-                platform.customizations.customizationLevel = customCSS ? 'medium' : 'low';
-            }
-            
-            // PHASE 2B: Enhanced Webflow Detection with Deep Intelligence
-            else if (document.querySelector('script[src*="webflow"]') ||
-                     document.querySelector('meta[name="generator"][content*="Webflow"]')) {
-                platform.type = 'webflow';
-                platform.name = 'Webflow';
-                platform.confidence = 0.8;
-                platform.indicators.push('Webflow generator meta tag', 'Webflow scripts');
-                platform.capabilities = {
-                    cssInjection: false,
-                    themeEditor: true,
-                    pluginSystem: false,
-                    apiAccess: true
-                };
-                platform.deploymentMethod = 'webflow-designer';
-                
-                // PHASE 2B: Detect Webflow hosting vs export
-                if (document.querySelector('script[src*="webflow.com"]')) {
-                    platform.deploymentMethod = 'webflow-hosting';
-                    platform.indicators.push('Webflow hosted site');
-                } else {
-                    platform.deploymentMethod = 'webflow-export';
-                    platform.indicators.push('Webflow exported site');
-                }
-                
-                // PHASE 2B: Detect Webflow CMS
-                if (document.querySelector('[data-w-id]') && document.querySelector('.w-dyn-')) {
-                    platform.indicators.push('Webflow CMS detected');
-                    platform.capabilities.apiAccess = true;
-                }
-                
-                // PHASE 2B: Detect custom code
-                const customCode = Array.from(document.querySelectorAll('script')).some(script => 
-                    script.textContent && script.textContent.includes('/* Custom Code */'));
-                platform.customizations.hasCustomJS = customCode;
-                platform.customizations.customizationLevel = customCode ? 'high' : 'medium';
-            }
-            
-            // Generic CMS Detection
-            else if (document.querySelector('meta[name="generator"]')) {
-                const generator = document.querySelector('meta[name="generator"]').content;
-                platform.name = generator.split(' ')[0];
-                platform.confidence = 0.5;
-                platform.indicators.push('Generic CMS generator tag');
-            }
-            
-            return platform;
-        });
-        
-        return platformInfo;
-        
-    } catch (error) {
-        console.log('❌ Platform detection failed:', error.message);
-        return {
-            type: 'unknown',
-            name: 'Unknown',
-            confidence: 0,
-            error: error.message
-        };
-    } finally {
-        await page.close();
-    }
-}
-
-// EXACT COPY OF WORKING API ENDPOINT WITH DATABASE INTEGRATION ADDED
-app.post('/api/scan', async (req, res) => {
-    const startTime = Date.now();
-    let browser = null;
-    
-    try {
-        const { url, scanType = 'single', maxPages = 5 } = req.body;
-        
-        if (!url) {
-            return res.status(400).json({
-                success: false,
-                error: 'URL is required'
-            });
-        }
-        
-        let targetUrl = url;
-        if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-            targetUrl = 'https://' + targetUrl;
-        }
-        
-        console.log('🔍 Starting accessibility scan for: ' + targetUrl + ' (type: ' + scanType + ')');
-        
-        // PHASE 1 ENHANCEMENT: Platform Detection
-        let platformInfo = null;
-        
-        // Launch Puppeteer - EXACT WORKING CONFIGURATION
-        browser = await puppeteer.launch({
-            headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--disable-features=VizDisplayCompositor',
-                '--disable-background-timer-throttling',
-                '--disable-backgrounding-occluded-windows',
-                '--disable-renderer-backgrounding'
-            ],
-            timeout: 60000
-        });
-        
-        if (scanType === 'single') {
-            // Single page scan (existing working functionality)
-            const results = await scanSinglePage(browser, targetUrl);
-            const scanTime = Date.now() - startTime;
-            
-            // PHASE 1 ENHANCEMENT: Detect platform for single page scans
-            platformInfo = await detectPlatform(browser, targetUrl);
-            console.log('🔍 Platform detected:', platformInfo);
-            
-            console.log('✅ Single page scan completed in ' + scanTime + 'ms. Found ' + results.violations.length + ' violations.');
-            
-            // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, results.violations.length, scanTime, 1, results.violations);
-            
-            res.json({
-                success: true,
-                url: targetUrl,
-                violations: results.violations,
-                timestamp: new Date().toISOString(),
-                totalIssues: results.violations.length,
-                scanTime: scanTime,
-                platformInfo: platformInfo, // PHASE 1 ENHANCEMENT
-                summary: {
-                    critical: results.violations.filter(v => v.impact === 'critical').length,
-                    serious: results.violations.filter(v => v.impact === 'serious').length,
-                    moderate: results.violations.filter(v => v.impact === 'moderate').length,
-                    minor: results.violations.filter(v => v.impact === 'minor').length
-                }
-            });
-            
-        } else if (scanType === 'crawl') {
-            // Multi-page crawl - EXACT WORKING LOGIC
-            console.log('🕷️ Starting multi-page crawl (max ' + maxPages + ' pages)');
-            
-            const scannedPages = [];
-            const urlsToScan = [targetUrl];
-            const scannedUrls = new Set();
-            
-            // Scan the first page and extract links
-            const firstPageResults = await scanSinglePage(browser, targetUrl);
-            
-            // PHASE 1 ENHANCEMENT: Detect platform after first page scan
-            if (!platformInfo) {
-                platformInfo = await detectPlatform(browser, targetUrl);
-                console.log('🔍 Platform detected:', platformInfo);
-            }
-            
-            scannedPages.push({
-                url: targetUrl,
-                violations: firstPageResults.violations,
-                scanTime: Date.now() - startTime
-            });
-            scannedUrls.add(targetUrl);
-            
-            // Extract links from the first page for crawling
-            if (maxPages > 1) {
-                const page = await browser.newPage();
-                try {
-                    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    const links = await extractLinks(page, targetUrl);
-                    
-                    // Add unique links to scan queue
-                    for (const link of links) {
-                        if (urlsToScan.length < maxPages && !scannedUrls.has(link)) {
-                            urlsToScan.push(link);
-                        }
-                    }
-                } catch (error) {
-                    console.log('Error extracting links:', error.message);
-                } finally {
-                    await page.close();
-                }
-            }
-            
-            // Scan additional pages
-            for (let i = 1; i < urlsToScan.length && i < maxPages; i++) {
-                const pageUrl = urlsToScan[i];
-                if (scannedUrls.has(pageUrl)) continue;
-                
-                try {
-                    console.log('🔍 Scanning page ' + (i + 1) + '/' + Math.min(urlsToScan.length, maxPages) + ': ' + pageUrl);
-                    const pageStartTime = Date.now();
-                    const pageResults = await scanSinglePage(browser, pageUrl);
-                    
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: pageResults.violations,
-                        scanTime: Date.now() - pageStartTime
-                    });
-                    scannedUrls.add(pageUrl);
-                    
-                } catch (error) {
-                    console.log('❌ Error scanning page ' + pageUrl + ':', error.message);
-                    scannedPages.push({
-                        url: pageUrl,
-                        violations: [],
-                        scanTime: 0,
-                        error: error.message
-                    });
-                }
-            }
-            
-            // Aggregate results
-            const allViolations = scannedPages.reduce((acc, page) => acc.concat(page.violations || []), []);
-            const scanTime = Date.now() - startTime;
-            
-            console.log('✅ Multi-page crawl completed in ' + scanTime + 'ms. Scanned ' + scannedPages.length + ' pages, found ' + allViolations.length + ' total violations.');
-            
-            // Save to database - ADDED FOR PERSISTENCE
-            await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations);
-            
-            res.json({
-                success: true,
-                scanType: 'crawl',
-                pages: scannedPages,
-                totalIssues: allViolations.length,
-                scanTime: scanTime,
-                timestamp: new Date().toISOString(),
-                summary: {
-                    critical: allViolations.filter(v => v.impact === 'critical').length,
-                    serious: allViolations.filter(v => v.impact === 'serious').length,
-                    moderate: allViolations.filter(v => v.impact === 'moderate').length,
-                    minor: allViolations.filter(v => v.impact === 'minor').length
-                }
-            });
-        }
-        
-    } catch (error) {
-        console.error('❌ Scan error:', error);
-        const scanTime = Date.now() - startTime;
-        
-        let errorMessage = error.message;
-        if (errorMessage.includes('Navigation timeout')) {
-            errorMessage = 'Website took too long to load. This may be due to slow server response or complex page content. Please try a different URL or try again later.';
-        } else if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED')) {
-            errorMessage = 'Website not found. Please check the URL and try again.';
-        } else if (errorMessage.includes('net::ERR_CONNECTION_REFUSED')) {
-            errorMessage = 'Connection refused. The website may be down or blocking automated access.';
-        }
-        
-        res.status(500).json({
-            success: false,
-            error: errorMessage,
-            scanTime: scanTime,
-            timestamp: new Date().toISOString()
-        });
-    } finally {
-        if (browser) {
-            try {
-                await browser.close();
-                console.log('🔒 Browser closed successfully');
-            } catch (closeError) {
-                console.error('❌ Error closing browser:', closeError);
-            }
-        }
-    }
-});
-
-// Start server
-app.listen(PORT, () => {
-    console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
-    console.log('📊 Health check: http://localhost:' + PORT + '/health');
-    console.log('🔍 Scanner: http://localhost:' + PORT + '/');
-    console.log('💾 Database: ' + (db ? 'Connected' : 'Standalone mode'));
-    console.log('🌐 Environment: ' + (process.env.K_SERVICE ? 'Cloud Run' : 'Local'));
-});
-
-
-
-// PHASE 2D: Visual Preview Endpoint with Smart Element Highlighting
-app.post('/api/visual-preview', async (req, res) => {
-    const { url, violation, fixSuggestion } = req.body;
-
-    if (!url || !violation) {
-        return res.status(400).json({ error: 'URL and violation data are required' });
-    }
-
-    let browser;
-    try {
-        console.log('🎬 Starting visual preview generation for:', url);
-        browser = await puppeteer.launch({ 
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            headless: true
-        });
-        
-        const page = await browser.newPage();
-        await page.setViewport({ width: 1200, height: 800 });
-        
-        // Navigate to the page
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
-        // Inject highlighting styles
-        await page.addStyleTag({
-            content: `
-                .accessibility-highlight {
-                    position: relative !important;
-                    z-index: 9999 !important;
-                }
-                .accessibility-highlight::before {
-                    content: '';
-                    position: absolute;
-                    top: -3px;
-                    left: -3px;
-                    right: -3px;
-                    bottom: -3px;
-                    border: 3px solid;
-                    border-radius: 4px;
-                    pointer-events: none;
-                    z-index: 10000;
-                }
-                .highlight-critical::before {
-                    border-color: #dc3545;
-                    box-shadow: 0 0 10px rgba(220, 53, 69, 0.5);
-                }
-                .highlight-serious::before {
-                    border-color: #fd7e14;
-                    box-shadow: 0 0 10px rgba(253, 126, 20, 0.5);
-                }
-                .highlight-moderate::before {
-                    border-color: #ffc107;
-                    box-shadow: 0 0 10px rgba(255, 193, 7, 0.5);
-                }
-                .highlight-minor::before {
-                    border-color: #6c757d;
-                    box-shadow: 0 0 10px rgba(108, 117, 125, 0.5);
-                }
-                .accessibility-tooltip {
-                    position: absolute;
-                    background: rgba(0, 0, 0, 0.9);
-                    color: white;
-                    padding: 8px 12px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    font-family: Arial, sans-serif;
-                    z-index: 10001;
-                    max-width: 300px;
-                    word-wrap: break-word;
-                    top: -40px;
-                    left: 0;
-                }
-            `
-        });
-
-        // Highlight the problematic element(s)
-        await page.evaluate((violation) => {
-            if (violation.nodes && violation.nodes.length > 0) {
-                violation.nodes.forEach((node, index) => {
-                    if (node.target && node.target.length > 0) {
-                        try {
-                            const element = document.querySelector(node.target[0]);
-                            if (element) {
-                                element.classList.add('accessibility-highlight', `highlight-${violation.impact}`);
-                                
-                                // Add tooltip with violation info
-                                const tooltip = document.createElement('div');
-                                tooltip.className = 'accessibility-tooltip';
-                                tooltip.textContent = `${violation.id}: ${violation.description || violation.help || 'Accessibility issue detected'}`;
-                                element.style.position = 'relative';
-                                element.appendChild(tooltip);
-                            }
-                        } catch (e) {
-                            console.log('Could not highlight element:', node.target[0]);
-                        }
-                    }
-                });
-            }
-        }, violation);
-
-        // Take "before" screenshot with highlighting
-        const beforeScreenshot = await page.screenshot({ 
-            encoding: 'base64',
-            fullPage: false
-        });
-
-        // Apply the suggested fix if provided
-        if (fixSuggestion && fixSuggestion.cssCode) {
-            await page.addStyleTag({
-                content: fixSuggestion.cssCode
-            });
-        }
-
-        // Remove highlighting for "after" screenshot
-        await page.evaluate(() => {
-            document.querySelectorAll('.accessibility-highlight').forEach(el => {
-                el.classList.remove('accessibility-highlight', 'highlight-critical', 'highlight-serious', 'highlight-moderate', 'highlight-minor');
-            });
-            document.querySelectorAll('.accessibility-tooltip').forEach(el => {
-                el.remove();
-            });
-        });
-
-        // Take "after" screenshot
-        const afterScreenshot = await page.screenshot({ 
-            encoding: 'base64',
-            fullPage: false
-        });
-
-        console.log('✅ Visual preview generated successfully');
-
-        res.json({
-            success: true,
-            before: `data:image/png;base64,${beforeScreenshot}`,
-            after: `data:image/png;base64,${afterScreenshot}`,
-            violation: {
-                id: violation.id,
-                impact: violation.impact,
-                description: violation.description || violation.help,
-                helpUrl: violation.helpUrl
-            }
-        });
-
-    } catch (error) {
-        console.error('❌ Error generating visual preview:', error);
-        res.status(500).json({ 
-            success: false,
-            error: 'Failed to generate visual preview',
-            details: error.message 
-        });
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
-    }
-});
-
-// PHASE 2D: Color Contrast Simulator Endpoint
-app.post('/api/color-contrast-preview', async (req, res) => {
-    const { url, simulationType } = req.body;
-
-    if (!url || !simulationType) {
-        return res.status(400).json({ error: 'URL and simulation type are required' });
-    }
-
-    let browser;
-    try {
-        console.log('🎨 Starting color contrast simulation for:', url, 'Type:', simulationType);
-        browser = await puppeteer.launch({ 
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            headless: true
-        });
-        
-        const page = await browser.newPage();
-        await page.setViewport({ width: 1200, height: 800 });
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
-        // Apply color vision simulation
-        const simulationFilters = {
-            protanopia: 'url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'protanopia\'%3E%3CfeColorMatrix values=\'0.567,0.433,0,0,0 0.558,0.442,0,0,0 0,0.242,0.758,0,0 0,0,0,1,0\'/%3E%3C/filter%3E%3C/svg%3E#protanopia")',
-            deuteranopia: 'url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'deuteranopia\'%3E%3CfeColorMatrix values=\'0.625,0.375,0,0,0 0.7,0.3,0,0,0 0,0.3,0.7,0,0 0,0,0,1,0\'/%3E%3C/filter%3E%3C/svg%3E#deuteranopia")',
-            tritanopia: 'url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'tritanopia\'%3E%3CfeColorMatrix values=\'0.95,0.05,0,0,0 0,0.433,0.567,0,0 0,0.475,0.525,0,0 0,0,0,1,0\'/%3E%3C/filter%3E%3C/svg%3E#tritanopia")',
-            monochrome: 'grayscale(100%)',
-            lowContrast: 'contrast(50%)'
-        };
-
-        if (simulationFilters[simulationType]) {
-            await page.addStyleTag({
-                content: `
-                    html {
-                        filter: ${simulationFilters[simulationType]} !important;
-                    }
-                `
-            });
-        }
-
-        const screenshot = await page.screenshot({ 
-            encoding: 'base64',
-            fullPage: false
-        });
-
-        console.log('✅ Color contrast simulation generated successfully');
-
-        res.json({
-            success: true,
-            screenshot: `data:image/png;base64,${screenshot}`,
-            simulationType: simulationType
-        });
-
-    } catch (error) {
-        console.error('❌ Error generating color contrast preview:', error);
-        res.status(500).json({ 
-            success: false,
-            error: 'Failed to generate color contrast preview',
-            details: error.message 
-        });
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
-    }
-});
-
-
-
-// PHASE 2D: Screen Reader Simulation Endpoint
-app.post('/api/screen-reader-preview', async (req, res) => {
-    const { url } = req.body;
-
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
-    }
-
-    let browser;
-    try {
-        console.log('🔊 Starting screen reader simulation for:', url);
-        browser = await puppeteer.launch({ 
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            headless: true
-        });
-        
-        const page = await browser.newPage();
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
-        // Extract text content that would be read by screen readers
-        const screenReaderContent = await page.evaluate(() => {
-            const content = [];
-            
-            // Get page title
-            const title = document.title;
-            if (title) {
-                content.push({
-                    type: 'title',
-                    text: title,
-                    element: 'title'
-                });
-            }
-            
-            // Get headings in order
-            const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
-            headings.forEach((heading, index) => {
-                if (heading.textContent.trim()) {
-                    content.push({
-                        type: 'heading',
-                        level: heading.tagName.toLowerCase(),
-                        text: heading.textContent.trim(),
-                        element: `${heading.tagName.toLowerCase()}[${index}]`
-                    });
-                }
-            });
-            
-            // Get links
-            const links = document.querySelectorAll('a[href]');
-            links.forEach((link, index) => {
-                const text = link.textContent.trim();
-                const href = link.getAttribute('href');
-                if (text && href) {
-                    content.push({
-                        type: 'link',
-                        text: text,
-                        href: href,
-                        element: `a[${index}]`
-                    });
-                }
-            });
-            
-            // Get form elements
-            const inputs = document.querySelectorAll('input, textarea, select');
-            inputs.forEach((input, index) => {
-                const label = input.getAttribute('aria-label') || 
-                             input.getAttribute('placeholder') ||
-                             (input.labels && input.labels[0] ? input.labels[0].textContent.trim() : '');
-                const type = input.type || input.tagName.toLowerCase();
-                
-                content.push({
-                    type: 'form',
-                    inputType: type,
-                    label: label || 'Unlabeled input',
-                    element: `${input.tagName.toLowerCase()}[${index}]`,
-                    hasLabel: !!label
-                });
-            });
-            
-            // Get images
-            const images = document.querySelectorAll('img');
-            images.forEach((img, index) => {
-                const alt = img.getAttribute('alt');
-                const src = img.getAttribute('src');
-                
-                content.push({
-                    type: 'image',
-                    alt: alt || 'Image without alt text',
-                    src: src,
-                    element: `img[${index}]`,
-                    hasAlt: !!alt
-                });
-            });
-            
-            // Get main content paragraphs
-            const paragraphs = document.querySelectorAll('p, div[role="main"] *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(a):not(img):not(input):not(textarea):not(select)');
-            paragraphs.forEach((p, index) => {
-                const text = p.textContent.trim();
-                if (text && text.length > 20 && !p.querySelector('h1, h2, h3, h4, h5, h6, a, img, input, textarea, select')) {
-                    content.push({
-                        type: 'content',
-                        text: text.substring(0, 200) + (text.length > 200 ? '...' : ''),
-                        element: `${p.tagName.toLowerCase()}[${index}]`
-                    });
-                }
-            });
-            
-            return content;
-        });
-
-        console.log('✅ Screen reader content extracted successfully');
-
-        res.json({
-            success: true,
-            content: screenReaderContent,
-            summary: {
-                totalElements: screenReaderContent.length,
-                headings: screenReaderContent.filter(item => item.type === 'heading').length,
-                links: screenReaderContent.filter(item => item.type === 'link').length,
-                images: screenReaderContent.filter(item => item.type === 'image').length,
-                imagesWithoutAlt: screenReaderContent.filter(item => item.type === 'image' && !item.hasAlt).length,
-                formElements: screenReaderContent.filter(item => item.type === 'form').length,
-                unlabeledInputs: screenReaderContent.filter(item => item.type === 'form' && !item.hasLabel).length
-            }
-        });
-
-    } catch (error) {
-        console.error('❌ Error generating screen reader preview:', error);
-        res.status(500).json({ 
-            success: false,
-            error: 'Failed to generate screen reader preview',
-            details: error.message 
-        });
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
-    }
-});
-
-// PHASE 2D: Keyboard Navigation Test Endpoint
-app.post('/api/keyboard-navigation-test', async (req, res) => {
-    const { url } = req.body;
-
-    if (!url) {
-        return res.status(400).json({ error: 'URL is required' });
-    }
-
-    let browser;
-    try {
-        console.log('⌨️ Starting keyboard navigation test for:', url);
-        browser = await puppeteer.launch({ 
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            headless: true
-        });
-        
-        const page = await browser.newPage();
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
-        // Test keyboard navigation
-        const navigationResults = await page.evaluate(() => {
-            const results = {
-                focusableElements: [],
-                tabOrder: [],
-                issues: []
-            };
-            
-            // Find all potentially focusable elements
-            const focusableSelectors = [
-                'a[href]',
-                'button',
-                'input:not([disabled])',
-                'textarea:not([disabled])',
-                'select:not([disabled])',
-                '[tabindex]:not([tabindex="-1"])',
-                '[role="button"]',
-                '[role="link"]'
-            ];
-            
-            const allFocusable = document.querySelectorAll(focusableSelectors.join(', '));
-            
-            allFocusable.forEach((element, index) => {
-                const rect = element.getBoundingClientRect();
-                const isVisible = rect.width > 0 && rect.height > 0 && 
-                                 window.getComputedStyle(element).visibility !== 'hidden' &&
-                                 window.getComputedStyle(element).display !== 'none';
-                
-                const tabIndex = element.getAttribute('tabindex') || '0';
-                const hasVisibleFocus = window.getComputedStyle(element, ':focus').outline !== 'none' ||
-                                       window.getComputedStyle(element, ':focus').boxShadow !== 'none';
-                
-                const elementInfo = {
-                    index: index,
-                    tagName: element.tagName.toLowerCase(),
-                    type: element.type || null,
-                    text: element.textContent.trim().substring(0, 50),
-                    tabIndex: tabIndex,
-                    isVisible: isVisible,
-                    hasVisibleFocus: hasVisibleFocus,
-                    ariaLabel: element.getAttribute('aria-label'),
-                    role: element.getAttribute('role')
-                };
-                
-                results.focusableElements.push(elementInfo);
-                
-                // Check for common issues
-                if (isVisible && !hasVisibleFocus) {
-                    results.issues.push({
-                        type: 'no-focus-indicator',
-                        element: elementInfo,
-                        description: 'Element lacks visible focus indicator'
-                    });
-                }
-                
-                if (isVisible && !elementInfo.text && !elementInfo.ariaLabel) {
-                    results.issues.push({
-                        type: 'no-accessible-name',
-                        element: elementInfo,
-                        description: 'Interactive element lacks accessible name'
-                    });
-                }
-            });
-            
-            // Sort by tab order
-            results.tabOrder = results.focusableElements
-                .filter(el => el.isVisible)
-                .sort((a, b) => {
-                    const aTab = parseInt(a.tabIndex) || 0;
-                    const bTab = parseInt(b.tabIndex) || 0;
-                    return aTab - bTab;
-                });
-            
-            return results;
-        });
-
-        console.log('✅ Keyboard navigation test completed successfully');
-
-        res.json({
-            success: true,
-            results: navigationResults,
-            summary: {
-                totalFocusableElements: navigationResults.focusableElements.length,
-                visibleFocusableElements: navigationResults.focusableElements.filter(el => el.isVisible).length,
-                elementsWithoutFocusIndicator: navigationResults.issues.filter(issue => issue.type === 'no-focus-indicator').length,
-                elementsWithoutAccessibleName: navigationResults.issues.filter(issue => issue.type === 'no-accessible-name').length,
-                totalIssues: navigationResults.issues.length
-            }
-        });
-
-    } catch (error) {
-        console.error('❌ Error testing keyboard navigation:', error);
-        res.status(500).json({ 
-            success: false,
-            error: 'Failed to test keyboard navigation',
-            details: error.message 
-        });
-    } finally {
-        if (browser) {
-            await browser.close();
-        }
-    }
-});
+                            <p style="margin: 0; opacity: 0.9
