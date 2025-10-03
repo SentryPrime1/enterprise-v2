@@ -1010,6 +1010,183 @@ app.get('/api/download-fix/:type', (req, res) => {
     res.send(content);
 });
 
+// PHASE 2C: Bulk Download API Endpoint for Enterprise Batch Operations
+app.post('/api/bulk-download-fixes', async (req, res) => {
+    try {
+        const { violations, platformInfo } = req.body;
+        
+        if (!violations || violations.length === 0) {
+            return res.status(400).json({ error: 'No violations provided' });
+        }
+        
+        const JSZip = require('jszip');
+        const zip = new JSZip();
+        
+        // Create folders for organization
+        const cssFolder = zip.folder('css-fixes');
+        const instructionsFolder = zip.folder('instructions');
+        const summaryFolder = zip.folder('summary');
+        
+        let allFixes = [];
+        let successCount = 0;
+        let failCount = 0;
+        
+        // Generate fixes for each violation
+        for (let i = 0; i < violations.length; i++) {
+            const violation = violations[i];
+            
+            try {
+                const fixCode = generateFixCode(violation, platformInfo);
+                
+                // Add CSS file
+                const cssContent = fixCode.css || '/* No CSS fixes available for this violation */';
+                cssFolder.file(`${violation.id}-fix.css`, cssContent);
+                
+                // Add instruction file
+                const instructionContent = `# Fix Instructions for ${violation.id}
+
+## Platform: ${platformInfo.name || 'Custom'}
+## Violation Type: ${violation.id}
+## Impact Level: ${violation.impact || 'Unknown'}
+
+## Description:
+${violation.description || 'Accessibility violation detected'}
+
+## Implementation Steps:
+${fixCode.instructions.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}
+
+## CSS Code:
+\`\`\`css
+${fixCode.css}
+\`\`\`
+
+## HTML Example:
+\`\`\`html
+${fixCode.html}
+\`\`\`
+
+## Testing:
+- Test the fix using screen readers
+- Verify color contrast meets WCAG standards
+- Ensure keyboard navigation works properly
+`;
+                
+                instructionsFolder.file(`${violation.id}-instructions.md`, instructionContent);
+                
+                allFixes.push({
+                    violationId: violation.id,
+                    success: true,
+                    fixCode: fixCode
+                });
+                successCount++;
+                
+            } catch (error) {
+                console.error(`Error generating fix for ${violation.id}:`, error);
+                failCount++;
+                
+                // Add error file
+                instructionsFolder.file(`${violation.id}-ERROR.txt`, 
+                    `Error generating fix for ${violation.id}: ${error.message}`);
+            }
+        }
+        
+        // Create summary report
+        const summaryContent = `# Accessibility Fixes Summary Report
+
+## Generated: ${new Date().toISOString()}
+## Platform: ${platformInfo.name || 'Custom'}
+## Total Violations: ${violations.length}
+## Successful Fixes: ${successCount}
+## Failed Fixes: ${failCount}
+
+## Violation Summary:
+${violations.map(v => `- ${v.id} (${v.impact || 'Unknown'} impact)`).join('\n')}
+
+## Implementation Guide:
+
+### 1. CSS Fixes
+- Navigate to the \`css-fixes/\` folder
+- Copy the CSS code from each file
+- Add to your website's main stylesheet or theme customizer
+
+### 2. Platform-Specific Instructions
+- Check the \`instructions/\` folder for detailed steps
+- Each violation has specific implementation guidance
+- Follow the platform-specific deployment methods
+
+### 3. Testing
+- Test each fix individually
+- Use accessibility testing tools to verify improvements
+- Ensure no visual regressions occur
+
+### 4. Deployment
+${platformInfo.type === 'shopify' ? 
+    '- Access Shopify Admin > Online Store > Themes\n- Click "Actions" > "Edit code"\n- Add CSS to assets/theme.scss.liquid' :
+    platformInfo.type === 'wordpress' ?
+    '- Access WordPress Admin > Appearance > Customize\n- Add CSS to Additional CSS section\n- Or edit your theme\'s style.css file' :
+    '- Add CSS to your main stylesheet\n- Upload files to your web server\n- Test thoroughly before going live'
+}
+
+## Support:
+For additional help implementing these fixes, consult your platform's documentation or contact your web developer.
+`;
+        
+        summaryFolder.file('README.md', summaryContent);
+        
+        // Create deployment checklist
+        const checklistContent = `# Deployment Checklist
+
+## Pre-Deployment
+- [ ] Review all generated fixes
+- [ ] Test fixes in staging environment
+- [ ] Backup current website/theme
+- [ ] Verify platform-specific requirements
+
+## Deployment Steps
+- [ ] Apply CSS fixes to main stylesheet
+- [ ] Test each fix individually
+- [ ] Verify accessibility improvements
+- [ ] Check for visual regressions
+- [ ] Test with screen readers
+- [ ] Validate with accessibility tools
+
+## Post-Deployment
+- [ ] Run new accessibility scan
+- [ ] Document changes made
+- [ ] Monitor for any issues
+- [ ] Update accessibility statement if needed
+
+## Rollback Plan
+- [ ] Keep backup of original files
+- [ ] Document rollback procedure
+- [ ] Test rollback in staging first
+`;
+        
+        summaryFolder.file('deployment-checklist.md', checklistContent);
+        
+        // Generate ZIP file
+        const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+        
+        // Set response headers for file download
+        const filename = `accessibility-fixes-${new Date().toISOString().split('T')[0]}.zip`;
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Length', zipBuffer.length);
+        
+        // Send the ZIP file
+        res.send(zipBuffer);
+        
+        console.log(`✅ Bulk download generated: ${successCount} successful, ${failCount} failed`);
+        
+    } catch (error) {
+        console.error('❌ Bulk download error:', error);
+        res.status(500).json({ 
+            error: 'Failed to generate bulk download',
+            details: error.message 
+        });
+    }
+});
+
 // Main route - serves the dashboard HTML
 app.get('/', (req, res) => {
     const html = `<!DOCTYPE html>
@@ -2365,20 +2542,27 @@ app.get('/', (req, res) => {
                             : '<p style="text-align: center; color: #28a745; font-size: 1.2rem; padding: 40px;">🎉 No accessibility issues found!</p>'
                         }
                         
+                        <!-- PHASE 2C: Enhanced Action Buttons with Bulk Operations -->
                         <div style="margin-top: 20px; text-align: center;">
                             \${violations.length > 0 ? 
-                                '<button class="view-report-btn" onclick="openDetailedReport()" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
+                                '<button class="view-report-btn" onclick="openDetailedReport()" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
                                 : ''
                             }
                             \${violations.length > 0 ? 
-                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ', ' + JSON.stringify(result.platformInfo || {}).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
+                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ', ' + JSON.stringify(result.platformInfo || {}).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
                                 : ''
                             }
                             \${violations.length > 0 ? 
-                                '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 0 10px; cursor: pointer; font-size: 14px;">🛠️ Let\\'s Start Fixing</button>' 
+                                '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">🛠️ Let\\'s Start Fixing</button>' 
                                 : ''
                             }
                         </div>
+                        
+                        <!-- PHASE 2C: Bulk Operations Section -->
+                        \${violations.length > 1 ? 
+                            '<div style="margin-top: 30px; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;"><h3 style="margin: 0 0 15px 0; text-align: center;">⚡ Bulk Operations</h3><div style="text-align: center;"><button onclick="BulkOperations.fixAllIssues()" style="background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">🔧 Fix All Issues</button><button onclick="BulkOperations.fixCriticalOnly()" style="background: #dc3545; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">🚨 Fix Critical Only</button><button onclick="BulkOperations.downloadAllFixes()" style="background: #17a2b8; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">📦 Download All Fixes</button><button onclick="BulkOperations.showBulkPreview()" style="background: #fd7e14; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px; font-weight: 600;">👁️ Preview All Changes</button></div></div>' 
+                            : ''
+                        }
                     </div>
                 </div>
             \`;
@@ -3047,6 +3231,295 @@ app.get('/', (req, res) => {
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
+            }
+        };
+        
+        // PHASE 2C: Bulk Operations Object for Enterprise-Grade Batch Processing
+        const BulkOperations = {
+            currentViolations: [],
+            fixProgress: {},
+            
+            // Initialize with current violations
+            init: function(violations) {
+                this.currentViolations = violations || currentViolations || [];
+                this.fixProgress = {};
+            },
+            
+            // Fix all issues with progress tracking
+            fixAllIssues: async function() {
+                this.init();
+                if (this.currentViolations.length === 0) {
+                    alert('No violations to fix!');
+                    return;
+                }
+                
+                const progressModal = this.showProgressModal('Fixing All Issues', this.currentViolations.length);
+                
+                try {
+                    const fixes = [];
+                    for (let i = 0; i < this.currentViolations.length; i++) {
+                        const violation = this.currentViolations[i];
+                        this.updateProgress(progressModal, i + 1, this.currentViolations.length, \`Fixing: \${violation.id}\`);
+                        
+                        const fix = await this.generateSingleFix(violation);
+                        if (fix.success) {
+                            fixes.push(fix);
+                        }
+                        
+                        // Small delay to show progress
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                    this.hideProgressModal(progressModal);
+                    this.showBulkResults('All Issues Fixed', fixes);
+                    
+                } catch (error) {
+                    this.hideProgressModal(progressModal);
+                    alert('Error during bulk fixing: ' + error.message);
+                }
+            },
+            
+            // Fix only critical issues
+            fixCriticalOnly: async function() {
+                this.init();
+                const criticalViolations = this.currentViolations.filter(v => 
+                    v.impact === 'critical' || v.impact === 'serious'
+                );
+                
+                if (criticalViolations.length === 0) {
+                    alert('No critical issues found!');
+                    return;
+                }
+                
+                const progressModal = this.showProgressModal('Fixing Critical Issues', criticalViolations.length);
+                
+                try {
+                    const fixes = [];
+                    for (let i = 0; i < criticalViolations.length; i++) {
+                        const violation = criticalViolations[i];
+                        this.updateProgress(progressModal, i + 1, criticalViolations.length, \`Fixing: \${violation.id}\`);
+                        
+                        const fix = await this.generateSingleFix(violation);
+                        if (fix.success) {
+                            fixes.push(fix);
+                        }
+                        
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                    this.hideProgressModal(progressModal);
+                    this.showBulkResults('Critical Issues Fixed', fixes);
+                    
+                } catch (error) {
+                    this.hideProgressModal(progressModal);
+                    alert('Error during critical fixing: ' + error.message);
+                }
+            },
+            
+            // Download all fixes as a ZIP package
+            downloadAllFixes: async function() {
+                this.init();
+                if (this.currentViolations.length === 0) {
+                    alert('No violations to download fixes for!');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/bulk-download-fixes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            violations: this.currentViolations,
+                            platformInfo: window.currentPlatformInfo || { type: 'custom' }
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = \`accessibility-fixes-\${new Date().toISOString().split('T')[0]}.zip\`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
+                        
+                        alert('All fixes downloaded successfully!');
+                    } else {
+                        throw new Error('Download failed');
+                    }
+                    
+                } catch (error) {
+                    alert('Error downloading fixes: ' + error.message);
+                }
+            },
+            
+            // Show preview of all changes
+            showBulkPreview: async function() {
+                this.init();
+                if (this.currentViolations.length === 0) {
+                    alert('No violations to preview!');
+                    return;
+                }
+                
+                const previewModal = this.createBulkPreviewModal();
+                document.body.appendChild(previewModal);
+                
+                // Generate previews for all violations
+                for (let i = 0; i < this.currentViolations.length; i++) {
+                    const violation = this.currentViolations[i];
+                    const previewHtml = await this.generatePreviewHtml(violation);
+                    this.addPreviewToModal(previewModal, violation, previewHtml);
+                }
+            },
+            
+            // Helper: Generate fix for a single violation
+            generateSingleFix: async function(violation) {
+                try {
+                    const response = await fetch('/api/implement-fix', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            violationId: violation.id,
+                            fixType: 'auto',
+                            platformInfo: window.currentPlatformInfo || { type: 'custom' }
+                        })
+                    });
+                    
+                    return await response.json();
+                } catch (error) {
+                    return { success: false, error: error.message };
+                }
+            },
+            
+            // Helper: Show progress modal
+            showProgressModal: function(title, totalItems) {
+                const modal = document.createElement('div');
+                modal.id = 'bulk-progress-modal';
+                modal.style.cssText = \`
+                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                    background: rgba(0,0,0,0.8); z-index: 2000; 
+                    display: flex; align-items: center; justify-content: center;
+                \`;
+                
+                modal.innerHTML = \`
+                    <div style="background: white; padding: 30px; border-radius: 12px; min-width: 400px; text-align: center;">
+                        <h3 style="margin-bottom: 20px; color: #333;">\${title}</h3>
+                        <div style="background: #f8f9fa; border-radius: 8px; padding: 4px; margin-bottom: 15px;">
+                            <div id="progress-bar" style="background: #28a745; height: 20px; border-radius: 4px; width: 0%; transition: width 0.3s ease;"></div>
+                        </div>
+                        <div id="progress-text" style="color: #666; font-size: 14px;">Starting...</div>
+                        <div id="progress-count" style="color: #333; font-weight: 600; margin-top: 10px;">0 / \${totalItems}</div>
+                    </div>
+                \`;
+                
+                document.body.appendChild(modal);
+                return modal;
+            },
+            
+            // Helper: Update progress
+            updateProgress: function(modal, current, total, message) {
+                const progressBar = modal.querySelector('#progress-bar');
+                const progressText = modal.querySelector('#progress-text');
+                const progressCount = modal.querySelector('#progress-count');
+                
+                const percentage = (current / total) * 100;
+                progressBar.style.width = percentage + '%';
+                progressText.textContent = message;
+                progressCount.textContent = \`\${current} / \${total}\`;
+            },
+            
+            // Helper: Hide progress modal
+            hideProgressModal: function(modal) {
+                if (modal && modal.parentNode) {
+                    modal.parentNode.removeChild(modal);
+                }
+            },
+            
+            // Helper: Show bulk results
+            showBulkResults: function(title, fixes) {
+                const successCount = fixes.filter(f => f.success).length;
+                const failCount = fixes.length - successCount;
+                
+                const modal = document.createElement('div');
+                modal.style.cssText = \`
+                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                    background: rgba(0,0,0,0.8); z-index: 2000; 
+                    display: flex; align-items: center; justify-content: center;
+                \`;
+                
+                modal.innerHTML = \`
+                    <div style="background: white; padding: 30px; border-radius: 12px; max-width: 600px; max-height: 80vh; overflow-y: auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="color: #333;">\${title}</h3>
+                            <button onclick="this.closest('div').parentNode.remove()" 
+                                    style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
+                                ✕ Close
+                            </button>
+                        </div>
+                        
+                        <div style="margin-bottom: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
+                            <h4 style="color: #155724; margin-bottom: 10px;">📊 Bulk Operation Results</h4>
+                            <p style="color: #155724; margin: 5px 0;"><strong>✅ Successful:</strong> \${successCount} fixes</p>
+                            \${failCount > 0 ? \`<p style="color: #721c24; margin: 5px 0;"><strong>❌ Failed:</strong> \${failCount} fixes</p>\` : ''}
+                        </div>
+                        
+                        <div style="text-align: center;">
+                            <button onclick="BulkOperations.downloadAllFixes()" 
+                                    style="background: #17a2b8; color: white; border: none; padding: 12px 20px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">
+                                📦 Download All Fixes
+                            </button>
+                        </div>
+                    </div>
+                \`;
+                
+                document.body.appendChild(modal);
+            },
+            
+            // Helper: Create bulk preview modal
+            createBulkPreviewModal: function() {
+                const modal = document.createElement('div');
+                modal.style.cssText = \`
+                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                    background: rgba(0,0,0,0.8); z-index: 2000; 
+                    display: flex; align-items: center; justify-content: center;
+                \`;
+                
+                modal.innerHTML = \`
+                    <div style="background: white; padding: 30px; border-radius: 12px; max-width: 90vw; max-height: 90vh; overflow-y: auto; width: 800px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="color: #333;">👁️ Preview All Changes</h3>
+                            <button onclick="this.closest('div').parentNode.remove()" 
+                                    style="background: #dc3545; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
+                                ✕ Close
+                            </button>
+                        </div>
+                        <div id="bulk-preview-content"></div>
+                    </div>
+                \`;
+                
+                return modal;
+            },
+            
+            // Helper: Generate preview HTML for a violation
+            generatePreviewHtml: async function(violation) {
+                // Simplified preview generation for bulk operations
+                return \`
+                    <div style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px;">
+                        <h4 style="color: #333; margin-bottom: 10px;">\${violation.id}</h4>
+                        <p style="color: #666; margin-bottom: 10px;">\${violation.description || 'Accessibility violation detected'}</p>
+                        <div style="background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                            <strong>Fix:</strong> Platform-specific accessibility fix will be generated
+                        </div>
+                    </div>
+                \`;
+            },
+            
+            // Helper: Add preview to modal
+            addPreviewToModal: function(modal, violation, previewHtml) {
+                const content = modal.querySelector('#bulk-preview-content');
+                content.innerHTML += previewHtml;
             }
         };
         
