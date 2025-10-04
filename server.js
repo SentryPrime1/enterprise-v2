@@ -342,13 +342,13 @@ app.post('/api/color-contrast-preview', async (req, res) => {
         let filterCSS = '';
         switch (simulationType) {
             case 'protanopia':
-                filterCSS = 'filter: url("data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\'><defs><filter id=\\'protanopia\\'><feColorMatrix values=\\'0.567,0.433,0,0,0 0.558,0.442,0,0,0 0,0.242,0.758,0,0 0,0,0,1,0\\'/></filter></defs></svg>#protanopia");';
+                filterCSS = 'filter: grayscale(100%) sepia(100%) hue-rotate(180deg);';
                 break;
             case 'deuteranopia':
-                filterCSS = 'filter: url("data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\'><defs><filter id=\\'deuteranopia\\'><feColorMatrix values=\\'0.625,0.375,0,0,0 0.7,0.3,0,0,0 0,0.3,0.7,0,0 0,0,0,1,0\\'/></filter></defs></svg>#deuteranopia");';
+                filterCSS = 'filter: grayscale(100%) sepia(100%) hue-rotate(90deg);';
                 break;
             case 'tritanopia':
-                filterCSS = 'filter: url("data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\'><defs><filter id=\\'tritanopia\\'><feColorMatrix values=\\'0.95,0.05,0,0,0 0,0.433,0.567,0,0 0,0.475,0.525,0,0 0,0,0,1,0\\'/></filter></defs></svg>#tritanopia");';
+                filterCSS = 'filter: grayscale(100%) sepia(100%) hue-rotate(270deg);';
                 break;
             case 'monochrome':
                 filterCSS = 'filter: grayscale(100%);';
@@ -486,19 +486,6 @@ app.post('/api/screen-reader-preview', async (req, res) => {
                     element: `img[${index}]`,
                     hasAlt: !!alt
                 });
-            });
-            
-            // Get main content paragraphs
-            const paragraphs = document.querySelectorAll('p, div[role="main"] *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(a):not(img):not(input):not(textarea):not(select)');
-            paragraphs.forEach((p, index) => {
-                const text = p.textContent.trim();
-                if (text && text.length > 20 && !p.querySelector('h1, h2, h3, h4, h5, h6, a, img, input, textarea, select')) {
-                    content.push({
-                        type: 'content',
-                        text: text.substring(0, 200) + (text.length > 200 ? '...' : ''),
-                        element: `${p.tagName.toLowerCase()}[${index}]`
-                    });
-                }
             });
             
             return content;
@@ -785,160 +772,9 @@ app.post('/api/detailed-report', (req, res) => {
                         </div>
                         ${violation.help ? `<div class="violation-description"><strong>Help:</strong> ${violation.help}</div>` : ''}
                         ${violation.helpUrl ? `<div class="violation-description"><strong>Learn more:</strong> <a href="${violation.helpUrl}" target="_blank">${violation.helpUrl}</a></div>` : ''}
-                        
-                        <!-- PHASE 2D: Visual Preview Controls -->
-                        <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 6px; border: 1px solid #e9ecef;">
-                            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                                <button onclick="showVisualPreview('${violation.id}', ${index})" 
-                                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3); transition: all 0.3s ease;">
-                                    👁️ Visual Preview
-                                </button>
-                                <button onclick="autoFixViolation('${violation.id}', ${index})" 
-                                        style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3); transition: all 0.3s ease;">
-                                    🔧 Auto-Fix
-                                </button>
-                                <button onclick="showColorContrastPreview(${index})" 
-                                        style="background: linear-gradient(135deg, #fd7e14 0%, #ffc107 100%); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; box-shadow: 0 2px 8px rgba(253, 126, 20, 0.3); transition: all 0.3s ease;">
-                                    🎨 Color Test
-                                </button>
-                                <button onclick="showScreenReaderPreview(${index})" 
-                                        style="background: linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; box-shadow: 0 2px 8px rgba(111, 66, 193, 0.3); transition: all 0.3s ease;">
-                                    🔊 Screen Reader
-                                </button>
-                                <button onclick="showKeyboardTest(${index})" 
-                                        style="background: linear-gradient(135deg, #17a2b8 0%, #6610f2 100%); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; box-shadow: 0 2px 8px rgba(23, 162, 184, 0.3); transition: all 0.3s ease;">
-                                    ⌨️ Keyboard Test
-                                </button>
-                                <span style="color: #6c757d; font-size: 12px; margin-left: auto;">
-                                    Impact: <span class="impact-badge impact-${violation.impact}" style="font-size: 10px; padding: 2px 8px;">${violation.impact}</span>
-                                </span>
-                            </div>
-                        </div>
-
                     </div>
                 `).join('')}
             </div>
-            
-            <!-- PHASE 2A: Auto-Fix JavaScript Functions -->
-            <script>
-                async function autoFixViolation(violationId, index) {
-                    const button = event.target;
-                    const originalText = button.textContent;
-                    
-                    try {
-                        button.textContent = '🔄 Applying Fix...';
-                        button.disabled = true;
-                        
-                        const response = await fetch('/api/implement-fix', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                violationId: violationId,
-                                fixType: 'auto',
-                                platformInfo: window.platformInfo || { type: 'custom' }
-                            })
-                        });
-                        
-                        const result = await response.json();
-                        
-                        if (result.success) {
-                            button.textContent = '✅ Fix Generated';
-                            button.style.background = '#28a745';
-                            
-                            // Show download options
-                            const fixArea = document.createElement('div');
-                            fixArea.innerHTML = \`
-                                <div style="margin-top: 15px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
-                                    <h4 style="color: #155724; margin-bottom: 10px;">✅ Auto-Fix Generated Successfully!</h4>
-                                    <p style="color: #155724; margin-bottom: 15px;">The fix has been generated for <strong>\${violationId}</strong>. Download the files below:</p>
-                                    
-                                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                        <button onclick="downloadFix('\${violationId}', 'css')" 
-                                                style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                            📄 Download CSS Fix
-                                        </button>
-                                        <button onclick="downloadFix('\${violationId}', 'instructions')" 
-                                                style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                            📋 Download Instructions
-                                        </button>
-                                    </div>
-                                    
-                                    <div style="font-size: 14px; color: #155724;">
-                                        <strong>Next Steps:</strong>
-                                        <ol style="margin: 8px 0 0 20px;">
-                                            \${result.nextSteps.map(step => \`<li>\${step}</li>\`).join('')}
-                                        </ol>
-                                    </div>
-                                </div>
-                            \`;
-                            
-                            button.parentElement.parentElement.appendChild(fixArea);
-                            
-                        } else {
-                            throw new Error(result.error || 'Fix generation failed');
-                        }
-                        
-                    } catch (error) {
-                        console.error('Auto-fix error:', error);
-                        button.textContent = '❌ Fix Failed';
-                        button.style.background = '#dc3545';
-                        setTimeout(() => {
-                            button.textContent = originalText;
-                            button.style.background = 'linear-gradient(135deg, #28a745 0%, #20c997 100%)';
-                            button.disabled = false;
-                        }, 3000);
-                    }
-                }
-                
-                async function downloadFix(violationId, fileType) {
-                    try {
-                        const response = await fetch('/api/download-fix', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                violationId: violationId,
-                                fileType: fileType
-                            })
-                        });
-                        
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            const url = window.URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = \`\${violationId}-\${fileType}.\${fileType === 'css' ? 'css' : 'md'}\`;
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            window.URL.revokeObjectURL(url);
-                        } else {
-                            throw new Error('Download failed');
-                        }
-                    } catch (error) {
-                        console.error('Download error:', error);
-                        alert('Download failed. Please try again.');
-                    }
-                }
-                
-                // PHASE 2D: Placeholder functions for visual preview buttons
-                // These functions are not working in the detailed report context
-                // The functionality has been moved to the Guided Fixing modal
-                function showVisualPreview(violationId, index) {
-                    alert('Visual Preview is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
-                }
-                
-                function showColorContrastPreview(index) {
-                    alert('Color Contrast Testing is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
-                }
-                
-                function showScreenReaderPreview(index) {
-                    alert('Screen Reader Analysis is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
-                }
-                
-                function showKeyboardTest(index) {
-                    alert('Keyboard Navigation Testing is available in the Guided Fixing interface. Please use "Let\\'s Start Fixing" from the main scan results.');
-                }
-            </script>
         </body>
         </html>
     `;
@@ -1468,46 +1304,6 @@ input:focus, textarea:focus, select:focus {
 /* Visual indicator for inputs without labels (for development) */
 input:not([aria-label]):not([aria-labelledby]) {
     border-color: red !important;
-}`,
-
-        'heading-order': `/* Heading Order Fix for ${violationId} */
-/* Generated on ${new Date().toISOString()} */
-
-/* Ensure proper heading hierarchy styling */
-h1 {
-    font-size: 2.5em !important;
-    margin: 0.67em 0 !important;
-    font-weight: bold !important;
-}
-
-h2 {
-    font-size: 2em !important;
-    margin: 0.75em 0 !important;
-    font-weight: bold !important;
-}
-
-h3 {
-    font-size: 1.5em !important;
-    margin: 0.83em 0 !important;
-    font-weight: bold !important;
-}
-
-h4 {
-    font-size: 1.25em !important;
-    margin: 1em 0 !important;
-    font-weight: bold !important;
-}
-
-h5 {
-    font-size: 1.1em !important;
-    margin: 1.17em 0 !important;
-    font-weight: bold !important;
-}
-
-h6 {
-    font-size: 1em !important;
-    margin: 1.33em 0 !important;
-    font-weight: bold !important;
 }`
     };
     
@@ -2156,17 +1952,32 @@ app.get('/', async (req, res) => {
         }
         
         .get-ai-fix-btn {
-            background: #ff6b6b;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
             color: white;
         }
         
         .auto-fix-btn {
-            background: #28a745;
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
             color: white;
         }
         
         .preview-fix-btn {
-            background: #17a2b8;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .color-test-btn {
+            background: linear-gradient(135deg, #fd7e14 0%, #ffc107 100%);
+            color: white;
+        }
+        
+        .screen-reader-btn {
+            background: linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%);
+            color: white;
+        }
+        
+        .keyboard-test-btn {
+            background: linear-gradient(135deg, #17a2b8 0%, #6610f2 100%);
             color: white;
         }
         
@@ -2181,6 +1992,7 @@ app.get('/', async (req, res) => {
         }
         
         .get-ai-fix-btn:hover, .auto-fix-btn:hover, .preview-fix-btn:hover, 
+        .color-test-btn:hover, .screen-reader-btn:hover, .keyboard-test-btn:hover,
         .prev-btn:hover, .next-btn:hover, .finish-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0,0,0,0.2);
@@ -2271,6 +2083,50 @@ app.get('/', async (req, res) => {
                     }">${scan.score}%</div>
                 </div>
             `).join('') : '<p style="color: #6c757d; text-align: center; padding: 20px;">No recent scans found. Start your first scan above!</p>'}
+        </div>
+    </div>
+    
+    <!-- AI Suggestions Modal -->
+    <div id="ai-modal" class="ai-modal">
+        <div class="ai-modal-content">
+            <div class="ai-modal-header">
+                <h2>🤖 AI Fix Suggestions</h2>
+                <button class="close" onclick="closeAIModal()">&times;</button>
+            </div>
+            <div class="ai-modal-body" id="ai-modal-body">
+                <!-- AI suggestions will be loaded here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Guided Fixing Modal -->
+    <div id="guided-fixing-modal" class="guided-modal">
+        <div class="guided-modal-content">
+            <div class="guided-modal-header">
+                <h2>🛠️ Guided Accessibility Fixing</h2>
+                <div class="progress-indicator" id="progress-indicator">Violation 1 of 1</div>
+                <button class="close" onclick="GuidedFixing.close()">&times;</button>
+            </div>
+            <div class="guided-modal-body" id="guided-modal-body">
+                <!-- Violation details will be loaded here -->
+            </div>
+            <div class="guided-modal-footer">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
+                    <button class="auto-fix-btn" onclick="GuidedFixing.autoFixCurrent()">🔧 Auto-Fix</button>
+                    <button class="preview-fix-btn" onclick="GuidedFixing.showVisualPreview()">👁️ Visual Preview</button>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <button class="color-test-btn" onclick="GuidedFixing.showColorTest()">🎨 Color Test</button>
+                    <button class="screen-reader-btn" onclick="GuidedFixing.showScreenReader()">🔊 Screen Reader</button>
+                    <button class="keyboard-test-btn" onclick="GuidedFixing.showKeyboardTest()">⌨️ Keyboard Test</button>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
+                    <button class="next-btn" id="next-btn" onclick="GuidedFixing.nextViolation()">Next →</button>
+                    <button class="finish-btn" id="finish-btn" onclick="GuidedFixing.finish()" style="display: none;">✅ Generate Report</button>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -2465,7 +2321,7 @@ app.get('/', async (req, res) => {
             GuidedFixing.start(currentScanResults.violations);
         }
         
-        // Guided Fixing System
+        // Guided Fixing System with Phase 2D Integration
         const GuidedFixing = {
             currentViolations: [],
             currentViolationIndex: 0,
@@ -2752,19 +2608,49 @@ app.get('/', async (req, res) => {
                     button.style.background = '#dc3545';
                     setTimeout(() => {
                         button.textContent = originalText;
-                        button.style.background = '#28a745';
+                        button.style.background = 'linear-gradient(135deg, #28a745 0%, #20c997 100%)';
                         button.disabled = false;
                     }, 3000);
                 }
             },
             
-            // PHASE 2D: Visual Preview functionality for current violation
+            downloadFix: async function(violationId, fileType) {
+                try {
+                    const response = await fetch('/api/download-fix', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            violationId: violationId,
+                            fileType: fileType
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = \`\${violationId}-\${fileType}.\${fileType === 'css' ? 'css' : 'md'}\`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(url);
+                    } else {
+                        throw new Error('Download failed');
+                    }
+                } catch (error) {
+                    console.error('Download error:', error);
+                    alert('Download failed. Please try again.');
+                }
+            },
+            
+            // PHASE 2D: Visual Preview functionality
             showVisualPreview: async function() {
                 const currentViolation = this.currentViolations[this.currentViolationIndex];
                 if (!currentViolation) return;
                 
                 try {
-                    const currentUrl = window.location.origin; // Use the scanner's own URL for testing
+                    const currentUrl = window.location.origin;
                     
                     const response = await fetch('/api/visual-preview', {
                         method: 'POST',
@@ -2789,68 +2675,6 @@ app.get('/', async (req, res) => {
                 }
             },
             
-            // PHASE 2D: Color Test functionality
-            showColorTest: async function() {
-                try {
-                    const currentUrl = window.location.origin;
-                    this.showColorTestModal(currentUrl);
-                } catch (error) {
-                    console.error('Color test error:', error);
-                    alert('Color test failed: ' + error.message);
-                }
-            },
-            
-            // PHASE 2D: Screen Reader functionality
-            showScreenReader: async function() {
-                try {
-                    const currentUrl = window.location.origin;
-                    
-                    const response = await fetch('/api/screen-reader-preview', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: currentUrl })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        this.showScreenReaderModal(result);
-                    } else {
-                        throw new Error(result.error || 'Screen reader analysis failed');
-                    }
-                    
-                } catch (error) {
-                    console.error('Screen reader error:', error);
-                    alert('Screen reader analysis failed: ' + error.message);
-                }
-            },
-            
-            // PHASE 2D: Keyboard Test functionality
-            showKeyboardTest: async function() {
-                try {
-                    const currentUrl = window.location.origin;
-                    
-                    const response = await fetch('/api/keyboard-navigation-test', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: currentUrl })
-                    });
-                    
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        this.showKeyboardTestModal(result);
-                    } else {
-                        throw new Error(result.error || 'Keyboard test failed');
-                    }
-                    
-                } catch (error) {
-                    console.error('Keyboard test error:', error);
-                    alert('Keyboard test failed: ' + error.message);
-                }
-            },
-            
-            // PHASE 2D: Modal display methods
             showVisualPreviewModal: function(data) {
                 const modal = document.createElement('div');
                 modal.style.cssText = \`
@@ -2908,6 +2732,17 @@ app.get('/', async (req, res) => {
                         modal.remove();
                     }
                 });
+            },
+            
+            // PHASE 2D: Color Test functionality
+            showColorTest: async function() {
+                try {
+                    const currentUrl = window.location.origin;
+                    this.showColorTestModal(currentUrl);
+                } catch (error) {
+                    console.error('Color test error:', error);
+                    alert('Color test failed: ' + error.message);
+                }
             },
             
             showColorTestModal: function(url) {
@@ -3004,6 +2839,31 @@ app.get('/', async (req, res) => {
                 }
             },
             
+            // PHASE 2D: Screen Reader functionality
+            showScreenReader: async function() {
+                try {
+                    const currentUrl = window.location.origin;
+                    
+                    const response = await fetch('/api/screen-reader-preview', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: currentUrl })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.showScreenReaderModal(result);
+                    } else {
+                        throw new Error(result.error || 'Screen reader analysis failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('Screen reader error:', error);
+                    alert('Screen reader analysis failed: ' + error.message);
+                }
+            },
+            
             showScreenReaderModal: function(data) {
                 const modal = document.createElement('div');
                 modal.style.cssText = \`
@@ -3022,4 +2882,120 @@ app.get('/', async (req, res) => {
                                     ✕
                                 </button>
                             </div>
-                            <p style="margin: 0; opacity: 0.9
+                            <p style="margin: 0; opacity: 0.9;">How screen readers interpret your page content</p>
+                        </div>
+                        
+                        <div style="padding: 30px; max-height: 70vh; overflow-y: auto;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #495057;">\${data.summary.headings}</div>
+                                    <div style="color: #6c757d;">Headings</div>
+                                </div>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #495057;">\${data.summary.links}</div>
+                                    <div style="color: #6c757d;">Links</div>
+                                </div>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #495057;">\${data.summary.images}</div>
+                                    <div style="color: #6c757d;">Images</div>
+                                </div>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #dc3545;">\${data.summary.imagesWithoutAlt}</div>
+                                    <div style="color: #6c757d;">Missing Alt Text</div>
+                                </div>
+                            </div>
+                            
+                            <div style="background: #e7f3ff; border-radius: 8px; padding: 20px; border-left: 4px solid #0066cc;">
+                                <h4 style="margin: 0 0 15px 0; color: #0066cc;">📋 Content Flow</h4>
+                                <div style="max-height: 300px; overflow-y: auto;">
+                                    \${data.content.slice(0, 20).map(item => \`
+                                        <div style="margin-bottom: 10px; padding: 8px; background: white; border-radius: 4px;">
+                                            <strong style="color: #495057; text-transform: capitalize;">\${item.type}:</strong>
+                                            <span style="color: #6c757d;">\${item.text || item.alt || item.label || 'No text'}</span>
+                                        </div>
+                                    \`).join('')}
+                                    \${data.content.length > 20 ? '<div style="text-align: center; color: #6c757d; font-style: italic;">... and ' + (data.content.length - 20) + ' more items</div>' : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+                
+                document.body.appendChild(modal);
+                
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        modal.remove();
+                    }
+                });
+            },
+            
+            // PHASE 2D: Keyboard Test functionality
+            showKeyboardTest: async function() {
+                try {
+                    const currentUrl = window.location.origin;
+                    
+                    const response = await fetch('/api/keyboard-navigation-test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: currentUrl })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        this.showKeyboardTestModal(result);
+                    } else {
+                        throw new Error(result.error || 'Keyboard test failed');
+                    }
+                    
+                } catch (error) {
+                    console.error('Keyboard test error:', error);
+                    alert('Keyboard test failed: ' + error.message);
+                }
+            },
+            
+            showKeyboardTestModal: function(data) {
+                const modal = document.createElement('div');
+                modal.style.cssText = \`
+                    position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+                    background: rgba(0,0,0,0.9); z-index: 10001; display: flex; 
+                    align-items: center; justify-content: center; backdrop-filter: blur(5px);
+                \`;
+                
+                modal.innerHTML = \`
+                    <div style="background: white; border-radius: 16px; max-width: 95vw; max-height: 95vh; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4);">
+                        <div style="background: linear-gradient(135deg, #17a2b8 0%, #6610f2 100%); color: white; padding: 25px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                <h3 style="margin: 0; font-size: 20px; font-weight: 600;">⌨️ Keyboard Navigation Test</h3>
+                                <button onclick="this.closest('[style*=\\"position: fixed\\"]').remove()" 
+                                        style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; backdrop-filter: blur(10px); font-size: 16px;">
+                                    ✕
+                                </button>
+                            </div>
+                            <p style="margin: 0; opacity: 0.9;">Analysis of keyboard accessibility and focus management</p>
+                        </div>
+                        
+                        <div style="padding: 30px; max-height: 70vh; overflow-y: auto;">
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #495057;">\${data.summary.totalFocusableElements}</div>
+                                    <div style="color: #6c757d;">Focusable Elements</div>
+                                </div>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #495057;">\${data.summary.visibleFocusableElements}</div>
+                                    <div style="color: #6c757d;">Visible & Focusable</div>
+                                </div>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #dc3545;">\${data.summary.elementsWithoutFocusIndicator}</div>
+                                    <div style="color: #6c757d;">Missing Focus Indicator</div>
+                                </div>
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center;">
+                                    <div style="font-size: 24px; font-weight: bold; color: #dc3545;">\${data.summary.elementsWithoutAccessibleName}</div>
+                                    <div style="color: #6c757d;">Missing Accessible Name</div>
+                                </div>
+                            </div>
+                            
+                            <div style="background: #e7f3ff; border-radius: 8px; padding: 20px; border-left: 4px solid #0066cc;">
+                                <h4 style="margin: 0 0 15px 0; color: #0066cc;">📋 Tab Order</h4>
+                                <div
