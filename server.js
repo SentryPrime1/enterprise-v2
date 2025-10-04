@@ -221,18 +221,37 @@ app.post('/api/visual-preview', async (req, res) => {
     try {
         const { url, violationId, elementSelector } = req.body;
         
-        console.log('👁️ Generating visual preview for:', violationId);
+        console.log('👁️ Generating visual preview for:', violationId, 'URL:', url);
+        
+        // Validate URL
+        if (!url || url === 'https://example.com') {
+            return res.status(400).json({ 
+                success: false,
+                error: 'No valid URL provided. Please run a scan first to set the target URL.' 
+            });
+        }
         
         const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            timeout: 60000
         });
         
         const page = await browser.newPage();
         await page.setViewport({ width: 1200, height: 800 });
         
         // Navigate to the page
-        await page.goto(url, { waitUntil: 'networkidle0' });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         
         // Take before screenshot
         const beforeScreenshot = await page.screenshot({ 
@@ -240,16 +259,18 @@ app.post('/api/visual-preview', async (req, res) => {
             fullPage: false
         });
         
-        // Highlight the problematic element
-        if (elementSelector) {
-            await page.evaluate((selector) => {
+        // Highlight the problematic element (simplified approach)
+        await page.evaluate(() => {
+            // Add a red border to elements that commonly have accessibility issues
+            const selectors = ['img:not([alt])', 'input:not([aria-label]):not([aria-labelledby])', 'button:empty', 'a:empty'];
+            selectors.forEach(selector => {
                 const elements = document.querySelectorAll(selector);
                 elements.forEach(el => {
                     el.style.border = '3px solid #dc3545';
                     el.style.boxShadow = '0 0 10px rgba(220, 53, 69, 0.5)';
                 });
-            }, elementSelector);
-        }
+            });
+        });
         
         // Take after screenshot with highlighting
         const afterScreenshot = await page.screenshot({ 
@@ -268,7 +289,10 @@ app.post('/api/visual-preview', async (req, res) => {
         
     } catch (error) {
         console.error('Error generating visual preview:', error);
-        res.status(500).json({ error: 'Failed to generate visual preview' });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate visual preview: ' + error.message 
+        });
     }
 });
 
@@ -276,22 +300,43 @@ app.post('/api/color-contrast-preview', async (req, res) => {
     try {
         const { url, simulationType } = req.body;
         
-        console.log('🎨 Generating color contrast preview:', simulationType);
+        console.log('🎨 Generating color contrast preview:', simulationType, 'URL:', url);
+        
+        // Validate URL
+        if (!url || url === 'https://example.com') {
+            return res.status(400).json({ 
+                success: false,
+                error: 'No valid URL provided. Please run a scan first to set the target URL.' 
+            });
+        }
         
         const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            timeout: 60000
         });
         
         const page = await browser.newPage();
         await page.setViewport({ width: 1200, height: 800 });
         
         // Navigate to the page
-        await page.goto(url, { waitUntil: 'networkidle0' });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         
         // Apply color vision simulation
         const filterCSS = getColorVisionFilter(simulationType);
-        await page.addStyleTag({ content: filterCSS });
+        if (filterCSS) {
+            await page.addStyleTag({ content: filterCSS });
+        }
         
         // Take screenshot
         const screenshot = await page.screenshot({ 
@@ -309,7 +354,10 @@ app.post('/api/color-contrast-preview', async (req, res) => {
         
     } catch (error) {
         console.error('Error generating color contrast preview:', error);
-        res.status(500).json({ error: 'Failed to generate color contrast preview' });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate color contrast preview: ' + error.message 
+        });
     }
 });
 
@@ -2626,9 +2674,10 @@ app.get('/', (req, res) => {
         }
         
         function displayScanResults(result) {
-            // Store violations and platform info globally
+            // Store violations, platform info, and URL globally
             currentViolations = result.violations;
             window.currentPlatformInfo = result.platformInfo;
+            window.currentScanUrl = result.url;
             
             const resultsContainer = document.getElementById('scan-results-container');
             
