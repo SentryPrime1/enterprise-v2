@@ -216,12 +216,12 @@ app.get('/health', (req, res) => {
     });
 });
 
-// PHASE 2D: Visual Preview Endpoints - MINIMAL ADDITIONS
+// PHASE 2D: Enhanced Visual Preview Endpoints - VIOLATION-SPECIFIC
 app.post('/api/visual-preview', async (req, res) => {
     try {
-        const { url, violationId, elementSelector } = req.body;
+        const { url, violation } = req.body;
         
-        console.log('👁️ Generating visual preview for:', violationId, 'URL:', url);
+        console.log('👁️ Generating violation-specific visual preview for:', violation?.id, 'URL:', url);
         
         // Validate URL
         if (!url || url === 'https://example.com') {
@@ -259,18 +259,104 @@ app.post('/api/visual-preview', async (req, res) => {
             fullPage: false
         });
         
-        // Highlight the problematic element (simplified approach)
-        await page.evaluate(() => {
-            // Add a red border to elements that commonly have accessibility issues
-            const selectors = ['img:not([alt])', 'input:not([aria-label]):not([aria-labelledby])', 'button:empty', 'a:empty'];
-            selectors.forEach(selector => {
-                const elements = document.querySelectorAll(selector);
-                elements.forEach(el => {
-                    el.style.border = '3px solid #dc3545';
-                    el.style.boxShadow = '0 0 10px rgba(220, 53, 69, 0.5)';
+        // Violation-specific highlighting
+        const highlightResult = await page.evaluate((violationData) => {
+            let highlightedCount = 0;
+            let elementInfo = null;
+            
+            // Get impact color
+            const impactColors = {
+                critical: '#dc3545',
+                serious: '#fd7e14', 
+                moderate: '#ffc107',
+                minor: '#6c757d'
+            };
+            const borderColor = impactColors[violationData?.impact] || '#dc3545';
+            
+            // Try to find elements using violation targets
+            if (violationData?.target && violationData.target.length > 0) {
+                violationData.target.forEach(selector => {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            // Highlight the element
+                            el.style.border = `4px solid ${borderColor}`;
+                            el.style.boxShadow = `0 0 15px rgba(220, 53, 69, 0.6)`;
+                            el.style.position = 'relative';
+                            
+                            // Add a tooltip
+                            const tooltip = document.createElement('div');
+                            tooltip.style.cssText = `
+                                position: absolute;
+                                top: -40px;
+                                left: 0;
+                                background: ${borderColor};
+                                color: white;
+                                padding: 5px 10px;
+                                border-radius: 4px;
+                                font-size: 12px;
+                                font-weight: bold;
+                                z-index: 10000;
+                                white-space: nowrap;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                            `;
+                            tooltip.textContent = `${violationData?.impact?.toUpperCase() || 'ISSUE'}: ${violationData?.id || 'Accessibility Issue'}`;
+                            el.appendChild(tooltip);
+                            
+                            highlightedCount++;
+                            
+                            // Get element info for the first element
+                            if (!elementInfo) {
+                                elementInfo = {
+                                    tagName: el.tagName.toLowerCase(),
+                                    selector: selector,
+                                    text: el.textContent?.substring(0, 50) || '',
+                                    attributes: {
+                                        id: el.id || null,
+                                        class: el.className || null,
+                                        alt: el.alt || null,
+                                        'aria-label': el.getAttribute('aria-label') || null
+                                    }
+                                };
+                            }
+                        });
+                    } catch (e) {
+                        console.log('Could not select:', selector, e.message);
+                    }
                 });
-            });
-        });
+            }
+            
+            // Fallback: violation-specific highlighting based on rule ID
+            if (highlightedCount === 0 && violationData?.id) {
+                const ruleSelectors = {
+                    'color-contrast': ['a', 'button', '[role="button"]', 'input[type="submit"]', 'input[type="button"]'],
+                    'image-alt': ['img:not([alt])', 'img[alt=""]'],
+                    'label': ['input:not([aria-label]):not([aria-labelledby])', 'select:not([aria-label]):not([aria-labelledby])'],
+                    'link-name': ['a:empty', 'a:not([aria-label]):not([title])'],
+                    'button-name': ['button:empty', 'button:not([aria-label]):not([title])'],
+                    'heading-order': ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+                    'landmark-one-main': ['main', '[role="main"]'],
+                    'page-has-heading-one': ['h1'],
+                    'region': ['header', 'nav', 'main', 'footer', '[role="banner"]', '[role="navigation"]', '[role="main"]', '[role="contentinfo"]']
+                };
+                
+                const selectors = ruleSelectors[violationData.id] || ['*'];
+                selectors.forEach(selector => {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        Array.from(elements).slice(0, 5).forEach(el => { // Limit to 5 elements
+                            el.style.border = `3px solid ${borderColor}`;
+                            el.style.boxShadow = `0 0 10px rgba(220, 53, 69, 0.5)`;
+                            highlightedCount++;
+                        });
+                    } catch (e) {
+                        console.log('Could not select:', selector, e.message);
+                    }
+                });
+            }
+            
+            return { highlightedCount, elementInfo };
+        }, violation);
         
         // Take after screenshot with highlighting
         const afterScreenshot = await page.screenshot({ 
@@ -284,7 +370,9 @@ app.post('/api/visual-preview', async (req, res) => {
             success: true,
             beforeImage: `data:image/png;base64,${beforeScreenshot}`,
             afterImage: `data:image/png;base64,${afterScreenshot}`,
-            violationId: violationId
+            violationId: violation?.id || 'unknown',
+            highlightedElements: highlightResult.highlightedCount,
+            elementInfo: highlightResult.elementInfo
         });
         
     } catch (error) {
@@ -3428,15 +3516,22 @@ app.get('/', (req, res) => {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
                             url: window.currentScanUrl || 'https://example.com',
-                            violationId: currentViolation.id,
-                            elementSelector: currentViolation.target?.[0] || 'body'
+                            violation: {
+                                id: currentViolation.id,
+                                impact: currentViolation.impact,
+                                description: currentViolation.description,
+                                help: currentViolation.help,
+                                helpUrl: currentViolation.helpUrl,
+                                target: currentViolation.target,
+                                nodes: currentViolation.nodes
+                            }
                         })
                     });
                     
                     const result = await response.json();
                     
                     if (result.success) {
-                        this.showVisualPreviewModal(result);
+                        this.showVisualPreviewModal(result, currentViolation);
                     } else {
                         throw new Error(result.error || 'Visual preview failed');
                     }
@@ -3450,12 +3545,21 @@ app.get('/', (req, res) => {
                 }
             },
             
-            showVisualPreviewModal: function(data) {
+            showVisualPreviewModal: function(data, violation) {
+                const impactColors = {
+                    critical: '#dc3545',
+                    serious: '#fd7e14', 
+                    moderate: '#ffc107',
+                    minor: '#6c757d'
+                };
+                
+                const impactColor = impactColors[violation?.impact] || '#6c757d';
+                
                 const modalHtml = \`
                     <div id="visual-preview-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; display: flex; align-items: center; justify-content: center;">
                         <div style="background: white; padding: 0; border-radius: 8px; max-width: 95%; max-height: 90%; overflow: hidden; position: relative;">
                             <div style="background: linear-gradient(135deg, #6f42c1 0%, #764ba2 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
-                                <h3>👁️ Visual Preview: \${data.violationId}</h3>
+                                <h3>👁️ Visual Preview: \${violation?.id || 'Unknown'}</h3>
                                 <button onclick="document.getElementById('visual-preview-modal').remove()" 
                                         style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">
                                     ✕
@@ -3463,6 +3567,23 @@ app.get('/', (req, res) => {
                             </div>
                             
                             <div style="padding: 20px;">
+                                <!-- Violation Info -->
+                                <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid \${impactColor};">
+                                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                                        <span style="background: \${impactColor}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px; text-transform: uppercase; font-weight: bold; margin-right: 10px;">
+                                            \${violation?.impact || 'Unknown'}
+                                        </span>
+                                        <strong>\${violation?.help || 'Accessibility Issue'}</strong>
+                                    </div>
+                                    <p style="margin: 0; color: #666; font-size: 14px;">\${violation?.description || 'No description available'}</p>
+                                    \${data.elementInfo ? \`
+                                        <div style="margin-top: 10px; font-size: 13px; color: #555;">
+                                            <strong>Element:</strong> \${data.elementInfo.tagName || 'Unknown'} 
+                                            \${data.elementInfo.selector ? \`<code style="background: #e9ecef; padding: 2px 4px; border-radius: 3px;">\${data.elementInfo.selector}</code>\` : ''}
+                                        </div>
+                                    \` : ''}
+                                </div>
+                                
                                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                                     <div>
                                         <h4 style="margin-bottom: 10px;">❌ Before (Current Issue)</h4>
@@ -3474,8 +3595,20 @@ app.get('/', (req, res) => {
                                     </div>
                                 </div>
                                 
+                                \${data.fixPreview ? \`
+                                    <div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 6px; padding: 15px; margin-bottom: 20px;">
+                                        <h4 style="margin-bottom: 10px; color: #155724;">✅ Suggested Fix Preview</h4>
+                                        <img src="\${data.fixPreview}" style="width: 100%; border: 1px solid #ddd; border-radius: 4px;" alt="Fixed version preview">
+                                    </div>
+                                \` : ''}
+                                
                                 <div style="text-align: center;">
-                                    <p style="color: #666; margin-bottom: 15px;">The highlighted elements show where accessibility issues were detected.</p>
+                                    <p style="color: #666; margin-bottom: 15px;">
+                                        \${data.highlightedElements > 0 ? 
+                                            \`Found and highlighted \${data.highlightedElements} element(s) with this accessibility issue.\` :
+                                            'The highlighted elements show where accessibility issues were detected.'
+                                        }
+                                    </p>
                                     <button onclick="GuidedFixing.autoFixCurrent(); document.getElementById('visual-preview-modal').remove();" 
                                             style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 10px;">
                                         🔧 Fix This Issue
