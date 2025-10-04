@@ -3628,9 +3628,9 @@ app.get('/', (req, res) => {
             
             showColorTest: async function() {
                 const colorTestHtml = \`
-                    <div id="color-test-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; display: flex; align-items: center; justify-content: center;">
-                        <div style="background: white; padding: 0; border-radius: 8px; max-width: 95%; max-height: 90%; overflow: hidden; position: relative;">
-                            <div style="background: linear-gradient(135deg, #fd7e14 0%, #f39c12 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <div id="color-test-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; display: flex; align-items: center; justify-content: center; overflow-y: auto;">
+                        <div style="background: white; padding: 0; border-radius: 8px; max-width: 95%; max-height: 90%; overflow-y: auto; position: relative; margin: 20px;">
+                            <div style="background: linear-gradient(135deg, #fd7e14 0%, #f39c12 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1;">
                                 <h3>🎨 Color Vision Test</h3>
                                 <button onclick="document.getElementById('color-test-modal').remove()" 
                                         style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">
@@ -3638,7 +3638,7 @@ app.get('/', (req, res) => {
                                 </button>
                             </div>
                             
-                            <div style="padding: 20px;">
+                            <div style="padding: 20px; max-height: calc(90vh - 100px); overflow-y: auto;">
                                 <p style="margin-bottom: 20px; color: #666;">Test how your website appears to users with different types of color vision deficiency:</p>
                                 
                                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
