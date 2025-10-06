@@ -2718,10 +2718,88 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
                     
+                    <!-- Modal HTML -->
+                    <div id="connectionModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+                        <div style="background: white; border-radius: 12px; padding: 2rem; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                                <h2 id="modalTitle" style="margin: 0; color: #333;">Connect Platform</h2>
+                                <button onclick="closeModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666;">&times;</button>
+                            </div>
+                            <div id="modalContent">
+                                <!-- Dynamic content will be inserted here -->
+                            </div>
+                        </div>
+                    </div>
+
                     <script>
                     function showConnectModal(platform) {
-                        alert('Connect to ' + platform + ' - Feature coming soon! This will open a connection modal for ' + platform + ' integration.');
+                        const modal = document.getElementById('connectionModal');
+                        const title = document.getElementById('modalTitle');
+                        const content = document.getElementById('modalContent');
+                        
+                        title.textContent = 'Connect ' + platform;
+                        
+                        if (platform === 'WordPress') {
+                            content.innerHTML = `
+                                <form onsubmit="connectWordPress(event)" style="display: flex; flex-direction: column; gap: 1rem;">
+                                    <div>
+                                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">WordPress Site URL</label>
+                                        <input type="url" id="wpUrl" placeholder="https://yoursite.com" required style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 6px; font-size: 1rem;">
+                                    </div>
+                                    <div>
+                                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Username</label>
+                                        <input type="text" id="wpUsername" placeholder="admin" required style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 6px; font-size: 1rem;">
+                                    </div>
+                                    <div>
+                                        <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #333;">Application Password</label>
+                                        <input type="password" id="wpPassword" placeholder="xxxx xxxx xxxx xxxx" required style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 6px; font-size: 1rem;">
+                                        <small style="color: #666; font-size: 0.9rem;">Generate this in WordPress Admin → Users → Application Passwords</small>
+                                    </div>
+                                    <button type="submit" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 1rem;">Connect WordPress</button>
+                                </form>
+                            `;
+                        } else {
+                            // Keep simple alerts for Shopify and Custom for now
+                            content.innerHTML = `
+                                <p style="text-align: center; color: #666; margin: 2rem 0;">
+                                    ${platform} integration coming soon!<br>
+                                    <small>This will include connection forms for ${platform}.</small>
+                                </p>
+                                <button onclick="closeModal()" style="background: #6c757d; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 600; cursor: pointer; width: 100%;">Close</button>
+                            `;
+                        }
+                        
+                        modal.style.display = 'flex';
                     }
+                    
+                    function closeModal() {
+                        document.getElementById('connectionModal').style.display = 'none';
+                    }
+                    
+                    function connectWordPress(event) {
+                        event.preventDefault();
+                        
+                        const url = document.getElementById('wpUrl').value;
+                        const username = document.getElementById('wpUsername').value;
+                        const password = document.getElementById('wpPassword').value;
+                        
+                        // Show loading state
+                        event.target.querySelector('button').textContent = 'Connecting...';
+                        event.target.querySelector('button').disabled = true;
+                        
+                        // Simulate connection attempt
+                        setTimeout(() => {
+                            alert('WordPress connection test completed!\\n\\nURL: ' + url + '\\nUsername: ' + username + '\\n\\nIn a real implementation, this would connect to your WordPress REST API.');
+                            closeModal();
+                        }, 2000);
+                    }
+                    
+                    // Close modal when clicking outside
+                    document.getElementById('connectionModal').addEventListener('click', function(e) {
+                        if (e.target === this) {
+                            closeModal();
+                        }
+                    });
                     </script>
                 </div>
                 
