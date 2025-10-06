@@ -483,7 +483,7 @@ function getColorVisionFilter(type) {
 
 // Detailed report endpoint
 app.post('/api/detailed-report', (req, res) => {
-    const { violations } = req.body;
+    const { violations, websiteContext, platformInfo } = req.body;
     
     if (!violations || violations.length === 0) {
         return res.status(400).send('<html><body><h1>No violations data provided</h1></body></html>');
@@ -573,6 +573,32 @@ app.post('/api/detailed-report', (req, res) => {
                 <h1>🔍 Accessibility Scan Report</h1>
                 <p>Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
                 
+                ${websiteContext ? `
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h3 style="margin: 0 0 15px 0; display: flex; align-items: center;">
+                        <span style="margin-right: 10px;">🔍</span>Website Analysis
+                    </h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
+                            <div style="font-size: 0.9rem; opacity: 0.8;">Website Type</div>
+                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.websiteType || 'Unknown'}</div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
+                            <div style="font-size: 0.9rem; opacity: 0.8;">Industry</div>
+                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.industry || 'General'}</div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
+                            <div style="font-size: 0.9rem; opacity: 0.8;">Business Model</div>
+                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.businessModel || 'Unknown'}</div>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
+                            <div style="font-size: 0.9rem; opacity: 0.8;">Target Audience</div>
+                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.targetAudience || 'General'}</div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-number">${violations.length}</div>
@@ -595,6 +621,34 @@ app.post('/api/detailed-report', (req, res) => {
                         <div>Minor</div>
                     </div>
                 </div>
+                
+                ${violations.some(v => v.businessImpact) ? `
+                <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <h4 style="margin: 0 0 15px 0; color: #856404; display: flex; align-items: center;">
+                        <span style="margin-right: 8px;">📊</span>Business Impact Analysis
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                        ${(() => {
+                            const impactCounts = violations.reduce((acc, v) => {
+                                if (v.businessImpact) {
+                                    acc[v.businessImpact.level] = (acc[v.businessImpact.level] || 0) + 1;
+                                }
+                                return acc;
+                            }, {});
+                            return Object.entries(impactCounts).map(([level, count]) => 
+                                `<div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 6px;">
+                                    <div style="font-size: 1.2rem; font-weight: 600; color: ${
+                                        level === 'critical' ? '#dc3545' : 
+                                        level === 'high' ? '#fd7e14' : 
+                                        level === 'medium' ? '#ffc107' : '#28a745'
+                                    };">${count}</div>
+                                    <div style="font-size: 0.9rem; color: #856404; text-transform: capitalize;">${level} Impact</div>
+                                </div>`
+                            ).join('');
+                        })()}
+                    </div>
+                </div>
+                ` : ''}
             </div>
             
             <div class="violations-list">
@@ -609,7 +663,29 @@ app.post('/api/detailed-report', (req, res) => {
                         </div>
                         ${violation.help ? `<div class="violation-description"><strong>Help:</strong> ${violation.help}</div>` : ''}
                         ${violation.helpUrl ? `<div class="violation-description"><strong>Learn more:</strong> <a href="${violation.helpUrl}" target="_blank">${violation.helpUrl}</a></div>` : ''}
-
+                        
+                        ${violation.businessImpact ? `
+                        <div style="background: #f8f9fa; border-left: 4px solid ${
+                            violation.businessImpact.level === 'critical' ? '#dc3545' : 
+                            violation.businessImpact.level === 'high' ? '#fd7e14' : 
+                            violation.businessImpact.level === 'medium' ? '#ffc107' : '#28a745'
+                        }; padding: 15px; margin: 15px 0; border-radius: 4px;">
+                            <h4 style="margin: 0 0 10px 0; color: #333; display: flex; align-items: center;">
+                                <span style="margin-right: 8px;">📊</span>Business Impact Analysis
+                            </h4>
+                            <div style="margin-bottom: 8px;">
+                                <strong>Impact Level:</strong> 
+                                <span style="text-transform: capitalize; font-weight: 600; color: ${
+                                    violation.businessImpact.level === 'critical' ? '#dc3545' : 
+                                    violation.businessImpact.level === 'high' ? '#fd7e14' : 
+                                    violation.businessImpact.level === 'medium' ? '#ffc107' : '#28a745'
+                                };">${violation.businessImpact.level}</span>
+                            </div>
+                            <div style="color: #666; line-height: 1.4;">
+                                ${violation.businessImpact.description || 'This accessibility issue may impact user experience and business goals.'}
+                            </div>
+                        </div>
+                        ` : ''}
                     </div>
                 `).join('')}
             </div>
@@ -2766,6 +2842,7 @@ app.get('/', (req, res) => {
             currentViolations = result.violations;
             window.currentPlatformInfo = result.platformInfo;
             window.currentScanUrl = result.url;
+            window.currentWebsiteContext = result.websiteContext; // PHASE 2F: Store website context
             
             const resultsContainer = document.getElementById('scan-results-container');
             
@@ -2778,6 +2855,12 @@ app.get('/', (req, res) => {
                         <div class="results-meta">Completed in \${result.scanTime}ms</div>
                     </div>
                     <div class="results-body">
+                        <!-- PHASE 2F: Website Context Information -->
+                        \${result.websiteContext ? 
+                            '<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;"><h3 style="margin: 0 0 15px 0; display: flex; align-items: center;"><span style="margin-right: 10px;">🔍</span>Website Analysis</h3><div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;"><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Website Type</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.websiteType || 'Unknown') + '</div></div><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Industry</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.industry || 'General') + '</div></div><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Business Model</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.businessModel || 'Unknown') + '</div></div><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Target Audience</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.targetAudience || 'General') + '</div></div></div></div>' 
+                            : ''
+                        }
+                        
                         <div class="results-summary">
                             <div class="summary-grid">
                                 <div class="summary-item">
@@ -2802,6 +2885,26 @@ app.get('/', (req, res) => {
                                 </div>
                             </div>
                         </div>
+                        
+                        <!-- PHASE 2F: Business Impact Summary -->
+                        \${violations.length > 0 && violations.some(v => v.businessImpact) ? 
+                            '<div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin: 20px 0;"><h4 style="margin: 0 0 15px 0; color: #856404; display: flex; align-items: center;"><span style="margin-right: 8px;">📊</span>Business Impact Analysis</h4><div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">' + 
+                            (() => {
+                                const impactCounts = violations.reduce((acc, v) => {
+                                    if (v.businessImpact) {
+                                        acc[v.businessImpact.level] = (acc[v.businessImpact.level] || 0) + 1;
+                                    }
+                                    return acc;
+                                }, {});
+                                return Object.entries(impactCounts).map(([level, count]) => 
+                                    '<div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 6px;"><div style="font-size: 1.2rem; font-weight: 600; color: ' + 
+                                    (level === 'critical' ? '#dc3545' : level === 'high' ? '#fd7e14' : level === 'medium' ? '#ffc107' : '#28a745') + 
+                                    ';">' + count + '</div><div style="font-size: 0.9rem; color: #856404; text-transform: capitalize;">' + level + ' Impact</div></div>'
+                                ).join('');
+                            })() + 
+                            '</div></div>' 
+                            : ''
+                        }
                         
                         \${violations.length > 0 ? 
                             '<div style="text-align: center; color: #666; padding: 20px; background: #f8f9fa; border-radius: 8px; margin: 20px 0;"><p>📋 <strong>' + violations.length + ' accessibility issues found</strong></p><p>Use the buttons below to view details or start fixing issues.</p></div>'
@@ -2927,7 +3030,11 @@ app.get('/', (req, res) => {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ violations: violationsToShow })
+                body: JSON.stringify({ 
+                    violations: violationsToShow,
+                    websiteContext: window.currentWebsiteContext,
+                    platformInfo: window.currentPlatformInfo
+                })
             })
             .then(response => response.text())
             .then(html => {
@@ -4199,6 +4306,184 @@ async function extractLinks(page, baseUrl) {
     }
 }
 
+// PHASE 2F: Website Context Detection
+async function detectWebsiteContext(page) {
+    const context = {
+        websiteType: 'unknown',
+        industry: 'unknown',
+        businessModel: 'unknown',
+        targetAudience: 'general'
+    };
+
+    try {
+        const content = await page.content();
+        const url = page.url();
+        
+        // Enhanced website type detection
+        if (content.match(/add to cart|checkout|product|shop|buy now|price|\$[\d,]+/i)) {
+            context.websiteType = 'e-commerce';
+            context.businessModel = 'retail';
+        } else if (content.match(/blog|post|comment|article|author|published/i)) {
+            context.websiteType = 'blog';
+            context.businessModel = 'content';
+        } else if (content.match(/contact us|about us|services|solutions|consulting/i)) {
+            context.websiteType = 'business';
+            context.businessModel = 'service';
+        } else if (content.match(/login|dashboard|account|profile|settings/i)) {
+            context.websiteType = 'application';
+            context.businessModel = 'saas';
+        } else if (content.match(/course|lesson|learn|education|training|student/i)) {
+            context.websiteType = 'educational';
+            context.businessModel = 'education';
+        } else {
+            context.websiteType = 'custom';
+            context.businessModel = 'other';
+        }
+
+        // Enhanced industry detection
+        if (content.match(/fashion|clothing|apparel|style|wear/i)) {
+            context.industry = 'retail-fashion';
+        } else if (content.match(/finance|investment|banking|loan|credit|insurance/i)) {
+            context.industry = 'finance';
+        } else if (content.match(/health|medical|doctor|hospital|clinic|patient/i)) {
+            context.industry = 'healthcare';
+        } else if (content.match(/food|restaurant|recipe|cooking|dining/i)) {
+            context.industry = 'food-service';
+        } else if (content.match(/travel|hotel|booking|vacation|flight/i)) {
+            context.industry = 'travel';
+        } else if (content.match(/tech|software|app|digital|technology/i)) {
+            context.industry = 'technology';
+        } else if (content.match(/real estate|property|home|house|rent/i)) {
+            context.industry = 'real-estate';
+        } else if (content.match(/education|school|university|course|learning/i)) {
+            context.industry = 'education';
+        } else {
+            context.industry = 'general';
+        }
+
+        // Target audience detection
+        if (content.match(/senior|elderly|retirement|medicare/i)) {
+            context.targetAudience = 'seniors';
+        } else if (content.match(/child|kid|family|parent|baby/i)) {
+            context.targetAudience = 'families';
+        } else if (content.match(/business|enterprise|corporate|b2b/i)) {
+            context.targetAudience = 'business';
+        } else if (content.match(/student|college|university|young/i)) {
+            context.targetAudience = 'students';
+        } else {
+            context.targetAudience = 'general';
+        }
+
+        console.log('🔍 Website context detected:', context);
+        return context;
+        
+    } catch (error) {
+        console.error('Error detecting website context:', error);
+        return context;
+    }
+}
+
+// PHASE 2F: Business Impact Analysis
+function getBusinessImpact(violation, context) {
+    const impact = {
+        level: 'low',
+        description: '',
+        businessConsequences: [],
+        priority: 'medium',
+        estimatedUsers: 'some users'
+    };
+
+    const highImpactIssues = ['color-contrast', 'button-name', 'link-name', 'form-field-multiple-labels'];
+    const mediumImpactIssues = ['image-alt', 'heading-order', 'label', 'landmark-one-main'];
+    const criticalForEcommerce = ['color-contrast', 'button-name', 'link-name'];
+    const criticalForForms = ['label', 'form-field-multiple-labels', 'input-button-name'];
+
+    // Context-aware impact assessment
+    if (context.websiteType === 'e-commerce' && criticalForEcommerce.includes(violation.id)) {
+        impact.level = 'critical';
+        impact.priority = 'high';
+        impact.estimatedUsers = '15-20% of users';
+        impact.description = 'This issue directly prevents users from completing purchases and can significantly impact revenue.';
+        impact.businessConsequences = [
+            'Lost sales and revenue',
+            'Abandoned shopping carts',
+            'Negative customer reviews',
+            'Legal compliance risks',
+            'Reduced customer loyalty'
+        ];
+    } else if (context.websiteType === 'application' && criticalForForms.includes(violation.id)) {
+        impact.level = 'critical';
+        impact.priority = 'high';
+        impact.estimatedUsers = '10-15% of users';
+        impact.description = 'This issue prevents users from accessing core application functionality.';
+        impact.businessConsequences = [
+            'User frustration and churn',
+            'Reduced user engagement',
+            'Support ticket increases',
+            'Compliance violations',
+            'Competitive disadvantage'
+        ];
+    } else if (context.industry === 'healthcare' && highImpactIssues.includes(violation.id)) {
+        impact.level = 'critical';
+        impact.priority = 'high';
+        impact.estimatedUsers = '20-25% of users';
+        impact.description = 'Healthcare accessibility issues can prevent patients from accessing vital information and services.';
+        impact.businessConsequences = [
+            'Patient safety concerns',
+            'Legal compliance violations',
+            'Regulatory penalties',
+            'Reputation damage',
+            'Reduced patient satisfaction'
+        ];
+    } else if (context.industry === 'finance' && highImpactIssues.includes(violation.id)) {
+        impact.level = 'high';
+        impact.priority = 'high';
+        impact.estimatedUsers = '12-18% of users';
+        impact.description = 'Financial services must be accessible to all users to maintain trust and compliance.';
+        impact.businessConsequences = [
+            'Regulatory compliance issues',
+            'Customer trust erosion',
+            'Legal liability risks',
+            'Market share loss',
+            'Brand reputation damage'
+        ];
+    } else if (highImpactIssues.includes(violation.id)) {
+        impact.level = 'high';
+        impact.priority = 'medium';
+        impact.estimatedUsers = '8-12% of users';
+        impact.description = 'This is a significant accessibility issue that can prevent users from accessing core functionality.';
+        impact.businessConsequences = [
+            'User experience degradation',
+            'Potential legal risks',
+            'Reduced user satisfaction',
+            'Accessibility compliance gaps'
+        ];
+    } else if (mediumImpactIssues.includes(violation.id)) {
+        impact.level = 'medium';
+        impact.priority = 'medium';
+        impact.estimatedUsers = '5-8% of users';
+        impact.description = 'This issue can create barriers for users with disabilities and should be addressed promptly.';
+        impact.businessConsequences = [
+            'User frustration',
+            'Reduced accessibility',
+            'Minor compliance gaps',
+            'Potential user abandonment'
+        ];
+    } else {
+        impact.level = 'low';
+        impact.priority = 'low';
+        impact.estimatedUsers = '2-5% of users';
+        impact.description = 'This is a minor accessibility issue that should be addressed to improve overall user experience.';
+        impact.businessConsequences = [
+            'Minor user experience issues',
+            'Small accessibility gaps',
+            'Potential for improvement'
+        ];
+    }
+
+    return impact;
+}
+
 async function scanSinglePage(browser, url) {
     const page = await browser.newPage();
     
@@ -4340,6 +4625,26 @@ async function scanSinglePage(browser, url) {
                 }
             });
         });
+        
+        // PHASE 2F: Detect website context for business impact analysis
+        console.log('🔍 Detecting website context...');
+        const websiteContext = await detectWebsiteContext(page);
+        
+        // PHASE 2F: Add business impact analysis to violations
+        if (results.violations && results.violations.length > 0) {
+            console.log('📊 Adding business impact analysis to violations...');
+            results.violations = results.violations.map(violation => {
+                const businessImpact = getBusinessImpact(violation, websiteContext);
+                return { 
+                    ...violation, 
+                    businessImpact,
+                    websiteContext // Include context for reference
+                };
+            });
+        }
+        
+        // Add context to results for use in UI
+        results.websiteContext = websiteContext;
         
         return results;
         
@@ -4727,7 +5032,7 @@ app.post('/api/scan', async (req, res) => {
         // Launch Puppeteer - EXACT WORKING CONFIGURATION
         browser = await puppeteer.launch({
             headless: 'new',
-            executablePath: '/usr/bin/google-chrome-stable',
+            executablePath: '/usr/bin/chromium-browser',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -4768,6 +5073,7 @@ app.post('/api/scan', async (req, res) => {
                 totalIssues: results.violations.length,
                 scanTime: scanTime,
                 platformInfo: platformInfo, // PHASE 1 ENHANCEMENT
+                websiteContext: results.websiteContext, // PHASE 2F ENHANCEMENT
                 summary: {
                     critical: results.violations.filter(v => v.impact === 'critical').length,
                     serious: results.violations.filter(v => v.impact === 'serious').length,
@@ -4857,6 +5163,11 @@ app.post('/api/scan', async (req, res) => {
             // Save to database - ADDED FOR PERSISTENCE
             await saveScan(1, 1, targetUrl, scanType, allViolations.length, scanTime, scannedPages.length, allViolations);
             
+            // PHASE 2F: Get website context from first page for multi-page scans
+            const firstPageContext = scannedPages.length > 0 && scannedPages[0].violations.length > 0 
+                ? scannedPages[0].violations[0].websiteContext 
+                : null;
+            
             res.json({
                 success: true,
                 scanType: 'crawl',
@@ -4864,6 +5175,7 @@ app.post('/api/scan', async (req, res) => {
                 totalIssues: allViolations.length,
                 scanTime: scanTime,
                 timestamp: new Date().toISOString(),
+                websiteContext: firstPageContext, // PHASE 2F ENHANCEMENT
                 summary: {
                     critical: allViolations.filter(v => v.impact === 'critical').length,
                     serious: allViolations.filter(v => v.impact === 'serious').length,
