@@ -115,27 +115,27 @@ async function getRecentScans(userId = 1, limit = 10) {
         return [
             {
                 id: 1,
-                url: 'https://company.com',
+                url: 'https://essolar.com',
                 scan_type: 'single',
                 total_issues: 8,
-                score: 94,
-                created_at: '2024-09-18T10:30:00Z'
+                score: 90,
+                created_at: '2025-10-06T10:30:00Z'
             },
             {
                 id: 2,
-                url: 'https://company.com/products',
-                scan_type: 'crawl',
+                url: 'https://essolar.com',
+                scan_type: 'single',
                 total_issues: 15,
-                score: 87,
-                created_at: '2024-09-18T09:15:00Z'
+                score: 90,
+                created_at: '2025-10-06T09:15:00Z'
             },
             {
                 id: 3,
-                url: 'https://company.com/about',
+                url: 'https://essolar.com',
                 scan_type: 'single',
                 total_issues: 3,
-                score: 96,
-                created_at: '2024-09-17T14:45:00Z'
+                score: 90,
+                created_at: '2025-10-05T14:45:00Z'
             }
         ];
     }
@@ -167,10 +167,10 @@ async function getDashboardStats(userId = 1) {
         // Return mock data when no database connection
         console.log('⚠️ No database connection, returning mock data');
         return {
-            totalScans: 3,
-            totalIssues: 22,
-            averageScore: 92,
-            thisWeekScans: 2
+            totalScans: 57,
+            totalIssues: 606,
+            averageScore: 79,
+            thisWeekScans: 29
         };
     }
     
@@ -214,6 +214,116 @@ app.get('/health', (req, res) => {
         database: db ? 'connected' : 'standalone',
         environment: process.env.K_SERVICE ? 'cloud-run' : 'local'
     });
+});
+
+// MISSING SCAN ENDPOINT - RESTORED
+app.post('/api/scan', async (req, res) => {
+    try {
+        const { url, scanType, standard } = req.body;
+        
+        console.log('🔍 Starting accessibility scan for:', url);
+        console.log('📋 Scan type:', scanType, 'Standard:', standard);
+        
+        const startTime = Date.now();
+        
+        // Launch Puppeteer browser
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ]
+        });
+        
+        const page = await browser.newPage();
+        
+        // Set viewport and user agent
+        await page.setViewport({ width: 1280, height: 720 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+        
+        try {
+            // Navigate to the page
+            await page.goto(url, { 
+                waitUntil: 'networkidle0',
+                timeout: 30000 
+            });
+            
+            // Wait a bit for dynamic content
+            await page.waitForTimeout(2000);
+            
+            // Inject axe-core
+            await page.addScriptTag({
+                content: axeCore.source
+            });
+            
+            // Run accessibility scan
+            const results = await page.evaluate(async (standard) => {
+                const config = {
+                    rules: {}
+                };
+                
+                // Configure rules based on standard
+                if (standard === 'wcag2aaa') {
+                    config.tags = ['wcag2aaa'];
+                } else if (standard === 'section508') {
+                    config.tags = ['section508'];
+                } else {
+                    config.tags = ['wcag2aa'];
+                }
+                
+                return await axe.run(config);
+            }, standard);
+            
+            await browser.close();
+            
+            const scanTime = Date.now() - startTime;
+            const violations = results.violations || [];
+            
+            console.log(`✅ Scan completed in ${scanTime}ms, found ${violations.length} violations`);
+            
+            // Save scan to database
+            const scanId = await saveScan(1, 1, url, scanType, violations.length, scanTime, 1, violations);
+            
+            res.json({
+                success: true,
+                url: url,
+                scanType: scanType,
+                standard: standard,
+                scanTime: scanTime,
+                violations: violations,
+                scanId: scanId,
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (pageError) {
+            await browser.close();
+            throw pageError;
+        }
+        
+    } catch (error) {
+        console.error('❌ Scan error:', error);
+        
+        let errorMessage = 'Failed to scan the website';
+        if (error.message.includes('net::ERR_NAME_NOT_RESOLVED')) {
+            errorMessage = 'Website not found. Please check the URL and try again.';
+        } else if (error.message.includes('timeout')) {
+            errorMessage = 'Website took too long to respond. Please try again.';
+        } else if (error.message.includes('net::ERR_CONNECTION_REFUSED')) {
+            errorMessage = 'Connection refused. The website may be down or blocking requests.';
+        }
+        
+        res.status(400).json({
+            success: false,
+            error: errorMessage,
+            details: error.message
+        });
+    }
 });
 
 // PHASE 2G: Platform Integration API Endpoints
@@ -891,6 +1001,7 @@ app.get('/', async (req, res) => {
             text-decoration: none;
             transition: background 0.3s;
             border-left: 3px solid transparent;
+            cursor: pointer;
         }
         
         .nav-item:hover, .nav-item.active {
@@ -1498,14 +1609,14 @@ app.get('/', async (req, res) => {
                 <h1>🛡️ SentryPrime</h1>
                 <p>Enterprise Dashboard</p>
             </div>
-            <a href="#" class="nav-item active" onclick="showPage('dashboard')">📊 Dashboard</a>
-            <a href="#" class="nav-item" onclick="showPage('scans')">🔍 Scans <span class="badge">2</span></a>
-            <a href="#" class="nav-item" onclick="showPage('analytics')">📈 Analytics <span class="badge">8</span></a>
-            <a href="#" class="nav-item" onclick="showPage('team')">👥 Team <span class="badge">4</span></a>
-            <a href="#" class="nav-item" onclick="showPage('integrations')">🔗 Integrations <span class="badge">5</span></a>
-            <a href="#" class="nav-item" onclick="showPage('api')">⚙️ API Management <span class="badge">6</span></a>
-            <a href="#" class="nav-item" onclick="showPage('billing')">💳 Billing <span class="badge">7</span></a>
-            <a href="#" class="nav-item" onclick="showPage('settings')">⚙️ Settings <span class="badge">8</span></a>
+            <div class="nav-item active" onclick="showPage('dashboard')">📊 Dashboard</div>
+            <div class="nav-item" onclick="showPage('scans')">🔍 Scans <span class="badge">2</span></div>
+            <div class="nav-item" onclick="showPage('analytics')">📈 Analytics <span class="badge">8</span></div>
+            <div class="nav-item" onclick="showPage('team')">👥 Team <span class="badge">4</span></div>
+            <div class="nav-item" onclick="showPage('integrations')">🔗 Integrations <span class="badge">5</span></div>
+            <div class="nav-item" onclick="showPage('api')">⚙️ API Management <span class="badge">6</span></div>
+            <div class="nav-item" onclick="showPage('billing')">💳 Billing <span class="badge">7</span></div>
+            <div class="nav-item" onclick="showPage('settings')">⚙️ Settings <span class="badge">8</span></div>
         </nav>
         
         <main class="main-content">
@@ -1627,7 +1738,7 @@ app.get('/', async (req, res) => {
                 </div>
             </div>
             
-            <!-- Other pages would go here -->
+            <!-- Scans Page -->
             <div id="scans" class="page">
                 <h1 class="page-title">🔍 Accessibility Scans</h1>
                 <p class="page-subtitle">Run comprehensive accessibility audits on your websites</p>
@@ -1736,7 +1847,7 @@ app.get('/', async (req, res) => {
         // Global variables
         let currentScanUrl = 'https://example.com';
         
-        // Navigation
+        // Navigation - FIXED
         function showPage(pageId) {
             // Hide all pages
             document.querySelectorAll('.page').forEach(page => {
@@ -1751,8 +1862,12 @@ app.get('/', async (req, res) => {
             // Show selected page
             document.getElementById(pageId).classList.add('active');
             
-            // Add active class to clicked nav item
-            event.target.classList.add('active');
+            // Add active class to clicked nav item - FIXED
+            document.querySelectorAll('.nav-item').forEach(item => {
+                if (item.textContent.toLowerCase().includes(pageId.toLowerCase())) {
+                    item.classList.add('active');
+                }
+            });
             
             // Load connected platforms when integrations page is shown
             if (pageId === 'integrations') {
@@ -2172,6 +2287,124 @@ app.get('/', async (req, res) => {
                 alert('❌ Error connecting platform: ' + error.message);
             }
         });
+        
+        // SCAN FORM HANDLER - RESTORED
+        document.getElementById('scanForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const url = formData.get('url');
+            const scanType = formData.get('scanType');
+            const standard = formData.get('standard');
+            
+            // Update current scan URL
+            currentScanUrl = url;
+            
+            // Show loading state
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('scanBtn').disabled = true;
+            
+            const statusElement = document.getElementById('loadingStatus');
+            
+            try {
+                // Update status
+                statusElement.textContent = 'Starting scan...';
+                
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        scanType: scanType,
+                        standard: standard
+                    })
+                });
+                
+                statusElement.textContent = 'Processing results...';
+                
+                const result = await response.json();
+                
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('scanBtn').disabled = false;
+                
+                if (result.success) {
+                    displayResults(result);
+                } else {
+                    displayError(result.error || 'Scan failed');
+                }
+                
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('scanBtn').disabled = false;
+                displayError('Network error: ' + error.message);
+            }
+        });
+        
+        function displayResults(result) {
+            const resultsDiv = document.getElementById('results');
+            const violations = result.violations || [];
+            
+            const score = violations.length === 0 ? 100 : Math.max(0, 100 - (violations.length * 2));
+            const scoreClass = score >= 95 ? 'score-excellent' : score >= 80 ? 'score-good' : 'score-needs-work';
+            
+            resultsDiv.innerHTML = \`
+                <div class="alert alert-success">
+                    <strong>Scan completed successfully!</strong><br>
+                    Found \${violations.length} accessibility issues on \${result.url}
+                </div>
+                
+                <div class="stat-card" style="margin-bottom: 20px;">
+                    <div class="stat-number \${scoreClass}">\${score}%</div>
+                    <div class="stat-label">Accessibility Score</div>
+                    <div class="stat-change">\${violations.length} issues found</div>
+                </div>
+                
+                \${violations.length > 0 ? \`
+                    <div class="violations-list">
+                        <div class="section-header">Accessibility Issues Found</div>
+                        \${violations.map(violation => \`
+                            <div class="violation-item">
+                                <div class="violation-header">
+                                    <div>
+                                        <div class="violation-title">\${violation.id}</div>
+                                        <span class="violation-impact impact-\${violation.impact}">\${violation.impact}</span>
+                                    </div>
+                                </div>
+                                <div class="violation-description">\${violation.description}</div>
+                                <div class="violation-help">\${violation.help}</div>
+                                \${violation.nodes && violation.nodes.length > 0 ? \`
+                                    <details class="violation-nodes">
+                                        <summary>Show affected elements (\${violation.nodes.length})</summary>
+                                        <div class="node-list">
+                                            \${violation.nodes.slice(0, 5).map(node => \`
+                                                <div class="node-item">\${node.target ? node.target.join(', ') : 'Element'}</div>
+                                            \`).join('')}
+                                            \${violation.nodes.length > 5 ? \`<div class="node-item">... and \${violation.nodes.length - 5} more</div>\` : ''}
+                                        </div>
+                                    </details>
+                                \` : ''}
+                            </div>
+                        \`).join('')}
+                    </div>
+                \` : '<div class="alert alert-success">🎉 No accessibility issues found! Your website meets the selected accessibility standards.</div>'}
+            \`;
+            
+            resultsDiv.style.display = 'block';
+        }
+        
+        function displayError(error) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = \`
+                <div class="alert alert-error">
+                    <strong>Scan failed:</strong> \${error}
+                </div>
+            \`;
+            resultsDiv.style.display = 'block';
+        }
         
         function viewReport(scanId) {
             alert('Opening detailed report for scan #' + scanId);
