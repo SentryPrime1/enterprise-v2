@@ -573,31 +573,7 @@ app.post('/api/detailed-report', (req, res) => {
                 <h1>🔍 Accessibility Scan Report</h1>
                 <p>Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</p>
                 
-                ${websiteContext ? `
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h3 style="margin: 0 0 15px 0; display: flex; align-items: center;">
-                        <span style="margin-right: 10px;">🔍</span>Website Analysis
-                    </h3>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
-                            <div style="font-size: 0.9rem; opacity: 0.8;">Website Type</div>
-                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.websiteType || 'Unknown'}</div>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
-                            <div style="font-size: 0.9rem; opacity: 0.8;">Industry</div>
-                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.industry || 'General'}</div>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
-                            <div style="font-size: 0.9rem; opacity: 0.8;">Business Model</div>
-                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.businessModel || 'Unknown'}</div>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;">
-                            <div style="font-size: 0.9rem; opacity: 0.8;">Target Audience</div>
-                            <div style="font-weight: 600; text-transform: capitalize;">${websiteContext.targetAudience || 'General'}</div>
-                        </div>
-                    </div>
-                </div>
-                ` : ''}
+
                 
                 <div class="stats-grid">
                     <div class="stat-card">
@@ -2855,11 +2831,7 @@ app.get('/', (req, res) => {
                         <div class="results-meta">Completed in \${result.scanTime}ms</div>
                     </div>
                     <div class="results-body">
-                        <!-- PHASE 2F: Website Context Information -->
-                        \${result.websiteContext ? 
-                            '<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;"><h3 style="margin: 0 0 15px 0; display: flex; align-items: center;"><span style="margin-right: 10px;">🔍</span>Website Analysis</h3><div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;"><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Website Type</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.websiteType || 'Unknown') + '</div></div><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Industry</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.industry || 'General') + '</div></div><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Business Model</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.businessModel || 'Unknown') + '</div></div><div style="background: rgba(255,255,255,0.1); padding: 12px; border-radius: 6px;"><div style="font-size: 0.9rem; opacity: 0.8;">Target Audience</div><div style="font-weight: 600; text-transform: capitalize;">' + (result.websiteContext.targetAudience || 'General') + '</div></div></div></div>' 
-                            : ''
-                        }
+
                         
                         <div class="results-summary">
                             <div class="summary-grid">
@@ -2917,10 +2889,7 @@ app.get('/', (req, res) => {
                                 '<button class="view-report-btn" onclick="openDetailedReport()" style="background: #007bff; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">📄 View Detailed Report</button>' 
                                 : ''
                             }
-                            \${violations.length > 0 ? 
-                                '<button class="ai-suggestions-btn" onclick="showAISuggestions(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ', ' + JSON.stringify(result.platformInfo || {}).replace(/"/g, '&quot;') + ')" style="background: #6f42c1; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">🤖 Get AI Fix Suggestions</button>' 
-                                : ''
-                            }
+
                             \${violations.length > 0 ? 
                                 '<button class="guided-fixing-btn" onclick="GuidedFixing.start(' + JSON.stringify(violations).replace(/"/g, '&quot;') + ')" style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 6px; margin: 5px; cursor: pointer; font-size: 14px;">🛠️ Let\\'s Start Fixing</button>' 
                                 : ''
@@ -3664,7 +3633,7 @@ app.get('/', (req, res) => {
                 
                 const modalHtml = \`
                     <div id="visual-preview-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 2000; display: flex; align-items: center; justify-content: center;">
-                        <div style="background: white; padding: 0; border-radius: 8px; max-width: 95%; max-height: 90%; overflow: hidden; position: relative;">
+                        <div style="background: white; padding: 0; border-radius: 8px; max-width: 95%; max-height: 90%; overflow: hidden; position: relative; display: flex; flex-direction: column;">
                             <div style="background: linear-gradient(135deg, #6f42c1 0%, #764ba2 100%); color: white; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
                                 <h3>👁️ Visual Preview: \${violation?.id || 'Unknown'}</h3>
                                 <button onclick="document.getElementById('visual-preview-modal').remove()" 
@@ -3673,7 +3642,7 @@ app.get('/', (req, res) => {
                                 </button>
                             </div>
                             
-                            <div style="padding: 20px;">
+                            <div style="padding: 20px; overflow-y: auto; flex: 1;">
                                 <!-- Violation Info -->
                                 <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid \${impactColor};">
                                     <div style="display: flex; align-items: center; margin-bottom: 8px;">
