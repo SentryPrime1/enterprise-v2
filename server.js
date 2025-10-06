@@ -818,13 +818,320 @@ app.post('/api/detailed-report', (req, res) => {
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
+        }
+        
+        // PHASE 2G: Platform Integration Functions
+        
+        // Load connected platforms
+        async function loadConnectedPlatforms() {
+            try {
+                const response = await fetch('/api/platforms/connected');
+                const data = await response.json();
+                
+                const container = document.getElementById('connected-platforms-list');
+                
+                if (data.platforms && data.platforms.length > 0) {
+                    container.innerHTML = data.platforms.map(platform => 
+                        '<div class="connected-platform-card">' +
+                            '<div class="connected-platform-info">' +
+                                '<div class="connected-platform-icon">' +
+                                    (platform.type === 'wordpress' ? '🌐' : platform.type === 'shopify' ? '🛒' : '⚙️') +
+                                '</div>' +
+                                '<div class="connected-platform-details">' +
+                                    '<h3>' + platform.name + '</h3>' +
+                                    '<p>' + platform.url + '</p>' +
+                                '</div>' +
+                            '</div>' +
+                            '<div class="connected-platform-status">' +
+                                '<span class="status-badge">' + platform.status + '</span>' +
+                                '<div class="platform-actions">' +
+                                    '<button class="btn-test" onclick="testPlatformConnection(\'' + platform.id + '\')">Test</button>' +
+                                    '<button class="btn-disconnect" onclick="disconnectPlatform(\'' + platform.id + '\')">Disconnect</button>' +
+                                '</div>' +
+                            '</div>' +
+                        '</div>'
+                    ).join('');
+                } else {
+                    container.innerHTML = 
+                        '<div style="padding: 40px; text-align: center; color: #666; grid-column: 1 / -1;">' +
+                            '🔗 No platforms connected yet. Connect your first platform below!' +
+                        '</div>';
                 }
-            </script>
-        </body>
-        </html>
+            } catch (error) {
+                console.error('Error loading connected platforms:', error);
+                document.getElementById('connected-platforms-list').innerHTML = 
+                    '<div style="padding: 40px; text-align: center; color: #dc3545; grid-column: 1 / -1;">' +
+                        '❌ Error loading connected platforms' +
+                    '</div>';
+            }
+        }
+        
+        // Show connection modal
+        function showConnectModal(platformType) {
+            let modalContent = '';
+            
+            if (platformType === 'wordpress') {
+                modalContent = 
+                    '<div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">' +
+                        '<div style="background: white; padding: 30px; border-radius: 8px; max-width: 500px; width: 90%;">' +
+                            '<h3 style="margin-bottom: 20px;">🌐 Connect WordPress Site</h3>' +
+                            '<form onsubmit="connectWordPress(event)">' +
+                                '<div style="margin-bottom: 16px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Site URL</label>' +
+                                    '<input type="url" id="wp-site-url" placeholder="https://yoursite.com" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                '</div>' +
+                                '<div style="margin-bottom: 16px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Username</label>' +
+                                    '<input type="text" id="wp-username" placeholder="Your WordPress username" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                '</div>' +
+                                '<div style="margin-bottom: 20px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Application Password</label>' +
+                                    '<input type="password" id="wp-app-password" placeholder="WordPress application password" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                    '<small style="color: #666; font-size: 0.8rem;">Generate this in your WordPress admin under Users > Profile > Application Passwords</small>' +
+                                '</div>' +
+                                '<div style="display: flex; gap: 12px; justify-content: flex-end;">' +
+                                    '<button type="button" onclick="closeConnectModal()" style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>' +
+                                    '<button type="submit" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">Connect</button>' +
+                                '</div>' +
+                            '</form>' +
+                        '</div>' +
+                    '</div>';
+            } else if (platformType === 'shopify') {
+                modalContent = 
+                    '<div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">' +
+                        '<div style="background: white; padding: 30px; border-radius: 8px; max-width: 500px; width: 90%;">' +
+                            '<h3 style="margin-bottom: 20px;">🛒 Connect Shopify Store</h3>' +
+                            '<form onsubmit="connectShopify(event)">' +
+                                '<div style="margin-bottom: 16px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Shop Domain</label>' +
+                                    '<input type="text" id="shopify-domain" placeholder="yourstore.myshopify.com" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                '</div>' +
+                                '<div style="margin-bottom: 20px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Access Token</label>' +
+                                    '<input type="password" id="shopify-token" placeholder="Your Shopify access token" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                    '<small style="color: #666; font-size: 0.8rem;">Create a private app in your Shopify admin to get an access token</small>' +
+                                '</div>' +
+                                '<div style="display: flex; gap: 12px; justify-content: flex-end;">' +
+                                    '<button type="button" onclick="closeConnectModal()" style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>' +
+                                    '<button type="submit" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">Connect</button>' +
+                                '</div>' +
+                            '</form>' +
+                        '</div>' +
+                    '</div>';
+            } else if (platformType === 'custom') {
+                modalContent = 
+                    '<div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">' +
+                        '<div style="background: white; padding: 30px; border-radius: 8px; max-width: 500px; width: 90%;">' +
+                            '<h3 style="margin-bottom: 20px;">⚙️ Connect Custom Site</h3>' +
+                            '<form onsubmit="connectCustomSite(event)">' +
+                                '<div style="margin-bottom: 16px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Site URL</label>' +
+                                    '<input type="url" id="custom-site-url" placeholder="https://yoursite.com" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                '</div>' +
+                                '<div style="margin-bottom: 16px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Connection Type</label>' +
+                                    '<select id="custom-connection-type" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                        '<option value="">Select connection type</option>' +
+                                        '<option value="ftp">FTP</option>' +
+                                        '<option value="sftp">SFTP</option>' +
+                                        '<option value="ssh">SSH</option>' +
+                                    '</select>' +
+                                '</div>' +
+                                '<div style="margin-bottom: 16px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Host</label>' +
+                                    '<input type="text" id="custom-host" placeholder="ftp.yoursite.com" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                '</div>' +
+                                '<div style="margin-bottom: 16px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Username</label>' +
+                                    '<input type="text" id="custom-username" placeholder="Your username" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                '</div>' +
+                                '<div style="margin-bottom: 20px;">' +
+                                    '<label style="display: block; margin-bottom: 8px; font-weight: 600;">Password</label>' +
+                                    '<input type="password" id="custom-password" placeholder="Your password" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">' +
+                                '</div>' +
+                                '<div style="display: flex; gap: 12px; justify-content: flex-end;">' +
+                                    '<button type="button" onclick="closeConnectModal()" style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>' +
+                                    '<button type="submit" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">Connect</button>' +
+                                '</div>' +
+                            '</form>' +
+                        '</div>' +
+                    '</div>';
+            }
+            
+            document.body.insertAdjacentHTML('beforeend', modalContent);
+        }
+        
+        // Close connection modal
+        function closeConnectModal() {
+            const modal = document.querySelector('[style*="position: fixed"]');
+            if (modal) {
+                modal.remove();
+            }
+        }
+        
+        // Connect WordPress site
+        async function connectWordPress(event) {
+            event.preventDefault();
+            
+            const siteUrl = document.getElementById('wp-site-url').value;
+            const username = document.getElementById('wp-username').value;
+            const applicationPassword = document.getElementById('wp-app-password').value;
+            
+            try {
+                const response = await fetch('/api/platforms/connect/wordpress', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        siteUrl,
+                        username,
+                        applicationPassword
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('WordPress site connected successfully!');
+                    closeConnectModal();
+                    loadConnectedPlatforms();
+                } else {
+                    alert('Failed to connect WordPress site: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error connecting WordPress site: ' + error.message);
+            }
+        }
+        
+        // Connect Shopify store
+        async function connectShopify(event) {
+            event.preventDefault();
+            
+            const shopDomain = document.getElementById('shopify-domain').value;
+            const accessToken = document.getElementById('shopify-token').value;
+            
+            try {
+                const response = await fetch('/api/platforms/connect/shopify', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        shopDomain,
+                        accessToken
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('Shopify store connected successfully!');
+                    closeConnectModal();
+                    loadConnectedPlatforms();
+                } else {
+                    alert('Failed to connect Shopify store: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error connecting Shopify store: ' + error.message);
+            }
+        }
+        
+        // Connect custom site
+        async function connectCustomSite(event) {
+            event.preventDefault();
+            
+            const siteUrl = document.getElementById('custom-site-url').value;
+            const connectionType = document.getElementById('custom-connection-type').value;
+            const host = document.getElementById('custom-host').value;
+            const username = document.getElementById('custom-username').value;
+            const password = document.getElementById('custom-password').value;
+            
+            try {
+                const response = await fetch('/api/platforms/connect/custom', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        siteUrl,
+                        connectionType,
+                        host,
+                        port: 21, // Default FTP port
+                        username,
+                        password
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('Custom site connected successfully!');
+                    closeConnectModal();
+                    loadConnectedPlatforms();
+                } else {
+                    alert('Failed to connect custom site: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error connecting custom site: ' + error.message);
+            }
+        }
+        
+        // Test platform connection
+        async function testPlatformConnection(platformId) {
+            try {
+                const response = await fetch('/api/platforms/test/' + platformId, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('Platform connection is working!');
+                } else {
+                    alert('Platform connection failed: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error testing platform connection: ' + error.message);
+            }
+        }
+        
+        // Disconnect platform
+        async function disconnectPlatform(platformId) {
+            if (confirm('Are you sure you want to disconnect this platform?')) {
+                try {
+                    const response = await fetch('/api/platforms/disconnect/' + platformId, {
+                        method: 'DELETE'
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('Platform disconnected successfully!');
+                        loadConnectedPlatforms();
+                    } else {
+                        alert('Failed to disconnect platform: ' + result.error);
+                    }
+                } catch (error) {
+                    alert('Error disconnecting platform: ' + error.message);
+                }
+            }
+        }
+        
+        // Load connected platforms when integrations page is shown
+        const originalSwitchToPage = switchToPage;
+        switchToPage = function(pageId) {
+            originalSwitchToPage(pageId);
+            if (pageId === 'integrations') {
+                loadConnectedPlatforms();
+            }
+        };
+    </script>
+</body>
+</html>
     `;
     
-    res.send(reportHtml);
+    res.send(html);
 });
 
 // API endpoint for recent scans
@@ -848,12 +1155,261 @@ app.get('/api/dashboard/stats', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch dashboard stats' });
     }
 });
+// PHASE 2G: Platform Integration API Endpoints
 
-// NEW: AI Suggestions API endpoint
-app.post('/api/ai-fixes', async (req, res) => {
+// In-memory storage for connected platforms (in production, use a database)
+let connectedPlatforms = [];
+let platformIdCounter = 1;
+
+// Get connected platforms
+app.get('/api/platforms/connected', (req, res) => {
+    res.json({
+        success: true,
+        platforms: connectedPlatforms
+    });
+});
+
+// Connect WordPress site
+app.post('/api/platforms/connect/wordpress', async (req, res) => {
+    const { siteUrl, username, applicationPassword } = req.body;
+    
     try {
-        const { violations, platformInfo } = req.body;
+        // Test WordPress connection
+        const testUrl = `${siteUrl.replace(/\/$/, '')}/wp-json/wp/v2/users/me`;
+        const auth = Buffer.from(`${username}:${applicationPassword}`).toString('base64');
         
+        const response = await fetch(testUrl, {
+            headers: {
+                'Authorization': `Basic ${auth}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const userData = await response.json();
+            
+            // Add to connected platforms
+            const platform = {
+                id: platformIdCounter++,
+                type: 'wordpress',
+                name: `WordPress - ${userData.name || 'Site'}`,
+                url: siteUrl,
+                status: 'Connected',
+                credentials: {
+                    username,
+                    applicationPassword
+                },
+                connectedAt: new Date().toISOString()
+            };
+            
+            connectedPlatforms.push(platform);
+            
+            res.json({
+                success: true,
+                platform: {
+                    id: platform.id,
+                    type: platform.type,
+                    name: platform.name,
+                    url: platform.url,
+                    status: platform.status
+                }
+            });
+        } else {
+            res.json({
+                success: false,
+                error: 'Failed to authenticate with WordPress site. Please check your credentials.'
+            });
+        }
+    } catch (error) {
+        res.json({
+            success: false,
+            error: 'Failed to connect to WordPress site: ' + error.message
+        });
+    }
+});
+
+// Connect Shopify store
+app.post('/api/platforms/connect/shopify', async (req, res) => {
+    const { shopDomain, accessToken } = req.body;
+    
+    try {
+        // Test Shopify connection
+        const testUrl = `https://${shopDomain}/admin/api/2023-10/shop.json`;
+        
+        const response = await fetch(testUrl, {
+            headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            const shopData = await response.json();
+            
+            // Add to connected platforms
+            const platform = {
+                id: platformIdCounter++,
+                type: 'shopify',
+                name: `Shopify - ${shopData.shop.name}`,
+                url: `https://${shopDomain}`,
+                status: 'Connected',
+                credentials: {
+                    shopDomain,
+                    accessToken
+                },
+                connectedAt: new Date().toISOString()
+            };
+            
+            connectedPlatforms.push(platform);
+            
+            res.json({
+                success: true,
+                platform: {
+                    id: platform.id,
+                    type: platform.type,
+                    name: platform.name,
+                    url: platform.url,
+                    status: platform.status
+                }
+            });
+        } else {
+            res.json({
+                success: false,
+                error: 'Failed to authenticate with Shopify store. Please check your access token.'
+            });
+        }
+    } catch (error) {
+        res.json({
+            success: false,
+            error: 'Failed to connect to Shopify store: ' + error.message
+        });
+    }
+});
+
+// Connect custom site
+app.post('/api/platforms/connect/custom', async (req, res) => {
+    const { siteUrl, connectionType, host, port, username, password } = req.body;
+    
+    try {
+        // For now, we'll just store the connection details
+        // In a real implementation, you'd test the FTP/SFTP/SSH connection here
+        
+        const platform = {
+            id: platformIdCounter++,
+            type: 'custom',
+            name: `Custom Site - ${new URL(siteUrl).hostname}`,
+            url: siteUrl,
+            status: 'Connected',
+            credentials: {
+                connectionType,
+                host,
+                port: port || 21,
+                username,
+                password
+            },
+            connectedAt: new Date().toISOString()
+        };
+        
+        connectedPlatforms.push(platform);
+        
+        res.json({
+            success: true,
+            platform: {
+                id: platform.id,
+                type: platform.type,
+                name: platform.name,
+                url: platform.url,
+                status: platform.status
+            }
+        });
+    } catch (error) {
+        res.json({
+            success: false,
+            error: 'Failed to connect custom site: ' + error.message
+        });
+    }
+});
+
+// Test platform connection
+app.post('/api/platforms/test/:platformId', async (req, res) => {
+    const platformId = parseInt(req.params.platformId);
+    const platform = connectedPlatforms.find(p => p.id === platformId);
+    
+    if (!platform) {
+        return res.json({
+            success: false,
+            error: 'Platform not found'
+        });
+    }
+    
+    try {
+        if (platform.type === 'wordpress') {
+            const testUrl = `${platform.url.replace(/\/$/, '')}/wp-json/wp/v2/users/me`;
+            const auth = Buffer.from(`${platform.credentials.username}:${platform.credentials.applicationPassword}`).toString('base64');
+            
+            const response = await fetch(testUrl, {
+                headers: {
+                    'Authorization': `Basic ${auth}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                res.json({ success: true, message: 'WordPress connection is working' });
+            } else {
+                res.json({ success: false, error: 'WordPress connection failed' });
+            }
+        } else if (platform.type === 'shopify') {
+            const testUrl = `https://${platform.credentials.shopDomain}/admin/api/2023-10/shop.json`;
+            
+            const response = await fetch(testUrl, {
+                headers: {
+                    'X-Shopify-Access-Token': platform.credentials.accessToken,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                res.json({ success: true, message: 'Shopify connection is working' });
+            } else {
+                res.json({ success: false, error: 'Shopify connection failed' });
+            }
+        } else {
+            res.json({ success: true, message: 'Custom site connection stored (test not implemented)' });
+        }
+    } catch (error) {
+        res.json({
+            success: false,
+            error: 'Connection test failed: ' + error.message
+        });
+    }
+});
+
+// Disconnect platform
+app.delete('/api/platforms/disconnect/:platformId', (req, res) => {
+    const platformId = parseInt(req.params.platformId);
+    const platformIndex = connectedPlatforms.findIndex(p => p.id === platformId);
+    
+    if (platformIndex === -1) {
+        return res.json({
+            success: false,
+            error: 'Platform not found'
+        });
+    }
+    
+    connectedPlatforms.splice(platformIndex, 1);
+    
+    res.json({
+        success: true,
+        message: 'Platform disconnected successfully'
+    });
+});
+
+// PHASE 2F: Enhanced AI Suggestions with Context
+app.post('/api/ai-fixes', async (req, res) => {
+    const { violations, platformInfo } = req.body;
+    
+    try {
         if (!violations || !Array.isArray(violations)) {
             return res.status(400).json({ error: 'Violations array is required' });
         }
@@ -1503,6 +2059,335 @@ For additional help implementing these fixes, consult your platform's documentat
         });
     }
 });
+
+// PHASE 2G: Platform Connection & Authentication Endpoints
+
+// Get connected platforms for a user
+app.get('/api/platforms/connected', async (req, res) => {
+    try {
+        // In a real implementation, this would check the database for user's connected platforms
+        // For now, we'll return a mock response
+        const connectedPlatforms = [
+            {
+                id: 'wp_1',
+                type: 'wordpress',
+                name: 'My WordPress Site',
+                url: 'https://example.com',
+                status: 'connected',
+                lastSync: new Date().toISOString()
+            }
+        ];
+        
+        res.json({ platforms: connectedPlatforms });
+    } catch (error) {
+        console.error('Error fetching connected platforms:', error);
+        res.status(500).json({ error: 'Failed to fetch connected platforms' });
+    }
+});
+
+// Connect a WordPress site
+app.post('/api/platforms/connect/wordpress', async (req, res) => {
+    try {
+        const { siteUrl, username, applicationPassword } = req.body;
+        
+        if (!siteUrl || !username || !applicationPassword) {
+            return res.status(400).json({ 
+                error: 'Missing required fields: siteUrl, username, applicationPassword' 
+            });
+        }
+        
+        // Validate WordPress site and credentials
+        const validationResult = await validateWordPressConnection(siteUrl, username, applicationPassword);
+        
+        if (!validationResult.success) {
+            return res.status(400).json({ 
+                error: 'Failed to connect to WordPress site',
+                details: validationResult.error 
+            });
+        }
+        
+        // In a real implementation, store the connection in the database
+        const connection = {
+            id: 'wp_' + Date.now(),
+            type: 'wordpress',
+            name: validationResult.siteName,
+            url: siteUrl,
+            username: username,
+            // In production, encrypt the application password
+            applicationPassword: applicationPassword,
+            status: 'connected',
+            connectedAt: new Date().toISOString()
+        };
+        
+        res.json({ 
+            success: true, 
+            connection: connection,
+            message: 'WordPress site connected successfully' 
+        });
+        
+    } catch (error) {
+        console.error('Error connecting WordPress site:', error);
+        res.status(500).json({ 
+            error: 'Failed to connect WordPress site',
+            details: error.message 
+        });
+    }
+});
+
+// Connect a Shopify store
+app.post('/api/platforms/connect/shopify', async (req, res) => {
+    try {
+        const { shopDomain, accessToken } = req.body;
+        
+        if (!shopDomain || !accessToken) {
+            return res.status(400).json({ 
+                error: 'Missing required fields: shopDomain, accessToken' 
+            });
+        }
+        
+        // Validate Shopify store and credentials
+        const validationResult = await validateShopifyConnection(shopDomain, accessToken);
+        
+        if (!validationResult.success) {
+            return res.status(400).json({ 
+                error: 'Failed to connect to Shopify store',
+                details: validationResult.error 
+            });
+        }
+        
+        // In a real implementation, store the connection in the database
+        const connection = {
+            id: 'shopify_' + Date.now(),
+            type: 'shopify',
+            name: validationResult.shopName,
+            url: `https://${shopDomain}`,
+            accessToken: accessToken,
+            status: 'connected',
+            connectedAt: new Date().toISOString()
+        };
+        
+        res.json({ 
+            success: true, 
+            connection: connection,
+            message: 'Shopify store connected successfully' 
+        });
+        
+    } catch (error) {
+        console.error('Error connecting Shopify store:', error);
+        res.status(500).json({ 
+            error: 'Failed to connect Shopify store',
+            details: error.message 
+        });
+    }
+});
+
+// Connect a custom site via FTP/SSH
+app.post('/api/platforms/connect/custom', async (req, res) => {
+    try {
+        const { siteUrl, connectionType, host, port, username, password, privateKey } = req.body;
+        
+        if (!siteUrl || !connectionType || !host || !username) {
+            return res.status(400).json({ 
+                error: 'Missing required fields: siteUrl, connectionType, host, username' 
+            });
+        }
+        
+        // Validate custom site connection
+        const validationResult = await validateCustomSiteConnection({
+            siteUrl, connectionType, host, port, username, password, privateKey
+        });
+        
+        if (!validationResult.success) {
+            return res.status(400).json({ 
+                error: 'Failed to connect to custom site',
+                details: validationResult.error 
+            });
+        }
+        
+        // In a real implementation, store the connection in the database
+        const connection = {
+            id: 'custom_' + Date.now(),
+            type: 'custom',
+            name: validationResult.siteName || siteUrl,
+            url: siteUrl,
+            connectionType: connectionType,
+            host: host,
+            port: port,
+            username: username,
+            // In production, encrypt credentials
+            password: password,
+            privateKey: privateKey,
+            status: 'connected',
+            connectedAt: new Date().toISOString()
+        };
+        
+        res.json({ 
+            success: true, 
+            connection: connection,
+            message: 'Custom site connected successfully' 
+        });
+        
+    } catch (error) {
+        console.error('Error connecting custom site:', error);
+        res.status(500).json({ 
+            error: 'Failed to connect custom site',
+            details: error.message 
+        });
+    }
+});
+
+// Disconnect a platform
+app.delete('/api/platforms/disconnect/:platformId', async (req, res) => {
+    try {
+        const { platformId } = req.params;
+        
+        // In a real implementation, remove the connection from the database
+        console.log(`Disconnecting platform: ${platformId}`);
+        
+        res.json({ 
+            success: true, 
+            message: 'Platform disconnected successfully' 
+        });
+        
+    } catch (error) {
+        console.error('Error disconnecting platform:', error);
+        res.status(500).json({ 
+            error: 'Failed to disconnect platform',
+            details: error.message 
+        });
+    }
+});
+
+// Test platform connection
+app.post('/api/platforms/test/:platformId', async (req, res) => {
+    try {
+        const { platformId } = req.params;
+        
+        // In a real implementation, test the stored connection
+        console.log(`Testing platform connection: ${platformId}`);
+        
+        res.json({ 
+            success: true, 
+            status: 'connected',
+            message: 'Platform connection is working' 
+        });
+        
+    } catch (error) {
+        console.error('Error testing platform connection:', error);
+        res.status(500).json({ 
+            error: 'Failed to test platform connection',
+            details: error.message 
+        });
+    }
+});
+
+// PHASE 2G: Platform Connection Validation Functions
+
+async function validateWordPressConnection(siteUrl, username, applicationPassword) {
+    try {
+        // Ensure URL has proper format
+        const url = siteUrl.endsWith('/') ? siteUrl : siteUrl + '/';
+        const apiUrl = url + 'wp-json/wp/v2/users/me';
+        
+        // Test WordPress REST API connection
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Basic ' + Buffer.from(username + ':' + applicationPassword).toString('base64'),
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`WordPress API returned ${response.status}: ${response.statusText}`);
+        }
+        
+        const userData = await response.json();
+        
+        // Get site info
+        const siteInfoResponse = await fetch(url + 'wp-json/', {
+            method: 'GET',
+            headers: {
+                'Authorization': 'Basic ' + Buffer.from(username + ':' + applicationPassword).toString('base64')
+            }
+        });
+        
+        const siteInfo = await siteInfoResponse.json();
+        
+        return {
+            success: true,
+            siteName: siteInfo.name || 'WordPress Site',
+            userInfo: userData
+        };
+        
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+async function validateShopifyConnection(shopDomain, accessToken) {
+    try {
+        // Test Shopify Admin API connection
+        const apiUrl = `https://${shopDomain}/admin/api/2023-10/shop.json`;
+        
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Shopify API returned ${response.status}: ${response.statusText}`);
+        }
+        
+        const shopData = await response.json();
+        
+        return {
+            success: true,
+            shopName: shopData.shop.name,
+            shopInfo: shopData.shop
+        };
+        
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+async function validateCustomSiteConnection(config) {
+    try {
+        // For now, we'll do a basic validation
+        // In a real implementation, this would test FTP/SSH connection
+        
+        if (config.connectionType === 'ftp' || config.connectionType === 'sftp') {
+            // Test FTP/SFTP connection
+            // This would require additional libraries like 'ssh2-sftp-client' or 'ftp'
+            console.log(`Testing ${config.connectionType} connection to ${config.host}:${config.port}`);
+        } else if (config.connectionType === 'ssh') {
+            // Test SSH connection
+            // This would require 'ssh2' library
+            console.log(`Testing SSH connection to ${config.host}:${config.port}`);
+        }
+        
+        return {
+            success: true,
+            siteName: config.siteUrl
+        };
+        
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
 
 // Main route - serves the dashboard HTML
 app.get('/', (req, res) => {
@@ -2465,6 +3350,173 @@ app.get('/', (req, res) => {
                 gap: 10px;
             }
         }
+        
+        /* PHASE 2G: Integrations Page Styles */
+        .connected-platforms, .add-platform-section {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+        
+        .section-header {
+            background: #f8f9fa;
+            padding: 20px 24px;
+            border-bottom: 1px solid #e1e5e9;
+        }
+        
+        .section-header h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .section-header p {
+            font-size: 0.9rem;
+            color: #666;
+            margin: 0;
+        }
+        
+        .platforms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+            padding: 24px;
+        }
+        
+        .platform-card {
+            background: white;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+        
+        .platform-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+        
+        .platform-icon {
+            font-size: 2.5rem;
+            margin-bottom: 12px;
+        }
+        
+        .platform-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .platform-description {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+        
+        .platform-status {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .platform-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            padding: 24px;
+        }
+        
+        .connected-platform-card {
+            background: white;
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .connected-platform-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .connected-platform-icon {
+            font-size: 2rem;
+        }
+        
+        .connected-platform-details h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .connected-platform-details p {
+            font-size: 0.9rem;
+            color: #666;
+            margin: 0;
+        }
+        
+        .connected-platform-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .status-badge {
+            background: #28a745;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .platform-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-test, .btn-disconnect {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        
+        .btn-test {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .btn-test:hover {
+            background: #138496;
+        }
+        
+        .btn-disconnect {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-disconnect:hover {
+            background: #c82333;
+        }
     </style>
 </head>
 <body>
@@ -2686,6 +3738,59 @@ app.get('/', (req, res) => {
                     <div class="dashboard-header">
                         <h1>Team Management</h1>
                         <p>Coming soon - Manage team members and permissions</p>
+                    </div>
+                </div>
+                
+                <!-- PHASE 2G: Integrations Page -->
+                <div id="integrations" class="page">
+                    <div class="dashboard-header">
+                        <h1>🔗 Platform Integrations</h1>
+                        <p>Connect your websites for automated accessibility fixes</p>
+                    </div>
+                    
+                    <!-- Connected Platforms -->
+                    <div class="connected-platforms">
+                        <div class="section-header">
+                            <h2>Connected Platforms</h2>
+                            <p>Manage your connected websites and platforms</p>
+                        </div>
+                        
+                        <div id="connected-platforms-list" class="platforms-grid">
+                            <div style="padding: 40px; text-align: center; color: #666; grid-column: 1 / -1;">
+                                🔄 Loading connected platforms...
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Add New Platform -->
+                    <div class="add-platform-section">
+                        <div class="section-header">
+                            <h2>Connect New Platform</h2>
+                            <p>Add a new website or platform for automated accessibility fixes</p>
+                        </div>
+                        
+                        <div class="platform-options">
+                            <div class="platform-card" onclick="showConnectModal('wordpress')">
+                                <div class="platform-icon">🌐</div>
+                                <div class="platform-name">WordPress</div>
+                                <div class="platform-description">Connect your WordPress site via REST API</div>
+                                <div class="platform-status">Most Popular</div>
+                            </div>
+                            
+                            <div class="platform-card" onclick="showConnectModal('shopify')">
+                                <div class="platform-icon">🛒</div>
+                                <div class="platform-name">Shopify</div>
+                                <div class="platform-description">Connect your Shopify store via Admin API</div>
+                                <div class="platform-status">E-commerce</div>
+                            </div>
+                            
+                            <div class="platform-card" onclick="showConnectModal('custom')">
+                                <div class="platform-icon">⚙️</div>
+                                <div class="platform-name">Custom Site</div>
+                                <div class="platform-description">Connect via FTP, SFTP, or SSH</div>
+                                <div class="platform-status">Advanced</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
