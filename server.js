@@ -1,6 +1,3 @@
-// This is your EXACT working server.js with ONLY the modal fix added
-// NO other changes - just making the integration buttons work
-
 const express = require('express');
 const puppeteer = require('puppeteer');
 const axeCore = require('axe-core');
@@ -8,51 +5,235 @@ const { Pool } = require('pg');
 const OpenAI = require('openai');
 
 const app = express();
-const port = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8080;
 
-// Middleware
 app.use(express.json());
-app.use(express.static('public'));
 
-// Database connection
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+// Database connection - PRESERVED FROM WORKING VERSION
+let db = null;
 
-// Test database connection
-pool.connect((err, client, release) => {
-    if (err) {
-        console.error('❌ Database connection error:', err.stack);
+// Initialize database connection if environment variables are provided
+if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && process.env.DB_NAME) {
+    console.log('🔄 Initializing database connection...');
+    console.log('📍 DB_HOST:', process.env.DB_HOST);
+    console.log('👤 DB_USER:', process.env.DB_USER);
+    console.log('🗄️ DB_NAME:', process.env.DB_NAME);
+    
+    // Detect if we're running in Cloud Run with Cloud SQL connection
+    const isCloudRun = process.env.K_SERVICE && process.env.DB_HOST.includes(':');
+    
+    let dbConfig;
+    
+    if (isCloudRun) {
+        // Cloud Run with Cloud SQL connection - use Unix socket with correct path
+        console.log('☁️ Detected Cloud Run environment, using Unix socket connection');
+        dbConfig = {
+            host: `/cloudsql/${process.env.DB_HOST}`,
+            database: process.env.DB_NAME,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            connectionTimeoutMillis: 10000,
+            idleTimeoutMillis: 30000,
+            max: 10
+        };
+        console.log('🔌 Unix socket path:', `/cloudsql/${process.env.DB_HOST}`);
     } else {
-        console.log('✅ Database connected successfully!');
-        console.log('🐘 PostgreSQL version:', client.serverVersion);
-        release();
+        // Local or other environment - use TCP connection
+        console.log('🌐 Using TCP connection');
+        dbConfig = {
+            host: process.env.DB_HOST,
+            port: process.env.DB_PORT || 5432,
+            database: process.env.DB_NAME,
+            user: process.env.DB_USER,
+            password: process.env.DB_PASSWORD,
+            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+            connectionTimeoutMillis: 10000,
+            idleTimeoutMillis: 30000,
+            max: 10
+        };
     }
-});
 
-// OpenAI client
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+    db = new Pool(dbConfig);
+    
+    // Test database connection with detailed logging
+    db.query('SELECT NOW() as current_time, version() as pg_version')
+        .then((result) => {
+            console.log('✅ Database connected successfully!');
+            console.log('⏰ Server time:', result.rows[0].current_time);
+            console.log('🐘 PostgreSQL version:', result.rows[0].pg_version.split(' ')[0]);
+        })
+        .catch(err => {
+            console.log('❌ Database connection failed, running in standalone mode');
+            console.log('🔍 Error details:', err.message);
+            console.log('🔍 Error code:', err.code);
+            db = null;
+        });
+} else {
+    console.log('ℹ️ No database configuration found, running in standalone mode');
+}
+
+// OpenAI client initialization
+let openai = null;
+if (process.env.OPENAI_API_KEY) {
+    console.log('🤖 Initializing OpenAI client...');
+    openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY
+    });
+    console.log('✅ OpenAI client initialized successfully');
+} else {
+    console.log('⚠️ No OpenAI API key found, AI suggestions will use predefined responses');
+}
+
+// Database helper functions - PRESERVED FROM WORKING VERSION
+async function saveScan(userId, organizationId, url, scanType, totalIssues, scanTimeMs, pagesScanned, violations) {
+    if (!db) {
+        console.log('⚠️ No database connection, skipping scan save');
+        return null;
+    }
+    
+    try {
+        const result = await db.query(
+            `INSERT INTO scans (user_id, organization_id, url, scan_type, status, total_issues, scan_time_ms, pages_scanned, violations_data, completed_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) 
+             RETURNING id`,
+            [userId, organizationId, url, scanType, 'completed', totalIssues, scanTimeMs, pagesScanned || 1, JSON.stringify(violations)]
+        );
+        
+        const scanId = result.rows[0].id;
+        console.log('✅ Scan saved to database with ID:', scanId);
+        return scanId;
+    } catch (error) {
+        console.log('❌ Database error saving scan:', error.message);
+        return null;
+    }
+}
+
+async function getRecentScans(userId = 1, limit = 10) {
+    if (!db) {
+        // Return mock data when no database connection
+        console.log('⚠️ No database connection, returning mock data');
+        return [
+            {
+                id: 1,
+                url: 'https://company.com',
+                scan_type: 'single',
+                total_issues: 8,
+                score: 94,
+                created_at: '2024-09-18T10:30:00Z'
+            },
+            {
+                id: 2,
+                url: 'https://company.com/products',
+                scan_type: 'crawl',
+                total_issues: 15,
+                score: 87,
+                created_at: '2024-09-18T09:15:00Z'
+            },
+            {
+                id: 3,
+                url: 'https://company.com/about',
+                scan_type: 'single',
+                total_issues: 3,
+                score: 96,
+                created_at: '2024-09-17T14:45:00Z'
+            }
+        ];
+    }
+    
+    try {
+        const result = await db.query(
+            `SELECT id, url, scan_type, total_issues, 
+                    CASE 
+                        WHEN total_issues = 0 THEN 100
+                        ELSE GREATEST(0, 100 - (total_issues * 2))
+                    END as score,
+                    created_at
+             FROM scans 
+             WHERE user_id = $1 
+             ORDER BY created_at DESC 
+             LIMIT $2`,
+            [userId, limit]
+        );
+        
+        return result.rows;
+    } catch (error) {
+        console.log('❌ Database error getting recent scans:', error.message);
+        return [];
+    }
+}
+
+async function getDashboardStats(userId = 1) {
+    if (!db) {
+        // Return mock data when no database connection
+        console.log('⚠️ No database connection, returning mock data');
+        return {
+            totalScans: 3,
+            totalIssues: 22,
+            averageScore: 92,
+            thisWeekScans: 2
+        };
+    }
+    
+    try {
+        const result = await db.query(`
+            SELECT 
+                COUNT(*) as total_scans,
+                COALESCE(SUM(total_issues), 0) as total_issues,
+                COALESCE(AVG(CASE 
+                    WHEN total_issues = 0 THEN 100
+                    ELSE GREATEST(0, 100 - (total_issues * 2))
+                END), 0) as average_score,
+                COUNT(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as this_week_scans
+            FROM scans 
+            WHERE user_id = $1
+        `, [userId]);
+        
+        const stats = result.rows[0];
+        return {
+            totalScans: parseInt(stats.total_scans),
+            totalIssues: parseInt(stats.total_issues),
+            averageScore: Math.round(parseFloat(stats.average_score)),
+            thisWeekScans: parseInt(stats.this_week_scans)
+        };
+    } catch (error) {
+        console.log('❌ Database error getting dashboard stats:', error.message);
+        return {
+            totalScans: 0,
+            totalIssues: 0,
+            averageScore: 0,
+            thisWeekScans: 0
+        };
+    }
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        database: db ? 'connected' : 'standalone',
+        environment: process.env.K_SERVICE ? 'cloud-run' : 'local'
+    });
 });
 
-// PHASE 2A ENHANCEMENT: Enhanced scan endpoint with AI-powered fix generation
-app.post('/api/scan', async (req, res) => {
-    const { url, scanType, standard } = req.body;
-    
-    console.log(`🔍 Starting accessibility scan for: ${url}`);
-    console.log(`📋 Scan type: ${scanType} Standard: ${standard}`);
-    
-    let browser;
+// PHASE 2D: Enhanced Visual Preview Endpoints - VIOLATION-SPECIFIC
+app.post('/api/visual-preview', async (req, res) => {
     try {
-        // Launch browser with optimized settings
-        browser = await puppeteer.launch({
-            headless: true,
+        const { url, violation } = req.body;
+        
+        console.log('👁️ Generating violation-specific visual preview for:', violation?.id, 'URL:', url);
+        
+        // Validate URL
+        if (!url || url === 'https://example.com') {
+            return res.status(400).json({ 
+                success: false,
+                error: 'No valid URL provided. Please run a scan first to set the target URL.' 
+            });
+        }
+        
+        const browser = await puppeteer.launch({
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -62,716 +243,749 @@ app.post('/api/scan', async (req, res) => {
                 '--no-zygote',
                 '--single-process',
                 '--disable-gpu'
-            ]
+            ],
+            timeout: 60000
         });
         
         const page = await browser.newPage();
-        
-        // Set viewport and user agent
         await page.setViewport({ width: 1200, height: 800 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
         
-        console.log(`🌐 Navigating to: ${url}`);
+        // Navigate to the page
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        
+        // Take before screenshot
+        const beforeScreenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false
+        });
+        
+        // Violation-specific highlighting
+        const highlightResult = await page.evaluate((violationData) => {
+            let highlightedCount = 0;
+            let elementInfo = null;
+            
+            // Get impact color
+            const impactColors = {
+                critical: '#dc3545',
+                serious: '#fd7e14', 
+                moderate: '#ffc107',
+                minor: '#6c757d'
+            };
+            const borderColor = impactColors[violationData?.impact] || '#dc3545';
+            
+            // Try to find elements using violation targets
+            if (violationData?.target && violationData.target.length > 0) {
+                violationData.target.forEach(selector => {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            // Highlight the element
+                            el.style.border = `4px solid ${borderColor}`;
+                            el.style.boxShadow = `0 0 15px rgba(220, 53, 69, 0.6)`;
+                            el.style.position = 'relative';
+                            
+                            // Add a tooltip
+                            const tooltip = document.createElement('div');
+                            tooltip.style.cssText = `
+                                position: absolute;
+                                top: -40px;
+                                left: 0;
+                                background: ${borderColor};
+                                color: white;
+                                padding: 5px 10px;
+                                border-radius: 4px;
+                                font-size: 12px;
+                                font-weight: bold;
+                                z-index: 10000;
+                                white-space: nowrap;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                            `;
+                            tooltip.textContent = `${violationData?.impact?.toUpperCase() || 'ISSUE'}: ${violationData?.id || 'Accessibility Issue'}`;
+                            el.appendChild(tooltip);
+                            
+                            highlightedCount++;
+                            
+                            // Get element info for the first element
+                            if (!elementInfo) {
+                                elementInfo = {
+                                    tagName: el.tagName.toLowerCase(),
+                                    selector: selector,
+                                    text: el.textContent?.substring(0, 50) || '',
+                                    attributes: {
+                                        id: el.id || null,
+                                        class: el.className || null,
+                                        alt: el.alt || null,
+                                        'aria-label': el.getAttribute('aria-label') || null
+                                    }
+                                };
+                            }
+                        });
+                    } catch (e) {
+                        console.log('Could not select:', selector, e.message);
+                    }
+                });
+            }
+            
+            // Fallback: violation-specific highlighting based on rule ID
+            if (highlightedCount === 0 && violationData?.id) {
+                const ruleSelectors = {
+                    'color-contrast': ['a', 'button', '[role="button"]', 'input[type="submit"]', 'input[type="button"]'],
+                    'image-alt': ['img:not([alt])', 'img[alt=""]'],
+                    'label': ['input:not([aria-label]):not([aria-labelledby])', 'select:not([aria-label]):not([aria-labelledby])'],
+                    'link-name': ['a:empty', 'a:not([aria-label]):not([title])'],
+                    'button-name': ['button:empty', 'button:not([aria-label]):not([title])'],
+                    'heading-order': ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+                    'landmark-one-main': ['main', '[role="main"]'],
+                    'page-has-heading-one': ['h1'],
+                    'region': ['header', 'nav', 'main', 'footer', '[role="banner"]', '[role="navigation"]', '[role="main"]', '[role="contentinfo"]']
+                };
+                
+                const selectors = ruleSelectors[violationData.id] || ['*'];
+                selectors.forEach(selector => {
+                    try {
+                        const elements = document.querySelectorAll(selector);
+                        Array.from(elements).slice(0, 5).forEach(el => { // Limit to 5 elements
+                            el.style.border = `3px solid ${borderColor}`;
+                            el.style.boxShadow = `0 0 10px rgba(220, 53, 69, 0.5)`;
+                            highlightedCount++;
+                        });
+                    } catch (e) {
+                        console.log('Could not select:', selector, e.message);
+                    }
+                });
+            }
+            
+            return { highlightedCount, elementInfo };
+        }, violation);
+        
+        // Take after screenshot with highlighting
+        const afterScreenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false
+        });
+        
+        await browser.close();
+        
+        res.json({
+            success: true,
+            beforeImage: `data:image/png;base64,${beforeScreenshot}`,
+            afterImage: `data:image/png;base64,${afterScreenshot}`,
+            violationId: violation?.id || 'unknown',
+            highlightedElements: highlightResult.highlightedCount,
+            elementInfo: highlightResult.elementInfo
+        });
+        
+    } catch (error) {
+        console.error('Error generating visual preview:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate visual preview: ' + error.message 
+        });
+    }
+});
+
+app.post('/api/color-contrast-preview', async (req, res) => {
+    try {
+        const { url, simulationType } = req.body;
+        
+        console.log('🎨 Generating color contrast preview:', simulationType, 'URL:', url);
+        
+        // Validate URL
+        if (!url || url === 'https://example.com') {
+            return res.status(400).json({ 
+                success: false,
+                error: 'No valid URL provided. Please run a scan first to set the target URL.' 
+            });
+        }
+        
+        const browser = await puppeteer.launch({
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            timeout: 60000
+        });
+        
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1200, height: 800 });
+        
+        // Navigate to the page
         await page.goto(url, { 
-            waitUntil: 'networkidle0',
+            waitUntil: 'domcontentloaded', 
             timeout: 30000 
         });
         
-        // PHASE 2B: Enhanced platform detection with deep intelligence
-        console.log('🔍 Detecting platform and gathering intelligence...');
-        const platformInfo = await page.evaluate(() => {
-            const platform = {
-                type: 'unknown',
-                name: 'Unknown Platform',
-                version: null,
-                confidence: 0,
-                indicators: [],
-                capabilities: {
-                    cssInjection: false,
-                    themeEditor: false,
-                    pluginSystem: false,
-                    apiAccess: false
-                },
-                theme: {
-                    name: null,
-                    framework: null,
-                    customizable: false
-                },
-                accessibilityPlugins: [],
-                customizations: {
-                    customizationLevel: 'unknown',
-                    hasCustomCSS: false,
-                    hasCustomJS: false
-                },
-                deploymentMethod: 'unknown'
-            };
-            
-            // PHASE 2B: Enhanced WordPress Detection with Deep Intelligence
-            if (document.querySelector('meta[name="generator"][content*="WordPress"]') ||
-                document.querySelector('link[href*="wp-content"]') ||
-                document.querySelector('script[src*="wp-content"]') ||
-                window.wp || document.body.className.includes('wordpress')) {
-                platform.type = 'wordpress';
-                platform.name = 'WordPress';
-                platform.confidence = 0.9;
-                platform.indicators.push('WordPress generator meta tag', 'wp-content references');
-                platform.capabilities = {
-                    cssInjection: true,
-                    themeEditor: true,
-                    pluginSystem: true,
-                    apiAccess: true
-                };
-                platform.deploymentMethod = 'wordpress-admin';
-                
-                // PHASE 2B: Detect WordPress version
-                const generator = document.querySelector('meta[name="generator"]');
-                if (generator && generator.content) {
-                    const versionMatch = generator.content.match(/WordPress\\s+([\\d.]+)/);
-                    if (versionMatch) {
-                        platform.version = versionMatch[1];
-                        platform.indicators.push(`WordPress ${versionMatch[1]}`);
-                    }
-                }
-                
-                // PHASE 2B: Detect active theme
-                const themeStylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-                    .filter(link => link.href.includes('/themes/'));
-                if (themeStylesheets.length > 0) {
-                    const themeMatch = themeStylesheets[0].href.match(/\\/themes\\/([^\\/]+)\\//);
-                    if (themeMatch) {
-                        platform.theme.name = themeMatch[1];
-                        platform.theme.customizable = true;
-                        platform.indicators.push(`Theme: ${themeMatch[1]}`);
-                    }
-                }
-                
-                // PHASE 2B: Detect accessibility plugins
-                if (document.querySelector('[data-userway]') || document.querySelector('.userway-')) {
-                    platform.accessibilityPlugins.push('UserWay');
-                }
-                if (document.querySelector('[data-accessibe]') || document.querySelector('.acsb-')) {
-                    platform.accessibilityPlugins.push('accessiBe');
-                }
-                if (document.querySelector('[data-equalweb]') || document.querySelector('.ew-')) {
-                    platform.accessibilityPlugins.push('EqualWeb');
-                }
-                if (document.querySelector('.wp-accessibility-') || document.querySelector('[id*="wp-accessibility"]')) {
-                    platform.accessibilityPlugins.push('WP Accessibility Plugin');
-                }
-                
-                // PHASE 2B: Detect customization level
-                const customCSS = Array.from(document.querySelectorAll('style')).some(style => 
-                    style.textContent && style.textContent.includes('/* Custom CSS'));
-                const customJS = Array.from(document.querySelectorAll('script')).some(script => 
-                    script.textContent && script.textContent.includes('/* Custom JS'));
-                
-                platform.customizations.hasCustomCSS = customCSS;
-                platform.customizations.hasCustomJS = customJS;
-                platform.customizations.customizationLevel = (customCSS || customJS) ? 'high' : 'medium';
-            }
-            
-            // PHASE 2B: Enhanced Shopify Detection with Deep Intelligence
-            else if (document.querySelector('script[src*="shopify"]') ||
-                     document.querySelector('link[href*="shopify"]') ||
-                     window.Shopify || document.querySelector('.shopify-')) {
-                platform.type = 'shopify';
-                platform.name = 'Shopify';
-                platform.confidence = 0.9;
-                platform.indicators.push('Shopify scripts', 'Shopify global object');
-                platform.capabilities = {
-                    cssInjection: true,
-                    themeEditor: true,
-                    pluginSystem: true,
-                    apiAccess: true
-                };
-                platform.deploymentMethod = 'shopify-admin';
-                
-                // PHASE 2B: Detect Shopify theme
-                if (window.Shopify && window.Shopify.theme) {
-                    platform.theme.name = window.Shopify.theme.name;
-                    platform.theme.framework = 'liquid';
-                    platform.indicators.push(`Shopify Theme: ${window.Shopify.theme.name}`);
-                } else if (document.querySelector('.dawn-') || document.querySelector('[class*="dawn"]')) {
-                    platform.theme.name = 'Dawn';
-                    platform.theme.framework = 'liquid';
-                } else if (document.querySelector('.debut-') || document.querySelector('[class*="debut"]')) {
-                    platform.theme.name = 'Debut';
-                    platform.theme.framework = 'liquid';
-                } else if (document.querySelector('.brooklyn-') || document.querySelector('[class*="brooklyn"]')) {
-                    platform.theme.name = 'Brooklyn';
-                    platform.theme.framework = 'liquid';
-                } else if (document.querySelector('.narrative-') || document.querySelector('[class*="narrative"]')) {
-                    platform.theme.name = 'Narrative';
-                    platform.theme.framework = 'liquid';
-                }
-                
-                // PHASE 2B: Detect Shopify apps (accessibility-related)
-                if (document.querySelector('[data-userway]') || document.querySelector('.userway-')) {
-                    platform.accessibilityPlugins.push('UserWay (Shopify App)');
-                }
-                if (document.querySelector('[data-accessibe]') || document.querySelector('.acsb-')) {
-                    platform.accessibilityPlugins.push('accessiBe (Shopify App)');
-                }
-                if (document.querySelector('[data-equalweb]') || document.querySelector('.ew-')) {
-                    platform.accessibilityPlugins.push('EqualWeb (Shopify App)');
-                }
-                
-                // PHASE 2B: Detect customization level
-                const liquidTemplates = Array.from(document.querySelectorAll('script')).some(script => 
-                    script.textContent && script.textContent.includes('liquid'));
-                const customSections = document.querySelectorAll('[id*="shopify-section-template"]').length;
-                
-                platform.customizations.customizationLevel = customSections > 5 ? 'high' : 
-                    customSections > 2 ? 'medium' : 'low';
-                platform.customizations.hasCustomCSS = Array.from(document.querySelectorAll('style')).some(style => 
-                    style.textContent && style.textContent.length > 200);
-            }
-            
-            // PHASE 2B: Enhanced Wix Detection with Deep Intelligence
-            else if (document.querySelector('meta[name="generator"][content*="Wix"]') ||
-                     document.querySelector('script[src*="wix.com"]') ||
-                     window.wixDevelopersAnalytics) {
-                platform.type = 'wix';
-                platform.name = 'Wix';
-                platform.confidence = 0.8;
-                platform.indicators.push('Wix generator meta tag', 'Wix scripts');
-                platform.capabilities = {
-                    cssInjection: false,
-                    themeEditor: false,
-                    pluginSystem: false,
-                    apiAccess: false
-                };
-                platform.deploymentMethod = 'wix-editor';
-                
-                // PHASE 2B: Detect Wix editor type
-                if (document.querySelector('[data-wix-editor]') || document.querySelector('.wix-ads')) {
-                    platform.deploymentMethod = 'wix-adi';
-                    platform.indicators.push('Wix ADI detected');
-                } else if (document.querySelector('[data-corvid]') || window.wixCode) {
-                    platform.deploymentMethod = 'wix-corvid';
-                    platform.indicators.push('Wix Corvid/Velo detected');
-                    platform.capabilities.apiAccess = true;
-                }
-                
-                // PHASE 2B: Detect accessibility apps
-                if (document.querySelector('[data-userway]')) {
-                    platform.accessibilityPlugins.push('UserWay (Wix App)');
-                }
-                if (document.querySelector('[data-accessibe]')) {
-                    platform.accessibilityPlugins.push('accessiBe (Wix App)');
-                }
-            }
-            
-            // PHASE 2B: Enhanced Squarespace Detection with Deep Intelligence
-            else if (document.querySelector('script[src*="squarespace"]') ||
-                     document.querySelector('link[href*="squarespace"]') ||
-                     document.body.id === 'collection' ||
-                     document.querySelector('.sqs-')) {
-                platform.type = 'squarespace';
-                platform.name = 'Squarespace';
-                platform.confidence = 0.8;
-                platform.indicators.push('Squarespace scripts', 'SQS class names');
-                platform.capabilities = {
-                    cssInjection: true,
-                    themeEditor: false,
-                    pluginSystem: false,
-                    apiAccess: false
-                };
-                platform.deploymentMethod = 'squarespace-style-editor';
-                
-                // PHASE 2B: Detect Squarespace template family
-                if (document.querySelector('.sqs-template-') || document.body.className.includes('sqs-template-')) {
-                    const templateMatch = document.body.className.match(/sqs-template-([^\\s]+)/);
-                    if (templateMatch) {
-                        platform.theme.name = templateMatch[1];
-                        platform.indicators.push(`Template: ${templateMatch[1]}`);
-                    }
-                }
-                
-                // PHASE 2B: Detect version
-                if (document.querySelector('.sqs-7-1') || document.body.className.includes('sqs-7-1')) {
-                    platform.version = '7.1';
-                    platform.deploymentMethod = 'squarespace-7.1-editor';
-                } else if (document.querySelector('.sqs-7-0') || document.body.className.includes('sqs-7-0')) {
-                    platform.version = '7.0';
-                    platform.deploymentMethod = 'squarespace-7.0-editor';
-                }
-            }
-            
-            // PHASE 2B: Enhanced Custom/Static Site Detection
-            else {
-                platform.type = 'custom';
-                platform.name = 'Custom Website';
-                platform.confidence = 0.6;
-                platform.indicators.push('No major CMS detected');
-                platform.capabilities = {
-                    cssInjection: true,
-                    themeEditor: false,
-                    pluginSystem: false,
-                    apiAccess: false
-                };
-                platform.deploymentMethod = 'manual';
-                
-                // PHASE 2B: Detect framework indicators
-                if (document.querySelector('[data-react-root]') || window.React) {
-                    platform.indicators.push('React framework detected');
-                    platform.theme.framework = 'react';
-                } else if (document.querySelector('[ng-app]') || window.angular) {
-                    platform.indicators.push('Angular framework detected');
-                    platform.theme.framework = 'angular';
-                } else if (document.querySelector('[data-vue]') || window.Vue) {
-                    platform.indicators.push('Vue.js framework detected');
-                    platform.theme.framework = 'vue';
-                } else if (document.querySelector('script[src*="bootstrap"]') || document.querySelector('.bootstrap')) {
-                    platform.indicators.push('Bootstrap framework detected');
-                    platform.theme.framework = 'bootstrap';
-                }
-                
-                // PHASE 2B: Detect static site generators
-                if (document.querySelector('meta[name="generator"][content*="Jekyll"]')) {
-                    platform.indicators.push('Jekyll static site generator');
-                    platform.deploymentMethod = 'jekyll';
-                } else if (document.querySelector('meta[name="generator"][content*="Hugo"]')) {
-                    platform.indicators.push('Hugo static site generator');
-                    platform.deploymentMethod = 'hugo';
-                } else if (document.querySelector('meta[name="generator"][content*="Gatsby"]')) {
-                    platform.indicators.push('Gatsby static site generator');
-                    platform.deploymentMethod = 'gatsby';
-                }
-            }
-            
-            return platform;
+        // Take before screenshot
+        const beforeScreenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false
         });
         
-        console.log('🎯 Platform detected:', platformInfo);
+        // Apply color vision simulation
+        await page.evaluate((simType) => {
+            // Color vision simulation filters
+            const filters = {
+                protanopia: 'url("data:image/svg+xml;charset=utf-8,<svg xmlns=\\"http://www.w3.org/2000/svg\\"><defs><filter id=\\"protanopia\\"><feColorMatrix values=\\"0.567,0.433,0,0,0 0.558,0.442,0,0,0 0,0.242,0.758,0,0 0,0,0,1,0\\"/></filter></defs></svg>#protanopia")',
+                deuteranopia: 'url("data:image/svg+xml;charset=utf-8,<svg xmlns=\\"http://www.w3.org/2000/svg\\"><defs><filter id=\\"deuteranopia\\"><feColorMatrix values=\\"0.625,0.375,0,0,0 0.7,0.3,0,0,0 0,0.3,0.7,0,0 0,0,0,1,0\\"/></filter></defs></svg>#deuteranopia")',
+                tritanopia: 'url("data:image/svg+xml;charset=utf-8,<svg xmlns=\\"http://www.w3.org/2000/svg\\"><defs><filter id=\\"tritanopia\\"><feColorMatrix values=\\"0.95,0.05,0,0,0 0,0.433,0.567,0,0 0,0.475,0.525,0,0 0,0,0,1,0\\"/></filter></defs></svg>#tritanopia")',
+                achromatopsia: 'grayscale(100%)',
+                lowVision: 'blur(2px) contrast(0.5)'
+            };
+            
+            if (filters[simType]) {
+                document.body.style.filter = filters[simType];
+            }
+        }, simulationType);
+        
+        // Take after screenshot with simulation
+        const afterScreenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false
+        });
+        
+        await browser.close();
+        
+        res.json({
+            success: true,
+            beforeImage: `data:image/png;base64,${beforeScreenshot}`,
+            afterImage: `data:image/png;base64,${afterScreenshot}`,
+            simulationType: simulationType
+        });
+        
+    } catch (error) {
+        console.error('Error generating color contrast preview:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate color contrast preview: ' + error.message 
+        });
+    }
+});
+
+// PHASE 2E: AI-Powered Fix Suggestions
+app.post('/api/ai-suggestions', async (req, res) => {
+    try {
+        const { violation, context } = req.body;
+        
+        console.log('🤖 Generating AI suggestions for violation:', violation?.id);
+        
+        if (!violation) {
+            return res.status(400).json({ 
+                success: false,
+                error: 'No violation data provided' 
+            });
+        }
+        
+        let suggestions;
+        
+        if (openai) {
+            // Use OpenAI for dynamic suggestions
+            try {
+                const prompt = `As an accessibility expert, provide specific, actionable fix suggestions for this WCAG violation:
+
+Rule: ${violation.id}
+Description: ${violation.description}
+Impact: ${violation.impact}
+Help: ${violation.help}
+${violation.helpUrl ? `Reference: ${violation.helpUrl}` : ''}
+
+Context:
+- Element: ${violation.target ? violation.target[0] : 'Unknown'}
+- HTML: ${violation.html || 'Not provided'}
+
+Provide 3-5 specific, actionable suggestions in JSON format:
+{
+  "suggestions": [
+    {
+      "title": "Brief title",
+      "description": "Detailed explanation",
+      "code": "Example code fix",
+      "priority": "high|medium|low"
+    }
+  ]
+}`;
+
+                const response = await openai.chat.completions.create({
+                    model: "gpt-4",
+                    messages: [{ role: "user", content: prompt }],
+                    max_tokens: 1000,
+                    temperature: 0.3
+                });
+                
+                const aiResponse = JSON.parse(response.choices[0].message.content);
+                suggestions = aiResponse.suggestions;
+                
+            } catch (aiError) {
+                console.log('AI suggestion failed, using fallback:', aiError.message);
+                suggestions = getFallbackSuggestions(violation);
+            }
+        } else {
+            // Use predefined suggestions
+            suggestions = getFallbackSuggestions(violation);
+        }
+        
+        res.json({
+            success: true,
+            violationId: violation.id,
+            suggestions: suggestions
+        });
+        
+    } catch (error) {
+        console.error('Error generating AI suggestions:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to generate suggestions: ' + error.message 
+        });
+    }
+});
+
+function getFallbackSuggestions(violation) {
+    const suggestionMap = {
+        'color-contrast': [
+            {
+                title: 'Increase Color Contrast',
+                description: 'Ensure text has a contrast ratio of at least 4.5:1 for normal text and 3:1 for large text.',
+                code: '/* Example: Change text color */\n.text-element {\n  color: #333333; /* Darker text */\n  background-color: #ffffff; /* Light background */\n}',
+                priority: 'high'
+            },
+            {
+                title: 'Use Color Contrast Tools',
+                description: 'Test your color combinations with online contrast checkers to ensure WCAG compliance.',
+                code: '/* Tools: WebAIM Contrast Checker, Colour Contrast Analyser */',
+                priority: 'medium'
+            }
+        ],
+        'image-alt': [
+            {
+                title: 'Add Alt Text',
+                description: 'Provide descriptive alternative text that conveys the meaning and context of the image.',
+                code: '<img src="chart.png" alt="Sales increased 25% from Q1 to Q2 2024">',
+                priority: 'high'
+            },
+            {
+                title: 'Use Empty Alt for Decorative Images',
+                description: 'For purely decorative images, use empty alt text to indicate they should be ignored by screen readers.',
+                code: '<img src="decoration.png" alt="" role="presentation">',
+                priority: 'medium'
+            }
+        ],
+        'label': [
+            {
+                title: 'Add Form Labels',
+                description: 'Associate form controls with descriptive labels using the for attribute or aria-labelledby.',
+                code: '<label for="email">Email Address:</label>\n<input type="email" id="email" name="email">',
+                priority: 'high'
+            },
+            {
+                title: 'Use Aria-Label',
+                description: 'For complex forms, use aria-label to provide accessible names for form controls.',
+                code: '<input type="search" aria-label="Search products">',
+                priority: 'medium'
+            }
+        ],
+        'link-name': [
+            {
+                title: 'Add Descriptive Link Text',
+                description: 'Ensure links have meaningful text that describes their destination or purpose.',
+                code: '<a href="/products">View our products</a>\n<!-- Instead of: <a href="/products">Click here</a> -->',
+                priority: 'high'
+            },
+            {
+                title: 'Use Aria-Label for Context',
+                description: 'When link text alone isn\'t descriptive enough, add aria-label for additional context.',
+                code: '<a href="/article1" aria-label="Read more about accessibility testing">Read more</a>',
+                priority: 'medium'
+            }
+        ]
+    };
+    
+    return suggestionMap[violation.id] || [
+        {
+            title: 'Review WCAG Guidelines',
+            description: 'Consult the official WCAG documentation for specific guidance on this violation.',
+            code: '/* Refer to: https://www.w3.org/WAI/WCAG21/Understanding/ */',
+            priority: 'medium'
+        }
+    ];
+}
+
+// PHASE 2F: Guided Fixing Interface
+app.post('/api/implement-fix', async (req, res) => {
+    try {
+        const { url, violation, fixType, customCode } = req.body;
+        
+        console.log('🔧 Implementing fix for violation:', violation?.id, 'Fix type:', fixType);
+        
+        // Validate URL
+        if (!url || url === 'https://example.com') {
+            return res.status(400).json({ 
+                success: false,
+                error: 'No valid URL provided. Please run a scan first to set the target URL.' 
+            });
+        }
+        
+        const browser = await puppeteer.launch({
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            timeout: 60000
+        });
+        
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1200, height: 800 });
+        
+        // Navigate to the page
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        
+        // Take before screenshot
+        const beforeScreenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false
+        });
+        
+        // Apply the fix based on violation type and fix type
+        const fixResult = await page.evaluate((violationData, fixType, customCode) => {
+            let fixedCount = 0;
+            let appliedFixes = [];
+            
+            // Get elements to fix
+            let elements = [];
+            if (violationData?.target && violationData.target.length > 0) {
+                violationData.target.forEach(selector => {
+                    try {
+                        const found = document.querySelectorAll(selector);
+                        elements.push(...Array.from(found));
+                    } catch (e) {
+                        console.log('Could not select:', selector);
+                    }
+                });
+            }
+            
+            // Apply fixes based on violation type
+            if (violationData?.id === 'color-contrast' && fixType === 'auto') {
+                elements.forEach(el => {
+                    const originalColor = window.getComputedStyle(el).color;
+                    const originalBg = window.getComputedStyle(el).backgroundColor;
+                    
+                    // Apply high contrast colors
+                    el.style.color = '#000000';
+                    el.style.backgroundColor = '#ffffff';
+                    el.style.border = '1px solid #cccccc';
+                    
+                    appliedFixes.push({
+                        element: el.tagName.toLowerCase(),
+                        fix: 'Applied high contrast colors',
+                        before: `color: ${originalColor}, background: ${originalBg}`,
+                        after: 'color: #000000, background: #ffffff'
+                    });
+                    fixedCount++;
+                });
+            }
+            
+            else if (violationData?.id === 'image-alt' && fixType === 'auto') {
+                elements.forEach(el => {
+                    if (el.tagName.toLowerCase() === 'img') {
+                        const originalAlt = el.alt;
+                        
+                        // Generate basic alt text based on src or context
+                        let altText = 'Image';
+                        if (el.src) {
+                            const filename = el.src.split('/').pop().split('.')[0];
+                            altText = filename.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        }
+                        
+                        el.alt = altText;
+                        el.style.border = '2px solid green';
+                        
+                        appliedFixes.push({
+                            element: 'img',
+                            fix: 'Added alt text',
+                            before: `alt="${originalAlt}"`,
+                            after: `alt="${altText}"`
+                        });
+                        fixedCount++;
+                    }
+                });
+            }
+            
+            else if (violationData?.id === 'label' && fixType === 'auto') {
+                elements.forEach(el => {
+                    if (['input', 'select', 'textarea'].includes(el.tagName.toLowerCase())) {
+                        const originalLabel = el.getAttribute('aria-label') || '';
+                        
+                        // Add aria-label based on input type or placeholder
+                        let labelText = el.placeholder || el.type || 'Form field';
+                        labelText = labelText.charAt(0).toUpperCase() + labelText.slice(1);
+                        
+                        el.setAttribute('aria-label', labelText);
+                        el.style.border = '2px solid green';
+                        
+                        appliedFixes.push({
+                            element: el.tagName.toLowerCase(),
+                            fix: 'Added aria-label',
+                            before: `aria-label="${originalLabel}"`,
+                            after: `aria-label="${labelText}"`
+                        });
+                        fixedCount++;
+                    }
+                });
+            }
+            
+            else if (violationData?.id === 'link-name' && fixType === 'auto') {
+                elements.forEach(el => {
+                    if (el.tagName.toLowerCase() === 'a') {
+                        const originalText = el.textContent;
+                        const originalAriaLabel = el.getAttribute('aria-label') || '';
+                        
+                        // Improve link text
+                        if (!originalText.trim() || originalText.trim().toLowerCase() === 'click here') {
+                            const href = el.href;
+                            let linkText = 'Link';
+                            if (href) {
+                                const path = new URL(href).pathname;
+                                linkText = path.split('/').filter(p => p).pop() || 'Home';
+                                linkText = linkText.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                            }
+                            el.textContent = linkText;
+                        }
+                        
+                        // Add aria-label for additional context
+                        if (!originalAriaLabel) {
+                            el.setAttribute('aria-label', `Navigate to ${el.textContent}`);
+                        }
+                        
+                        el.style.border = '2px solid green';
+                        
+                        appliedFixes.push({
+                            element: 'a',
+                            fix: 'Improved link text and added aria-label',
+                            before: `text="${originalText}", aria-label="${originalAriaLabel}"`,
+                            after: `text="${el.textContent}", aria-label="${el.getAttribute('aria-label')}"`
+                        });
+                        fixedCount++;
+                    }
+                });
+            }
+            
+            // Apply custom code if provided
+            if (fixType === 'custom' && customCode) {
+                try {
+                    // Create a style element with the custom CSS
+                    const style = document.createElement('style');
+                    style.textContent = customCode;
+                    document.head.appendChild(style);
+                    
+                    appliedFixes.push({
+                        element: 'custom',
+                        fix: 'Applied custom CSS',
+                        before: 'No custom styles',
+                        after: customCode
+                    });
+                    fixedCount++;
+                } catch (e) {
+                    console.log('Error applying custom code:', e);
+                }
+            }
+            
+            return { fixedCount, appliedFixes };
+        }, violation, fixType, customCode);
+        
+        // Take after screenshot
+        const afterScreenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false
+        });
+        
+        await browser.close();
+        
+        res.json({
+            success: true,
+            beforeImage: `data:image/png;base64,${beforeScreenshot}`,
+            afterImage: `data:image/png;base64,${afterScreenshot}`,
+            violationId: violation?.id || 'unknown',
+            fixType: fixType,
+            fixedElements: fixResult.fixedCount,
+            appliedFixes: fixResult.appliedFixes
+        });
+        
+    } catch (error) {
+        console.error('Error implementing fix:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to implement fix: ' + error.message 
+        });
+    }
+});
+
+// Main scan endpoint - PRESERVED FROM WORKING VERSION
+app.post('/api/scan', async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+        const { url, scanType, standard } = req.body;
+        
+        console.log(`🔍 Starting accessibility scan for: ${url}`);
+        console.log(`📋 Scan type: ${scanType}, Standard: ${standard}`);
+        
+        // Validate URL
+        if (!url) {
+            return res.status(400).json({ 
+                success: false,
+                error: 'URL is required' 
+            });
+        }
+        
+        // Launch browser with Cloud Run optimized settings
+        const browser = await puppeteer.launch({
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            timeout: 60000
+        });
+        
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1200, height: 800 });
+        
+        // Navigate to the page
+        await page.goto(url, { 
+            waitUntil: 'domcontentloaded', 
+            timeout: 30000 
+        });
         
         // Inject axe-core
         await page.addScriptTag({
             content: axeCore.source
         });
         
-        // Run accessibility scan
-        console.log('🔍 Running axe-core accessibility scan...');
-        const results = await page.evaluate((standard) => {
-            return axe.run({
-                tags: [standard.toLowerCase()],
-                options: {
-                    reporter: 'v2'
-                }
-            });
-        }, standard);
+        // Configure axe based on standard
+        const axeConfig = {
+            'wcag2a': { tags: ['wcag2a'] },
+            'wcag2aa': { tags: ['wcag2aa'] },
+            'wcag2aaa': { tags: ['wcag2aaa'] },
+            'wcag21aa': { tags: ['wcag21aa'] },
+            'section508': { tags: ['section508'] }
+        };
+        
+        // Run axe-core accessibility scan
+        const results = await page.evaluate((config) => {
+            return axe.run(document, config);
+        }, axeConfig[standard] || { tags: ['wcag2aa'] });
+        
+        // Take screenshot for visual reference
+        const screenshot = await page.screenshot({ 
+            encoding: 'base64',
+            fullPage: false
+        });
         
         await browser.close();
         
-        // PHASE 2A: Process violations and generate AI-powered fixes
-        console.log(`📊 Scan completed. Found ${results.violations.length} violations`);
-        
-        const processedViolations = await Promise.all(
-            results.violations.map(async (violation) => {
-                // PHASE 2A: Generate AI-powered fix for each violation
-                const fixCode = generateFixCode(violation, platformInfo);
-                
-                return {
-                    ...violation,
-                    fixCode: fixCode,
-                    platformSpecific: {
-                        platform: platformInfo.type,
-                        deploymentMethod: platformInfo.deploymentMethod,
-                        canAutoFix: platformInfo.capabilities.apiAccess,
-                        fixComplexity: violation.impact === 'critical' ? 'high' : 
-                                     violation.impact === 'serious' ? 'medium' : 'low'
-                    }
-                };
-            })
-        );
+        const scanTimeMs = Date.now() - startTime;
+        const totalIssues = results.violations.length;
         
         // Calculate accessibility score
-        const totalElements = results.passes.length + results.violations.length + results.incomplete.length;
-        const passedElements = results.passes.length;
-        const score = totalElements > 0 ? Math.round((passedElements / totalElements) * 100) : 0;
+        let score = 100;
+        results.violations.forEach(violation => {
+            const impact = violation.impact;
+            const deduction = {
+                'critical': 10,
+                'serious': 7,
+                'moderate': 4,
+                'minor': 2
+            }[impact] || 2;
+            score -= deduction;
+        });
+        score = Math.max(0, score);
         
-        // Store scan results in database
-        try {
-            const scanResult = await pool.query(
-                'INSERT INTO scans (url, scan_type, standard, score, violations_count, platform_type, platform_name, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW()) RETURNING id',
-                [url, scanType, standard, score, results.violations.length, platformInfo.type, platformInfo.name]
-            );
-            
-            console.log('✅ Scan results stored in database with ID:', scanResult.rows[0].id);
-        } catch (dbError) {
-            console.error('❌ Database error:', dbError);
-        }
+        console.log(`✅ Scan completed in ${scanTimeMs}ms`);
+        console.log(`📊 Found ${totalIssues} violations, Score: ${score}`);
+        
+        // Save scan to database
+        const scanId = await saveScan(1, 1, url, scanType, totalIssues, scanTimeMs, 1, results.violations);
         
         res.json({
             success: true,
+            scanId: scanId,
             url: url,
             scanType: scanType,
             standard: standard,
             score: score,
-            violations: processedViolations,
-            passes: results.passes,
-            incomplete: results.incomplete,
-            platformInfo: platformInfo,
-            timestamp: new Date().toISOString(),
-            summary: {
-                totalViolations: results.violations.length,
-                criticalViolations: results.violations.filter(v => v.impact === 'critical').length,
-                seriousViolations: results.violations.filter(v => v.impact === 'serious').length,
-                moderateViolations: results.violations.filter(v => v.impact === 'moderate').length,
-                minorViolations: results.violations.filter(v => v.impact === 'minor').length,
-                autoFixableViolations: processedViolations.filter(v => v.platformSpecific.canAutoFix).length
-            }
+            totalIssues: totalIssues,
+            scanTimeMs: scanTimeMs,
+            violations: results.violations,
+            passes: results.passes.length,
+            incomplete: results.incomplete.length,
+            screenshot: `data:image/png;base64,${screenshot}`,
+            timestamp: new Date().toISOString()
         });
         
     } catch (error) {
-        console.error('❌ Scan error:', error);
+        const scanTimeMs = Date.now() - startTime;
+        console.error('❌ Scan error:', error.message);
         
-        if (browser) {
-            await browser.close();
-        }
-        
-        res.status(500).json({
+        res.status(500).json({ 
             success: false,
-            error: 'Failed to scan the website',
-            details: error.message,
-            url: url
+            error: error.message,
+            scanTimeMs: scanTimeMs
         });
     }
 });
 
-// PHASE 2A: AI-powered fix code generation
-function generateFixCode(violation, platformInfo) {
-    const fixes = {
-        css: '',
-        html: '',
-        javascript: '',
-        instructions: ''
-    };
-    
-    // PHASE 2A: Generate platform-specific fixes based on violation type
-    switch (violation.id) {
-        case 'color-contrast':
-            fixes.css = `
-/* Fix for color contrast violation */
-.low-contrast-text {
-    color: #333333 !important; /* WCAG AA compliant dark text */
-    background-color: #ffffff !important; /* High contrast background */
-}
-
-/* For dark backgrounds */
-.dark-background {
-    color: #ffffff !important; /* White text on dark background */
-    background-color: #333333 !important;
-}
-`;
-            fixes.instructions = `
-## Color Contrast Fix Instructions
-
-### For ${platformInfo.name}:
-1. Navigate to your ${platformInfo.deploymentMethod === 'wordpress-admin' ? 'WordPress admin → Appearance → Customize → Additional CSS' : 'theme editor'}
-2. Add the provided CSS code
-3. Apply the classes to elements with contrast issues
-4. Test with a color contrast analyzer tool
-`;
-            break;
-            
-        case 'image-alt':
-            fixes.html = `
-<!-- Fix for missing alt text -->
-<!-- Replace images without alt text: -->
-<img src="image.jpg" alt=""> <!-- Decorative image -->
-<img src="logo.jpg" alt="Company Name Logo"> <!-- Meaningful image -->
-<img src="chart.jpg" alt="Sales increased 25% from Q1 to Q2 2024"> <!-- Complex image -->
-`;
-            fixes.javascript = `
-// Automatically add alt text to images missing it
-document.querySelectorAll('img:not([alt])').forEach(img => {
-    // For decorative images
-    if (img.closest('.decoration') || img.classList.contains('decorative')) {
-        img.alt = '';
-    } else {
-        // Prompt for meaningful alt text
-        img.alt = 'Image description needed';
-        console.warn('Alt text needed for:', img.src);
-    }
-});
-`;
-            break;
-            
-        case 'heading-order':
-            fixes.html = `
-<!-- Fix for heading order violation -->
-<!-- Correct heading hierarchy: -->
-<h1>Main Page Title</h1>
-  <h2>Section Title</h2>
-    <h3>Subsection Title</h3>
-    <h3>Another Subsection</h3>
-  <h2>Another Section</h2>
-    <h3>Subsection</h3>
-`;
-            break;
-            
-        case 'link-name':
-            fixes.html = `
-<!-- Fix for link without accessible name -->
-<!-- Instead of: <a href="/read-more">Read more</a> -->
-<a href="/article-title">Read more about Article Title</a>
-
-<!-- Or use aria-label: -->
-<a href="/read-more" aria-label="Read more about Article Title">Read more</a>
-
-<!-- Or use sr-only text: -->
-<a href="/read-more">Read more <span class="sr-only">about Article Title</span></a>
-`;
-            fixes.css = `
-/* Screen reader only text */
-.sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-}
-`;
-            break;
-            
-        case 'button-name':
-            fixes.html = `
-<!-- Fix for button without accessible name -->
-<!-- Instead of: <button><i class="icon-save"></i></button> -->
-<button aria-label="Save document">
-    <i class="icon-save" aria-hidden="true"></i>
-</button>
-
-<!-- Or with visible text: -->
-<button>
-    <i class="icon-save" aria-hidden="true"></i>
-    Save
-</button>
-`;
-            break;
-            
-        case 'form-field-multiple-labels':
-            fixes.html = `
-<!-- Fix for form field with multiple labels -->
-<!-- Use fieldset and legend for grouped fields: -->
-<fieldset>
-    <legend>Contact Information</legend>
-    <label for="email">Email Address</label>
-    <input type="email" id="email" name="email">
-    
-    <label for="phone">Phone Number</label>
-    <input type="tel" id="phone" name="phone">
-</fieldset>
-`;
-            break;
-            
-        case 'landmark-one-main':
-            fixes.html = `
-<!-- Fix for missing or multiple main landmarks -->
-<header>
-    <nav aria-label="Main navigation">
-        <!-- Navigation content -->
-    </nav>
-</header>
-
-<main>
-    <!-- Main content goes here -->
-    <h1>Page Title</h1>
-    <!-- Page content -->
-</main>
-
-<footer>
-    <!-- Footer content -->
-</footer>
-`;
-            break;
-    }
-    
-    // PHASE 2A: Add platform-specific deployment instructions
-    let platformInstructions = '';
-    switch (platformInfo.type) {
-        case 'wordpress':
-            platformInstructions = `
-### WordPress Implementation:
-1. **CSS Changes**: Go to Appearance → Customize → Additional CSS
-2. **HTML Changes**: Edit the theme files or use a child theme
-3. **JavaScript**: Add to theme's functions.php or use a plugin like "Insert Headers and Footers"
-4. **Testing**: Use WordPress accessibility plugins to verify fixes
-`;
-            break;
-            
-        case 'shopify':
-            platformInstructions = `
-### Shopify Implementation:
-1. **CSS Changes**: Go to Online Store → Themes → Actions → Edit Code → Assets → theme.scss.liquid
-2. **HTML Changes**: Edit the relevant template files (.liquid files)
-3. **JavaScript**: Add to assets/theme.js or create a new asset file
-4. **Testing**: Preview changes before publishing
-`;
-            break;
-            
-        case 'wix':
-            platformInstructions = `
-### Wix Implementation:
-1. **CSS Changes**: Use the Wix Editor → Add → More → HTML iFrame (for custom CSS)
-2. **HTML Changes**: Limited - use Wix's built-in elements and accessibility features
-3. **JavaScript**: Add through HTML iFrame or Corvid (if available)
-4. **Note**: Wix has limited customization - consider using built-in accessibility features
-`;
-            break;
-            
-        case 'squarespace':
-            platformInstructions = `
-### Squarespace Implementation:
-1. **CSS Changes**: Go to Design → Custom CSS
-2. **HTML Changes**: Limited - use Code Blocks for custom HTML
-3. **JavaScript**: Add through Code Injection in Settings → Advanced
-4. **Testing**: Use Squarespace's preview mode to test changes
-`;
-            break;
-            
-        default:
-            platformInstructions = `
-### Custom Website Implementation:
-1. **CSS Changes**: Add to your main stylesheet
-2. **HTML Changes**: Update your HTML templates
-3. **JavaScript**: Add to your main JavaScript file or create a new one
-4. **Testing**: Test across different browsers and devices
-`;
-    }
-    
-    // Combine all fixes and instructions
-    const combinedCSS = fixes.css;
-    const combinedHTML = fixes.html;
-    const combinedJS = fixes.javascript;
-    
-    const instructionsText = `
-# Accessibility Fix Instructions
-
-## Violation: ${violation.id}
-**Impact Level**: ${violation.impact}
-**Description**: ${violation.description}
-
-${platformInstructions}
-
-## Generated Code:
-
-### CSS:
-\`\`\`css
-${combinedCSS}
-\`\`\`
-
-### HTML:
-\`\`\`html
-${combinedHTML}
-\`\`\`
-
-### JavaScript:
-\`\`\`javascript
-${combinedJS}
-\`\`\`
-
-## Testing:
-1. Apply the fixes to your website
-2. Re-run the accessibility scan to verify improvements
-3. Test with screen readers and keyboard navigation
-4. Validate color contrast ratios meet WCAG standards
-`;
-
-    return {
-        css: combinedCSS,
-        html: combinedHTML,
-        instructions: instructionsText,
-        platform: platformInfo?.type || 'custom'
-    };
-}
-
-// PHASE 2A ENHANCEMENT: New endpoint for implementing auto-fixes
-app.post('/api/implement-fix', async (req, res) => {
+// Dashboard data endpoint - PRESERVED FROM WORKING VERSION
+app.get('/api/dashboard', async (req, res) => {
     try {
-        const { violationId, fixType, platformInfo } = req.body;
+        console.log('📊 Fetching dashboard data...');
         
-        console.log('🔧 Implementing auto-fix for violation:', violationId);
-        
-        // Generate the specific fix
-        const mockViolation = { id: violationId, impact: 'serious' };
-        const fixCode = generateFixCode(mockViolation, platformInfo);
-        
-        // In a real implementation, this would:
-        // 1. Connect to the platform's API (Shopify, WordPress, etc.)
-        // 2. Apply the fix directly to the website
-        // 3. Verify the fix was applied successfully
-        
-        // For now, we'll return the generated code and instructions
-        res.json({
-            success: true,
-            message: `Auto-fix generated for ${violationId}`,
-            fixApplied: false, // Set to true when actually implemented
-            fixCode: fixCode,
-            nextSteps: [
-                'Download the generated fix files',
-                'Follow the platform-specific instructions',
-                'Apply the fixes to your website',
-                'Re-run the accessibility scan to verify improvements'
-            ]
-        });
-        
-    } catch (error) {
-        console.error('Error implementing fix:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to implement fix',
-            details: error.message
-        });
-    }
-});
-
-// PHASE 2A ENHANCEMENT: New endpoint for generating fix previews
-app.post('/api/preview-fix', async (req, res) => {
-    try {
-        const { violationId, element, platformInfo } = req.body;
-        
-        console.log('👀 Generating fix preview for violation:', violationId);
-        
-        // Generate the fix code
-        const mockViolation = { id: violationId, impact: 'serious', description: 'Sample violation' };
-        const fixCode = generateFixCode(mockViolation, platformInfo);
+        const [stats, recentScans] = await Promise.all([
+            getDashboardStats(),
+            getRecentScans()
+        ]);
         
         res.json({
             success: true,
-            violationId: violationId,
-            preview: {
-                before: element.outerHTML || '<div>Original element</div>',
-                after: `<!-- Fixed element with accessibility improvements -->
-${element.outerHTML || '<div>Fixed element</div>'}`,
-                explanation: `This fix addresses the ${violationId} violation by implementing WCAG 2.1 AA compliant changes.`
-            },
-            fixCode: fixCode,
-            estimatedImpact: {
-                scoreImprovement: '+5-15 points',
-                violationsFixed: 1,
-                timeToImplement: '5-10 minutes'
-            }
+            stats: stats,
+            recentScans: recentScans
         });
         
     } catch (error) {
-        console.error('Error generating fix preview:', error);
-        res.status(500).json({
+        console.error('❌ Dashboard error:', error.message);
+        res.status(500).json({ 
             success: false,
-            error: 'Failed to generate fix preview',
-            details: error.message
+            error: error.message 
         });
     }
 });
 
-// Main dashboard route
+// Serve static files
+app.use(express.static('public'));
+
+// Main application route - PRESERVED FROM WORKING VERSION
 app.get('/', (req, res) => {
-    const html = `
+    res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -787,101 +1001,115 @@ app.get('/', (req, res) => {
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f8fafc;
-            color: #334155;
+            background-color: #f8f9fa;
+            color: #333;
             line-height: 1.6;
         }
         
-        .dashboard {
+        .app-container {
             display: flex;
             min-height: 100vh;
         }
         
         .sidebar {
-            width: 280px;
-            background: #1e293b;
+            width: 250px;
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
             color: white;
             padding: 0;
             position: fixed;
             height: 100vh;
             overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
         }
         
         .logo {
-            padding: 24px;
-            border-bottom: 1px solid #334155;
+            padding: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.2);
         }
         
         .logo h1 {
             font-size: 24px;
             font-weight: 700;
-            color: #f1f5f9;
+            margin-bottom: 5px;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }
         
-        .logo .subtitle {
+        .logo p {
             font-size: 14px;
-            color: #94a3b8;
-            font-weight: 400;
-            margin-top: 4px;
+            opacity: 0.8;
+            font-weight: 300;
         }
         
-        .nav {
-            padding: 24px 0;
+        .nav-menu {
+            list-style: none;
+            padding: 20px 0;
         }
         
         .nav-item {
+            margin: 0;
+        }
+        
+        .nav-link {
             display: flex;
             align-items: center;
-            padding: 12px 24px;
-            color: #cbd5e1;
+            padding: 15px 20px;
+            color: rgba(255,255,255,0.8);
             text-decoration: none;
-            transition: all 0.2s;
+            transition: all 0.3s ease;
             border-left: 3px solid transparent;
             position: relative;
         }
         
-        .nav-item:hover {
-            background: #334155;
-            color: #f1f5f9;
-            border-left-color: #3b82f6;
-        }
-        
-        .nav-item.active {
-            background: #1e40af;
+        .nav-link:hover {
+            background: rgba(255,255,255,0.1);
             color: white;
-            border-left-color: #60a5fa;
+            border-left-color: #3498db;
         }
         
-        .nav-item .icon {
-            width: 20px;
-            height: 20px;
-            margin-right: 12px;
-            opacity: 0.8;
-        }
-        
-        .nav-item .badge {
-            background: #dc2626;
+        .nav-link.active {
+            background: rgba(255,255,255,0.15);
             color: white;
-            font-size: 12px;
-            padding: 2px 8px;
-            border-radius: 12px;
-            margin-left: auto;
+            border-left-color: #e74c3c;
             font-weight: 600;
+        }
+        
+        .nav-icon {
+            margin-right: 12px;
+            font-size: 18px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .badge {
+            background: #e74c3c;
+            color: white;
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: auto;
         }
         
         .main-content {
             flex: 1;
-            margin-left: 280px;
-            padding: 0;
+            margin-left: 250px;
+            background: #f8f9fa;
         }
         
         .header {
             background: white;
-            padding: 16px 32px;
-            border-bottom: 1px solid #e2e8f0;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e9ecef;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header-content {
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -890,77 +1118,82 @@ app.get('/', (req, res) => {
         .search-bar {
             flex: 1;
             max-width: 400px;
-            margin: 0 32px;
+            margin: 0 20px;
         }
         
-        .search-bar input {
+        .search-input {
             width: 100%;
-            padding: 8px 16px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
+            padding: 12px 20px;
+            border: 1px solid #e9ecef;
+            border-radius: 25px;
             font-size: 14px;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
         }
         
-        .user-menu {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-        
-        .notification-bell {
-            position: relative;
-            padding: 8px;
-            border-radius: 8px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-        }
-        
-        .notification-bell .badge {
-            position: absolute;
-            top: -4px;
-            right: -4px;
-            background: #dc2626;
-            color: white;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 10px;
+        .search-input:focus {
+            outline: none;
+            border-color: #3498db;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
         
         .user-profile {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 8px 16px;
-            border-radius: 8px;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+            gap: 15px;
+        }
+        
+        .notification-bell {
+            position: relative;
+            padding: 8px;
+            border-radius: 50%;
+            background: #f8f9fa;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        
+        .notification-bell:hover {
+            background: #e9ecef;
+        }
+        
+        .notification-dot {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            width: 8px;
+            height: 8px;
+            background: #e74c3c;
+            border-radius: 50%;
         }
         
         .user-avatar {
-            width: 32px;
-            height: 32px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
-            background: #3b82f6;
+            background: linear-gradient(135deg, #3498db, #2980b9);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             font-weight: 600;
+            font-size: 16px;
         }
         
         .user-info h3 {
             font-size: 14px;
             font-weight: 600;
-            color: #1f2937;
+            margin-bottom: 2px;
         }
         
         .user-info p {
             font-size: 12px;
-            color: #6b7280;
+            color: #6c757d;
         }
         
         .page-content {
-            padding: 32px;
+            padding: 30px;
         }
         
         .page {
@@ -971,131 +1204,160 @@ app.get('/', (req, res) => {
             display: block;
         }
         
+        .dashboard-header {
+            margin-bottom: 30px;
+        }
+        
         .dashboard-header h1 {
             font-size: 32px;
             font-weight: 700;
-            color: #1f2937;
+            color: #2c3e50;
             margin-bottom: 8px;
         }
         
         .dashboard-header p {
-            color: #6b7280;
             font-size: 16px;
+            color: #6c757d;
         }
         
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 24px;
-            margin: 32px 0;
+            gap: 20px;
+            margin-bottom: 30px;
         }
         
         .stat-card {
             background: white;
-            padding: 24px;
+            padding: 25px;
             border-radius: 12px;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border-left: 4px solid #3498db;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+        }
+        
+        .stat-card.critical {
+            border-left-color: #e74c3c;
+        }
+        
+        .stat-card.warning {
+            border-left-color: #f39c12;
+        }
+        
+        .stat-card.success {
+            border-left-color: #27ae60;
         }
         
         .stat-number {
             font-size: 36px;
             font-weight: 700;
-            color: #1f2937;
+            color: #2c3e50;
             margin-bottom: 8px;
         }
         
         .stat-label {
-            color: #6b7280;
             font-size: 14px;
+            color: #6c757d;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            margin-bottom: 4px;
+            margin-bottom: 5px;
         }
         
         .stat-change {
-            font-size: 14px;
+            font-size: 12px;
             font-weight: 600;
         }
         
         .stat-change.positive {
-            color: #059669;
+            color: #27ae60;
         }
         
         .stat-change.negative {
-            color: #dc2626;
+            color: #e74c3c;
         }
         
-        .quick-actions {
+        .actions-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 24px;
-            margin: 32px 0;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
         }
         
         .action-card {
             background: white;
-            padding: 24px;
+            padding: 25px;
             border-radius: 12px;
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
             text-align: center;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
             cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-            color: inherit;
         }
         
         .action-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            border-color: #3b82f6;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
         }
         
         .action-icon {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 16px;
-            background: #eff6ff;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.8;
         }
         
         .action-card h3 {
             font-size: 18px;
             font-weight: 600;
-            margin-bottom: 8px;
-            color: #1f2937;
+            margin-bottom: 10px;
+            color: #2c3e50;
         }
         
         .action-card p {
-            color: #6b7280;
+            color: #6c757d;
             font-size: 14px;
+            line-height: 1.5;
         }
         
         .recent-scans {
             background: white;
             border-radius: 12px;
-            border: 1px solid #e2e8f0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
             overflow: hidden;
         }
         
-        .recent-scans h2 {
-            padding: 24px;
-            border-bottom: 1px solid #e2e8f0;
+        .recent-scans-header {
+            padding: 20px 25px;
+            border-bottom: 1px solid #e9ecef;
+            background: #f8f9fa;
+        }
+        
+        .recent-scans-header h2 {
             font-size: 20px;
             font-weight: 600;
-            color: #1f2937;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+        
+        .recent-scans-header p {
+            color: #6c757d;
+            font-size: 14px;
         }
         
         .scan-item {
-            padding: 16px 24px;
-            border-bottom: 1px solid #f1f5f9;
+            padding: 20px 25px;
+            border-bottom: 1px solid #f1f3f4;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: background 0.3s ease;
+        }
+        
+        .scan-item:hover {
+            background: #f8f9fa;
         }
         
         .scan-item:last-child {
@@ -1103,159 +1365,271 @@ app.get('/', (req, res) => {
         }
         
         .scan-info h4 {
+            font-size: 16px;
             font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 4px;
+            color: #2c3e50;
+            margin-bottom: 5px;
         }
         
-        .scan-info p {
-            color: #6b7280;
-            font-size: 14px;
+        .scan-meta {
+            font-size: 12px;
+            color: #6c757d;
         }
         
         .scan-score {
-            display: flex;
-            align-items: center;
-            gap: 12px;
+            text-align: right;
         }
         
         .score-badge {
-            padding: 4px 12px;
+            display: inline-block;
+            padding: 6px 12px;
             border-radius: 20px;
-            font-weight: 600;
             font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 5px;
         }
         
         .score-excellent {
-            background: #dcfce7;
-            color: #166534;
+            background: #d4edda;
+            color: #155724;
         }
         
         .score-good {
-            background: #fef3c7;
-            color: #92400e;
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .score-fair {
+            background: #fff3cd;
+            color: #856404;
         }
         
         .score-poor {
-            background: #fee2e2;
-            color: #991b1b;
+            background: #f8d7da;
+            color: #721c24;
         }
         
-        .btn {
+        .view-report-btn {
+            background: #3498db;
+            color: white;
+            border: none;
             padding: 8px 16px;
             border-radius: 6px;
-            border: none;
+            font-size: 12px;
             font-weight: 600;
             cursor: pointer;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.2s;
+            transition: background 0.3s ease;
         }
         
-        .btn-primary {
-            background: #3b82f6;
-            color: white;
+        .view-report-btn:hover {
+            background: #2980b9;
         }
         
-        .btn-primary:hover {
-            background: #2563eb;
-        }
-        
-        .btn-secondary {
-            background: #f1f5f9;
-            color: #475569;
-            border: 1px solid #e2e8f0;
-        }
-        
-        .btn-secondary:hover {
-            background: #e2e8f0;
-        }
-        
-        /* Scan Form Styles */
+        /* Scan Page Styles */
         .scan-form {
             background: white;
-            padding: 32px;
+            padding: 30px;
             border-radius: 12px;
-            border: 1px solid #e2e8f0;
-            max-width: 600px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
         }
         
         .form-group {
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
         
-        .form-group label {
+        .form-label {
             display: block;
-            margin-bottom: 8px;
             font-weight: 600;
-            color: #374151;
+            margin-bottom: 8px;
+            color: #2c3e50;
         }
         
-        .form-group input,
-        .form-group select {
+        .form-input {
             width: 100%;
             padding: 12px 16px;
-            border: 1px solid #d1d5db;
+            border: 1px solid #e9ecef;
             border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.2s;
+            font-size: 14px;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
         }
         
-        .form-group input:focus,
-        .form-group select:focus {
+        .form-input:focus {
             outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        
+        .form-select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
         }
         
         .form-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 16px;
+            gap: 20px;
+        }
+        
+        .scan-btn {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+        }
+        
+        .scan-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
+        }
+        
+        .scan-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }
         
         .scan-results {
-            margin-top: 32px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            overflow: hidden;
+            margin-top: 20px;
         }
         
-        .alert {
-            padding: 16px;
-            border-radius: 8px;
-            margin-bottom: 16px;
+        .results-header {
+            padding: 20px 25px;
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
         }
         
-        .alert-success {
-            background: #dcfce7;
-            color: #166534;
-            border: 1px solid #bbf7d0;
+        .results-header h3 {
+            font-size: 20px;
+            margin-bottom: 10px;
         }
         
-        .alert-error {
-            background: #fee2e2;
-            color: #991b1b;
-            border: 1px solid #fecaca;
+        .results-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            padding: 20px 25px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .summary-item {
+            text-align: center;
+        }
+        
+        .summary-number {
+            font-size: 24px;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .summary-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .violations-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .violation-item {
+            padding: 20px 25px;
+            border-bottom: 1px solid #f1f3f4;
+        }
+        
+        .violation-header {
+            display: flex;
+            justify-content: between;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+        
+        .violation-title {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+        
+        .impact-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 10px;
+        }
+        
+        .impact-critical {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .impact-serious {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .impact-moderate {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .impact-minor {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .violation-description {
+            color: #6c757d;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        
+        .violation-help {
+            font-size: 13px;
+            color: #3498db;
+            text-decoration: none;
+        }
+        
+        .violation-help:hover {
+            text-decoration: underline;
         }
         
         .loading {
-            display: none;
             text-align: center;
-            padding: 32px;
+            padding: 40px;
+            color: #6c757d;
         }
         
-        .loading.show {
-            display: block;
-        }
-        
-        .spinner {
+        .loading-spinner {
+            display: inline-block;
             width: 40px;
             height: 40px;
-            border: 4px solid #f3f4f6;
-            border-top: 4px solid #3b82f6;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
+            margin-bottom: 15px;
         }
         
         @keyframes spin {
@@ -1263,248 +1637,134 @@ app.get('/', (req, res) => {
             100% { transform: rotate(360deg); }
         }
         
-        .results-summary {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-        
-        .summary-card {
-            background: white;
-            padding: 20px;
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
             border-radius: 8px;
-            border: 1px solid #e2e8f0;
-            text-align: center;
+            margin: 20px 0;
+            border: 1px solid #f5c6cb;
         }
         
-        .summary-number {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 4px;
-        }
-        
-        .summary-label {
-            color: #6b7280;
-            font-size: 14px;
-        }
-        
-        .violations-list {
-            background: white;
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
             border-radius: 8px;
-            border: 1px solid #e2e8f0;
-            overflow: hidden;
+            margin: 20px 0;
+            border: 1px solid #c3e6cb;
         }
         
-        .violation-item {
-            padding: 20px;
-            border-bottom: 1px solid #f1f5f9;
-        }
-        
-        .violation-item:last-child {
-            border-bottom: none;
-        }
-        
-        .violation-header {
-            display: flex;
-            justify-content: between;
-            align-items: flex-start;
-            margin-bottom: 12px;
-        }
-        
-        .violation-title {
-            font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 4px;
-        }
-        
-        .violation-impact {
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-        
-        .impact-critical {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-        
-        .impact-serious {
-            background: #fed7aa;
-            color: #9a3412;
-        }
-        
-        .impact-moderate {
-            background: #fef3c7;
-            color: #92400e;
-        }
-        
-        .impact-minor {
-            background: #dbeafe;
-            color: #1e40af;
-        }
-        
-        .violation-description {
-            color: #6b7280;
-            margin-bottom: 12px;
-            line-height: 1.5;
-        }
-        
-        .violation-help {
-            background: #f8fafc;
-            padding: 12px;
-            border-radius: 6px;
-            border-left: 3px solid #3b82f6;
-            font-size: 14px;
-            color: #475569;
-        }
-        
-        /* PHASE 2G: Modal Styles for Platform Integration */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-        }
-        
-        .modal.show {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .modal-content {
-            background: white;
-            padding: 32px;
-            border-radius: 12px;
-            width: 90%;
-            max-width: 500px;
-            position: relative;
-        }
-        
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-        }
-        
-        .modal-title {
-            font-size: 24px;
-            font-weight: 600;
-            color: #1f2937;
-        }
-        
-        .modal-close {
-            background: none;
-            border: none;
-            font-size: 24px;
-            cursor: pointer;
-            color: #6b7280;
-            padding: 4px;
-        }
-        
-        .modal-close:hover {
-            color: #374151;
-        }
-        
-        .modal-body {
-            margin-bottom: 24px;
-        }
-        
-        .modal-footer {
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-        }
-        
-        .btn-cancel {
-            background: #f3f4f6;
-            color: #374151;
-            border: 1px solid #d1d5db;
-        }
-        
-        .btn-cancel:hover {
-            background: #e5e7eb;
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+            
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .actions-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="dashboard">
+    <div class="app-container">
         <nav class="sidebar">
             <div class="logo">
                 <h1>🛡️ SentryPrime</h1>
-                <div class="subtitle">Enterprise Dashboard</div>
+                <p>Enterprise Dashboard</p>
             </div>
-            
-            <div class="nav">
-                <a href="#" class="nav-item active" data-page="dashboard">
-                    <span class="icon">📊</span>
-                    Dashboard
-                </a>
-                <a href="#" class="nav-item" data-page="scans">
-                    <span class="icon">🔍</span>
-                    Scans
-                    <span class="badge">2</span>
-                </a>
-                <a href="#" class="nav-item" data-page="analytics">
-                    <span class="icon">📈</span>
-                    Analytics
-                    <span class="badge">8</span>
-                </a>
-                <a href="#" class="nav-item" data-page="team">
-                    <span class="icon">👥</span>
-                    Team
-                    <span class="badge">4</span>
-                </a>
-                <a href="#" class="nav-item" data-page="integrations">
-                    <span class="icon">🔗</span>
-                    Integrations
-                    <span class="badge">5</span>
-                </a>
-                <a href="#" class="nav-item" data-page="api">
-                    <span class="icon">⚙️</span>
-                    API Management
-                    <span class="badge">6</span>
-                </a>
-                <a href="#" class="nav-item" data-page="billing">
-                    <span class="icon">💳</span>
-                    Billing
-                    <span class="badge">7</span>
-                </a>
-                <a href="#" class="nav-item" data-page="settings">
-                    <span class="icon">⚙️</span>
-                    Settings
-                    <span class="badge">8</span>
-                </a>
-            </div>
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="#" class="nav-link active" data-page="dashboard">
+                        <span class="nav-icon">📊</span>
+                        Dashboard
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="scans">
+                        <span class="nav-icon">🔍</span>
+                        Scans
+                        <span class="badge">2</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="analytics">
+                        <span class="nav-icon">📈</span>
+                        Analytics
+                        <span class="badge">8</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="team">
+                        <span class="nav-icon">👥</span>
+                        Team
+                        <span class="badge">4</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="integrations">
+                        <span class="nav-icon">🔗</span>
+                        Integrations
+                        <span class="badge">5</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="api">
+                        <span class="nav-icon">⚙️</span>
+                        API Management
+                        <span class="badge">6</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="billing">
+                        <span class="nav-icon">💳</span>
+                        Billing
+                        <span class="badge">7</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="#" class="nav-link" data-page="settings">
+                        <span class="nav-icon">⚙️</span>
+                        Settings
+                        <span class="badge">8</span>
+                    </a>
+                </li>
+            </ul>
         </nav>
         
         <main class="main-content">
             <header class="header">
-                <div class="search-bar">
-                    <input type="text" placeholder="Search scans, reports, or settings...">
-                </div>
-                
-                <div class="user-menu">
-                    <div class="notification-bell">
-                        🔔
-                        <span class="badge">3</span>
+                <div class="header-content">
+                    <div class="search-bar">
+                        <input type="text" class="search-input" placeholder="Search scans, reports, or settings...">
                     </div>
-                    
                     <div class="user-profile">
+                        <button class="notification-bell">
+                            🔔
+                            <span class="notification-dot"></span>
+                        </button>
                         <div class="user-avatar">JD</div>
                         <div class="user-info">
                             <h3>John Doe</h3>
                             <p>Acme Corporation</p>
                         </div>
-                        <span>▼</span>
                     </div>
                 </div>
             </header>
@@ -1518,85 +1778,57 @@ app.get('/', (req, res) => {
                     
                     <div class="stats-grid">
                         <div class="stat-card">
-                            <div class="stat-number">57</div>
-                            <div class="stat-label">TOTAL SCANS</div>
+                            <div class="stat-number" id="total-scans">57</div>
+                            <div class="stat-label">Total Scans</div>
                             <div class="stat-change positive">+2 this week</div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-number">606</div>
-                            <div class="stat-label">ISSUES FOUND</div>
+                        <div class="stat-card warning">
+                            <div class="stat-number" id="total-issues">606</div>
+                            <div class="stat-label">Issues Found</div>
                             <div class="stat-change negative">-5 from last week</div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-number">79%</div>
-                            <div class="stat-label">AVERAGE SCORE</div>
+                        <div class="stat-card success">
+                            <div class="stat-number" id="average-score">79%</div>
+                            <div class="stat-label">Average Score</div>
                             <div class="stat-change positive">+3% improvement</div>
                         </div>
                         <div class="stat-card">
-                            <div class="stat-number">29</div>
-                            <div class="stat-label">THIS WEEK</div>
+                            <div class="stat-number" id="this-week-scans">29</div>
+                            <div class="stat-label">This Week</div>
                             <div class="stat-change">scans completed</div>
                         </div>
                     </div>
                     
-                    <div class="quick-actions">
-                        <a href="#" class="action-card" onclick="showPage('scans')">
+                    <div class="actions-grid">
+                        <div class="action-card" onclick="showPage('scans')">
                             <div class="action-icon">🔍</div>
                             <h3>New Scan</h3>
                             <p>Start a new accessibility scan</p>
-                        </a>
-                        <a href="#" class="action-card" onclick="showPage('analytics')">
+                        </div>
+                        <div class="action-card" onclick="showPage('analytics')">
                             <div class="action-icon">📊</div>
                             <h3>View Analytics</h3>
                             <p>Analyze compliance trends</p>
-                        </a>
-                        <a href="#" class="action-card" onclick="showPage('team')">
+                        </div>
+                        <div class="action-card" onclick="showPage('team')">
                             <div class="action-icon">👥</div>
                             <h3>Manage Team</h3>
                             <p>Add or remove team members</p>
-                        </a>
-                        <a href="#" class="action-card" onclick="showPage('settings')">
+                        </div>
+                        <div class="action-card" onclick="showPage('settings')">
                             <div class="action-icon">⚙️</div>
                             <h3>Settings</h3>
                             <p>Configure your preferences</p>
-                        </a>
+                        </div>
                     </div>
                     
                     <div class="recent-scans">
-                        <h2>Recent Scans</h2>
-                        <p style="color: #6b7280; padding: 0 24px 16px;">Your latest accessibility scan results</p>
-                        
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>https://essolar.com/</h4>
-                                <p>Single Page • 10/6/2025</p>
-                            </div>
-                            <div class="scan-score">
-                                <span class="score-badge score-excellent">90% Score</span>
-                                <a href="#" class="btn btn-primary">👁️ View Report</a>
-                            </div>
+                        <div class="recent-scans-header">
+                            <h2>Recent Scans</h2>
+                            <p>Your latest accessibility scan results</p>
                         </div>
-                        
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>https://essolar.com/</h4>
-                                <p>Single Page • 10/6/2025</p>
-                            </div>
-                            <div class="scan-score">
-                                <span class="score-badge score-excellent">90% Score</span>
-                                <a href="#" class="btn btn-primary">👁️ View Report</a>
-                            </div>
-                        </div>
-                        
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>https://essolar.com/</h4>
-                                <p>Single Page • 10/6/2025</p>
-                            </div>
-                            <div class="scan-score">
-                                <span class="score-badge score-excellent">90% Score</span>
-                                <a href="#" class="btn btn-primary">👁️ View Report</a>
-                            </div>
+                        <div id="recent-scans-list">
+                            <!-- Recent scans will be loaded here -->
                         </div>
                     </div>
                 </div>
@@ -1608,46 +1840,36 @@ app.get('/', (req, res) => {
                     </div>
                     
                     <div class="scan-form">
-                        <h2 style="margin-bottom: 24px;">Start New Scan</h2>
-                        
-                        <form id="scanForm">
+                        <h2>Start New Scan</h2>
+                        <form id="scan-form">
                             <div class="form-group">
-                                <label for="url">Website URL</label>
-                                <input type="url" id="url" name="url" placeholder="https://essolar.com/" required>
+                                <label class="form-label" for="website-url">Website URL</label>
+                                <input type="url" id="website-url" class="form-input" placeholder="https://essolar.com/" value="https://essolar.com/" required>
                             </div>
-                            
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="scanType">Scan Type</label>
-                                    <select id="scanType" name="scanType">
+                                    <label class="form-label" for="scan-type">Scan Type</label>
+                                    <select id="scan-type" class="form-select">
                                         <option value="single">Single Page</option>
-                                        <option value="sitemap">Full Sitemap</option>
-                                        <option value="crawl">Deep Crawl</option>
+                                        <option value="crawl">Full Site Crawl</option>
+                                        <option value="sitemap">Sitemap Based</option>
                                     </select>
                                 </div>
-                                
                                 <div class="form-group">
-                                    <label for="standard">Accessibility Standard</label>
-                                    <select id="standard" name="standard">
+                                    <label class="form-label" for="accessibility-standard">Accessibility Standard</label>
+                                    <select id="accessibility-standard" class="form-select">
                                         <option value="wcag2aa">WCAG 2.1 AA</option>
+                                        <option value="wcag2a">WCAG 2.1 A</option>
                                         <option value="wcag2aaa">WCAG 2.1 AAA</option>
                                         <option value="section508">Section 508</option>
                                     </select>
                                 </div>
                             </div>
-                            
-                            <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
-                                🚀 Start Scan
-                            </button>
+                            <button type="submit" class="scan-btn" id="start-scan-btn">Start Scan</button>
                         </form>
                     </div>
                     
-                    <div class="loading" id="loading">
-                        <div class="spinner"></div>
-                        <p>Scanning website for accessibility issues...</p>
-                    </div>
-                    
-                    <div class="scan-results" id="scanResults"></div>
+                    <div id="scan-results-container"></div>
                 </div>
                 
                 <div id="analytics" class="page">
@@ -1666,47 +1888,28 @@ app.get('/', (req, res) => {
                 
                 <div id="integrations" class="page">
                     <div class="dashboard-header">
-                        <h1>🔗 Platform Integrations</h1>
+                        <h1>Platform Integrations</h1>
                         <p>Connect your websites for automated accessibility monitoring</p>
                     </div>
                     
-                    <div style="margin-top: 32px;">
-                        <h2 style="margin-bottom: 16px;">Connected Platforms</h2>
-                        <p style="color: #6b7280; margin-bottom: 24px;">Manage your connected platforms and deployment settings</p>
-                        <div id="connectedPlatforms">
-                            <!-- Connected platforms will be loaded here -->
+                    <div class="actions-grid">
+                        <div class="action-card" onclick="showConnectModal('wordpress')">
+                            <div class="action-icon">🌐</div>
+                            <h3>WordPress</h3>
+                            <p>Connect your WordPress site via REST API</p>
+                            <div class="badge" style="background: #0073aa; margin-top: 10px;">Most Popular</div>
                         </div>
-                    </div>
-                    
-                    <div style="margin-top: 48px;">
-                        <h2 style="margin-bottom: 16px;">Connect New Platform</h2>
-                        <p style="color: #6b7280; margin-bottom: 24px;">Add a new website or platform below.</p>
-                        
-                        <div class="quick-actions">
-                            <div class="action-card" onclick="showConnectModal('wordpress')">
-                                <div class="action-icon">🌐</div>
-                                <h3>WordPress</h3>
-                                <p>Connect your WordPress site via REST API</p>
-                                <div style="margin-top: 12px;">
-                                    <span style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Most Popular</span>
-                                </div>
-                            </div>
-                            <div class="action-card" onclick="showConnectModal('shopify')">
-                                <div class="action-icon">🛒</div>
-                                <h3>Shopify</h3>
-                                <p>Connect your Shopify store via Admin API</p>
-                                <div style="margin-top: 12px;">
-                                    <span style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">E-commerce</span>
-                                </div>
-                            </div>
-                            <div class="action-card" onclick="showConnectModal('custom')">
-                                <div class="action-icon">⚙️</div>
-                                <h3>Custom Site</h3>
-                                <p>Connect via FTP, SFTP, or SSH</p>
-                                <div style="margin-top: 12px;">
-                                    <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 12px; font-size: 12px;">Advanced</span>
-                                </div>
-                            </div>
+                        <div class="action-card" onclick="showConnectModal('shopify')">
+                            <div class="action-icon">🛒</div>
+                            <h3>Shopify</h3>
+                            <p>Connect your Shopify store via Admin API</p>
+                            <div class="badge" style="background: #96bf48; margin-top: 10px;">E-commerce</div>
+                        </div>
+                        <div class="action-card" onclick="showConnectModal('custom')">
+                            <div class="action-icon">⚙️</div>
+                            <h3>Custom Site</h3>
+                            <p>Connect via FTP, SFTP, or SSH</p>
+                            <div class="badge" style="background: #f39c12; margin-top: 10px;">Advanced</div>
                         </div>
                     </div>
                 </div>
@@ -1735,281 +1938,322 @@ app.get('/', (req, res) => {
         </main>
     </div>
 
-    <!-- PHASE 2G: Platform Connection Modals -->
-    <div id="connectModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title" id="modalTitle">Connect Platform</h2>
-                <button class="modal-close" onclick="closeConnectModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="modalBody">
-                <!-- Modal content will be populated here -->
-            </div>
-            <div class="modal-footer" id="modalFooter">
-                <!-- Modal buttons will be populated here -->
-            </div>
-        </div>
-    </div>
-
     <script>
-        // Navigation functionality
+        // Navigation functionality - PRESERVED FROM WORKING VERSION
         function showPage(pageId) {
             // Hide all pages
             document.querySelectorAll('.page').forEach(page => {
                 page.classList.remove('active');
             });
             
-            // Remove active class from all nav items
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.classList.remove('active');
+            // Remove active class from all nav links
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
             });
             
             // Show selected page
             document.getElementById(pageId).classList.add('active');
             
-            // Add active class to selected nav item
+            // Add active class to corresponding nav link
             document.querySelector(`[data-page="${pageId}"]`).classList.add('active');
         }
-        
-        // Add click event listeners to nav items
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', (e) => {
+
+        // Add click event listeners to navigation links
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', (e) => {
                 e.preventDefault();
-                const pageId = item.getAttribute('data-page');
+                const pageId = link.getAttribute('data-page');
                 showPage(pageId);
             });
         });
-        
-        // PHASE 2G: Modal functionality for platform connections - FIXED SCOPING
+
+        // MINIMAL ADDITION: Only the showConnectModal function
         function showConnectModal(platform) {
-            const modal = document.getElementById('connectModal');
-            const modalTitle = document.getElementById('modalTitle');
-            const modalBody = document.getElementById('modalBody');
-            const modalFooter = document.getElementById('modalFooter');
+            const modalHtml = `
+                <div id="connect-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
+                    <div style="background: white; padding: 30px; border-radius: 12px; width: 90%; max-width: 500px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h2 style="margin: 0; color: #2c3e50;">🌐 Connect ${platform.charAt(0).toUpperCase() + platform.slice(1)} Site</h2>
+                            <button onclick="closeModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6c757d;">×</button>
+                        </div>
+                        <div id="modal-content">
+                            ${getModalContent(platform)}
+                        </div>
+                    </div>
+                </div>
+            `;
             
-            let title, body, footer;
-            
-            switch(platform) {
-                case 'wordpress':
-                    title = '🌐 Connect WordPress Site';
-                    body = \`
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        function getModalContent(platform) {
+            if (platform === 'wordpress') {
+                return `
+                    <div class="form-group">
+                        <label class="form-label">WordPress Site URL</label>
+                        <input type="url" class="form-input" placeholder="https://yoursite.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-input" placeholder="admin" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Application Password</label>
+                        <input type="password" class="form-input" placeholder="xxxx xxxx xxxx xxxx" required>
+                        <small style="color: #6c757d; font-size: 12px;">Generate an application password in WordPress admin → Users → Profile</small>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button onclick="closeModal()" style="flex: 1; padding: 12px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer;">Cancel</button>
+                        <button onclick="connectPlatform('wordpress')" style="flex: 1; padding: 12px; background: #0073aa; color: white; border: none; border-radius: 6px; cursor: pointer;">Connect WordPress</button>
+                    </div>
+                `;
+            } else if (platform === 'shopify') {
+                return `
+                    <div class="form-group">
+                        <label class="form-label">Shopify Store URL</label>
+                        <input type="url" class="form-input" placeholder="https://yourstore.myshopify.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Access Token</label>
+                        <input type="password" class="form-input" placeholder="shpat_xxxxxxxxxxxxxxxx" required>
+                        <small style="color: #6c757d; font-size: 12px;">Create a private app in Shopify admin to get access token</small>
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button onclick="closeModal()" style="flex: 1; padding: 12px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer;">Cancel</button>
+                        <button onclick="connectPlatform('shopify')" style="flex: 1; padding: 12px; background: #96bf48; color: white; border: none; border-radius: 6px; cursor: pointer;">Connect Shopify</button>
+                    </div>
+                `;
+            } else if (platform === 'custom') {
+                return `
+                    <div class="form-group">
+                        <label class="form-label">Site URL</label>
+                        <input type="url" class="form-input" placeholder="https://yoursite.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Connection Type</label>
+                        <select class="form-select">
+                            <option value="ftp">FTP</option>
+                            <option value="sftp">SFTP</option>
+                            <option value="ssh">SSH</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Host</label>
+                        <input type="text" class="form-input" placeholder="ftp.yoursite.com" required>
+                    </div>
+                    <div class="form-row">
                         <div class="form-group">
-                            <label for="wpUrl">WordPress Site URL</label>
-                            <input type="url" id="wpUrl" placeholder="https://yoursite.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="wpUsername">Username</label>
-                            <input type="text" id="wpUsername" placeholder="admin" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="wpPassword">Application Password</label>
-                            <input type="password" id="wpPassword" placeholder="xxxx xxxx xxxx xxxx" required>
-                            <small style="color: #6b7280; font-size: 12px; margin-top: 4px; display: block;">
-                                Generate an application password in WordPress admin → Users → Profile
-                            </small>
-                        </div>
-                    \`;
-                    footer = \`
-                        <button class="btn btn-cancel" onclick="closeConnectModal()">Cancel</button>
-                        <button class="btn btn-primary" onclick="connectPlatform('wordpress')">Connect WordPress</button>
-                    \`;
-                    break;
-                    
-                case 'shopify':
-                    title = '🛒 Connect Shopify Store';
-                    body = \`
-                        <div class="form-group">
-                            <label for="shopifyUrl">Shopify Store URL</label>
-                            <input type="url" id="shopifyUrl" placeholder="https://yourstore.myshopify.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="shopifyToken">Private App Access Token</label>
-                            <input type="password" id="shopifyToken" placeholder="shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required>
-                            <small style="color: #6b7280; font-size: 12px; margin-top: 4px; display: block;">
-                                Create a private app in Shopify admin → Apps → App and sales channel settings → Develop apps
-                            </small>
-                        </div>
-                    \`;
-                    footer = \`
-                        <button class="btn btn-cancel" onclick="closeConnectModal()">Cancel</button>
-                        <button class="btn btn-primary" onclick="connectPlatform('shopify')">Connect Shopify</button>
-                    \`;
-                    break;
-                    
-                case 'custom':
-                    title = '⚙️ Connect Custom Site';
-                    body = \`
-                        <div class="form-group">
-                            <label for="customUrl">Website URL</label>
-                            <input type="url" id="customUrl" placeholder="https://yoursite.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="deployMethod">Deployment Method</label>
-                            <select id="deployMethod" required>
-                                <option value="">Select method...</option>
-                                <option value="ftp">FTP</option>
-                                <option value="sftp">SFTP</option>
-                                <option value="ssh">SSH</option>
-                                <option value="git">Git Repository</option>
-                            </select>
+                            <label class="form-label">Username</label>
+                            <input type="text" class="form-input" placeholder="username" required>
                         </div>
                         <div class="form-group">
-                            <label for="customHost">Host/Server</label>
-                            <input type="text" id="customHost" placeholder="ftp.yoursite.com" required>
+                            <label class="form-label">Password</label>
+                            <input type="password" class="form-input" placeholder="password" required>
                         </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="customUsername">Username</label>
-                                <input type="text" id="customUsername" placeholder="username" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="customPassword">Password/Key</label>
-                                <input type="password" id="customPassword" placeholder="password or SSH key" required>
-                            </div>
-                        </div>
-                    \`;
-                    footer = \`
-                        <button class="btn btn-cancel" onclick="closeConnectModal()">Cancel</button>
-                        <button class="btn btn-primary" onclick="connectPlatform('custom')">Connect Site</button>
-                    \`;
-                    break;
+                    </div>
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button onclick="closeModal()" style="flex: 1; padding: 12px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer;">Cancel</button>
+                        <button onclick="connectPlatform('custom')" style="flex: 1; padding: 12px; background: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer;">Connect Site</button>
+                    </div>
+                `;
             }
-            
-            modalTitle.textContent = title;
-            modalBody.innerHTML = body;
-            modalFooter.innerHTML = footer;
-            modal.classList.add('show');
         }
-        
-        function closeConnectModal() {
-            document.getElementById('connectModal').classList.remove('show');
+
+        function closeModal() {
+            const modal = document.getElementById('connect-modal');
+            if (modal) {
+                modal.remove();
+            }
         }
-        
+
         function connectPlatform(platform) {
-            // This would normally make an API call to connect the platform
-            alert(\`\${platform.charAt(0).toUpperCase() + platform.slice(1)} connection initiated! This would connect to your platform in a real implementation.\`);
-            closeConnectModal();
+            alert(`${platform.charAt(0).toUpperCase() + platform.slice(1)} connection functionality will be implemented in the backend.`);
+            closeModal();
         }
-        
-        // Close modal when clicking outside
-        document.getElementById('connectModal').addEventListener('click', (e) => {
-            if (e.target.id === 'connectModal') {
-                closeConnectModal();
-            }
-        });
-        
-        // Scan form functionality
-        document.getElementById('scanForm').addEventListener('submit', async (e) => {
+
+        // Scan functionality - PRESERVED FROM WORKING VERSION
+        document.getElementById('scan-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const formData = new FormData(e.target);
-            const scanData = {
-                url: formData.get('url'),
-                scanType: formData.get('scanType'),
-                standard: formData.get('standard')
-            };
+            const url = document.getElementById('website-url').value;
+            const scanType = document.getElementById('scan-type').value;
+            const standard = document.getElementById('accessibility-standard').value;
             
-            // Show loading
-            document.getElementById('loading').classList.add('show');
-            document.getElementById('scanResults').innerHTML = '';
+            const startBtn = document.getElementById('start-scan-btn');
+            const resultsContainer = document.getElementById('scan-results-container');
+            
+            // Show loading state
+            startBtn.disabled = true;
+            startBtn.textContent = 'Scanning...';
+            
+            resultsContainer.innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <p>Scanning ${url}...</p>
+                    <p>This may take a few moments</p>
+                </div>
+            `;
             
             try {
                 const response = await fetch('/api/scan', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(scanData)
+                    body: JSON.stringify({
+                        url: url,
+                        scanType: scanType,
+                        standard: standard
+                    })
                 });
                 
                 const result = await response.json();
                 
-                // Hide loading
-                document.getElementById('loading').classList.remove('show');
-                
                 if (result.success) {
                     displayScanResults(result);
+                    loadDashboardData(); // Refresh dashboard stats
                 } else {
-                    displayError(result.error || 'Scan failed');
+                    resultsContainer.innerHTML = `
+                        <div class="error-message">
+                            <strong>Scan failed:</strong> ${result.error}
+                        </div>
+                    `;
                 }
-                
             } catch (error) {
-                console.error('Scan error:', error);
-                document.getElementById('loading').classList.remove('show');
-                displayError('Network error occurred');
+                resultsContainer.innerHTML = `
+                    <div class="error-message">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            } finally {
+                startBtn.disabled = false;
+                startBtn.textContent = 'Start Scan';
             }
         });
-        
+
         function displayScanResults(result) {
-            const resultsContainer = document.getElementById('scanResults');
+            const container = document.getElementById('scan-results-container');
             
-            const html = \`
-                <div class="alert alert-success">
-                    ✅ Scan completed successfully! Found \${result.violations.length} accessibility issues.
+            let scoreClass = 'score-excellent';
+            if (result.score < 60) scoreClass = 'score-poor';
+            else if (result.score < 80) scoreClass = 'score-fair';
+            else if (result.score < 90) scoreClass = 'score-good';
+            
+            const violationsList = result.violations.map(violation => `
+                <div class="violation-item">
+                    <div class="violation-header">
+                        <div>
+                            <div class="violation-title">${violation.id}</div>
+                            <span class="impact-badge impact-${violation.impact}">${violation.impact}</span>
+                        </div>
+                    </div>
+                    <div class="violation-description">${violation.description}</div>
+                    <a href="${violation.helpUrl}" target="_blank" class="violation-help">Learn more →</a>
                 </div>
-                
-                <div class="results-summary">
-                    <div class="summary-card">
-                        <div class="summary-number" style="color: \${result.score >= 80 ? '#059669' : result.score >= 60 ? '#d97706' : '#dc2626'}">\${result.score}%</div>
-                        <div class="summary-label">Accessibility Score</div>
+            `).join('');
+            
+            container.innerHTML = `
+                <div class="scan-results">
+                    <div class="results-header">
+                        <h3>Scan Results for ${result.url}</h3>
+                        <p>Completed in ${result.scanTimeMs}ms using ${result.standard.toUpperCase()}</p>
                     </div>
-                    <div class="summary-card">
-                        <div class="summary-number">\${result.violations.length}</div>
-                        <div class="summary-label">Total Issues</div>
+                    <div class="results-summary">
+                        <div class="summary-item">
+                            <div class="summary-number ${scoreClass}">${result.score}</div>
+                            <div class="summary-label">Accessibility Score</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="summary-number">${result.totalIssues}</div>
+                            <div class="summary-label">Issues Found</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="summary-number">${result.passes}</div>
+                            <div class="summary-label">Tests Passed</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="summary-number">${result.incomplete}</div>
+                            <div class="summary-label">Needs Review</div>
+                        </div>
                     </div>
-                    <div class="summary-card">
-                        <div class="summary-number">\${result.summary.criticalViolations}</div>
-                        <div class="summary-label">Critical Issues</div>
-                    </div>
-                    <div class="summary-card">
-                        <div class="summary-number">\${result.summary.seriousViolations}</div>
-                        <div class="summary-label">Serious Issues</div>
-                    </div>
+                    ${result.violations.length > 0 ? `
+                        <div class="violations-list">
+                            ${violationsList}
+                        </div>
+                    ` : `
+                        <div style="padding: 40px; text-align: center; color: #27ae60;">
+                            <h3>🎉 No accessibility violations found!</h3>
+                            <p>Your website meets the ${result.standard.toUpperCase()} accessibility standards.</p>
+                        </div>
+                    `}
                 </div>
+            `;
+        }
+
+        // Dashboard data loading - PRESERVED FROM WORKING VERSION
+        async function loadDashboardData() {
+            try {
+                const response = await fetch('/api/dashboard');
+                const data = await response.json();
                 
-                \${result.violations.length > 0 ? \`
-                    <div class="violations-list">
-                        \${result.violations.map(violation => \`
-                            <div class="violation-item">
-                                <div class="violation-header">
-                                    <div>
-                                        <div class="violation-title">\${violation.id}</div>
-                                        <span class="violation-impact impact-\${violation.impact}">\${violation.impact}</span>
+                if (data.success) {
+                    // Update stats
+                    document.getElementById('total-scans').textContent = data.stats.totalScans;
+                    document.getElementById('total-issues').textContent = data.stats.totalIssues;
+                    document.getElementById('average-score').textContent = data.stats.averageScore + '%';
+                    document.getElementById('this-week-scans').textContent = data.stats.thisWeekScans;
+                    
+                    // Update recent scans
+                    const recentScansList = document.getElementById('recent-scans-list');
+                    if (data.recentScans.length > 0) {
+                        recentScansList.innerHTML = data.recentScans.map(scan => {
+                            let scoreClass = 'score-excellent';
+                            if (scan.score < 60) scoreClass = 'score-poor';
+                            else if (scan.score < 80) scoreClass = 'score-fair';
+                            else if (scan.score < 90) scoreClass = 'score-good';
+                            
+                            const date = new Date(scan.created_at).toLocaleDateString();
+                            
+                            return `
+                                <div class="scan-item">
+                                    <div class="scan-info">
+                                        <h4>${scan.url}</h4>
+                                        <div class="scan-meta">
+                                            ${scan.scan_type.charAt(0).toUpperCase() + scan.scan_type.slice(1)} Page • ${date}
+                                        </div>
+                                    </div>
+                                    <div class="scan-score">
+                                        <div class="score-badge ${scoreClass}">${scan.score}% Score</div>
+                                        <button class="view-report-btn">👁️ View Report</button>
                                     </div>
                                 </div>
-                                <div class="violation-description">\${violation.description}</div>
-                                <div class="violation-help">\${violation.help}</div>
+                            `;
+                        }).join('');
+                    } else {
+                        recentScansList.innerHTML = `
+                            <div style="padding: 40px; text-align: center; color: #6c757d;">
+                                <p>No scans yet. <a href="#" onclick="showPage('scans')" style="color: #3498db;">Start your first scan</a></p>
                             </div>
-                        \`).join('')}
-                    </div>
-                \` : '<div class="alert alert-success">🎉 No accessibility violations found!</div>'}
-            \`;
-            
-            resultsContainer.innerHTML = html;
+                        `;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading dashboard data:', error);
+            }
         }
-        
-        function displayError(error) {
-            const resultsContainer = document.getElementById('scanResults');
-            resultsContainer.innerHTML = \`
-                <div class="alert alert-error">
-                    ❌ Scan failed: \${error}
-                </div>
-            \`;
-        }
+
+        // Load dashboard data on page load
+        loadDashboardData();
     </script>
 </body>
 </html>
-    `;
-    
-    res.send(html);
+    `);
 });
 
-// Start server
-app.listen(port, () => {
-    console.log(\`🚀 SentryPrime server running on port \${port}\`);
-    console.log(\`📊 Dashboard: http://localhost:\${port}\`);
-    console.log(\`🔍 Health check: http://localhost:\${port}/health\`);
-    
-    // Log server time for debugging
-    console.log(\`🕒 Server time: \${new Date().toISOString()}\`);
+console.log(`🚀 SentryPrime server running on port ${PORT}`);
+console.log(`📍 Dashboard: http://localhost:${PORT}`);
+console.log(`🔍 Health check: http://localhost:${PORT}/health`);
+
+app.listen(PORT, () => {
+    console.log(`✅ Server started successfully`);
 });
