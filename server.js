@@ -2692,8 +2692,37 @@ app.get('/', (req, res) => {
                 <div id="integrations" class="page">
                     <div class="dashboard-header">
                         <h1>Integrations</h1>
-                        <p>Coming soon - Connect with your favorite tools</p>
+                        <p>Connect your platforms for automated accessibility fixes</p>
                     </div>
+                    
+                    <div class="integration-platforms" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; margin-top: 2rem;">
+                        <div class="platform-card" onclick="showConnectModal('WordPress')" style="background: white; border: 2px solid #e9ecef; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">📝</div>
+                            <h3 style="color: #333; margin-bottom: 1rem;">WordPress</h3>
+                            <p style="color: #666; margin-bottom: 1.5rem;">Connect your WordPress site for automated accessibility fixes</p>
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 600; cursor: pointer;">Connect WordPress</button>
+                        </div>
+                        
+                        <div class="platform-card" onclick="showConnectModal('Shopify')" style="background: white; border: 2px solid #e9ecef; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">🛍️</div>
+                            <h3 style="color: #333; margin-bottom: 1rem;">Shopify</h3>
+                            <p style="color: #666; margin-bottom: 1.5rem;">Connect your Shopify store for automated accessibility improvements</p>
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 600; cursor: pointer;">Connect Shopify</button>
+                        </div>
+                        
+                        <div class="platform-card" onclick="showConnectModal('Custom')" style="background: white; border: 2px solid #e9ecef; border-radius: 12px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">🔧</div>
+                            <h3 style="color: #333; margin-bottom: 1rem;">Custom Site</h3>
+                            <p style="color: #666; margin-bottom: 1.5rem;">Connect any website via FTP, SFTP, or SSH</p>
+                            <button style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 600; cursor: pointer;">Connect Custom Site</button>
+                        </div>
+                    </div>
+                    
+                    <script>
+                    function showConnectModal(platform) {
+                        alert('Connect to ' + platform + ' - Feature coming soon! This will open a connection modal for ' + platform + ' integration.');
+                    }
+                    </script>
                 </div>
                 
                 <div id="api" class="page">
