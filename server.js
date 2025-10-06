@@ -806,6 +806,31 @@ app.get('/', async (req, res) => {
         const stats = await getDashboardStats();
         const recentScans = await getRecentScans();
         
+        const recentScansHtml = recentScans.map(scan => {
+            const scoreClass = scan.score >= 95 ? 'score-excellent' : scan.score >= 80 ? 'score-good' : 'score-needs-work';
+            const scanTypeText = scan.scan_type === 'single' ? 'Single Page' : 'Multi-page';
+            const scanDate = new Date(scan.created_at).toLocaleDateString();
+            
+            return `
+                <div class="scan-item">
+                    <div class="scan-info">
+                        <h4>${scan.url}</h4>
+                        <div class="scan-meta">
+                            ${scanTypeText} • ${scanDate}
+                        </div>
+                    </div>
+                    <div class="scan-score">
+                        <div class="score-badge ${scoreClass}">
+                            ${scan.score}% Score
+                        </div>
+                        <div>
+                            <button class="view-report-btn" onclick="viewReport(${scan.id})">👁️ View Report</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
         res.send(`
 <!DOCTYPE html>
 <html lang="en">
@@ -1553,24 +1578,7 @@ app.get('/', async (req, res) => {
                 <div class="recent-scans">
                     <div class="section-header">Recent Scans</div>
                     <div class="section-subtitle">Your latest accessibility scan results</div>
-                    ${recentScans.map(scan => `
-                        <div class="scan-item">
-                            <div class="scan-info">
-                                <h4>${scan.url}</h4>
-                                <div class="scan-meta">
-                                    ${scan.scan_type === 'single' ? 'Single Page' : 'Multi-page'} • ${new Date(scan.created_at).toLocaleDateString()}
-                                </div>
-                            </div>
-                            <div class="scan-score">
-                                <div class="score-badge ${scan.score >= 95 ? 'score-excellent' : scan.score >= 80 ? 'score-good' : 'score-needs-work'}">
-                                    ${scan.score}% Score
-                                </div>
-                                <div>
-                                    <button class="view-report-btn" onclick="viewReport(${scan.id})">👁️ View Report</button>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
+                    ${recentScansHtml}
                 </div>
             </div>
             
@@ -1765,7 +1773,7 @@ app.get('/', async (req, res) => {
                 case 'wordpress':
                     title = '🌐 Connect WordPress Site';
                     buttonText = 'Connect WordPress';
-                    content = `
+                    content = \`
                         <div class="form-group">
                             <label for="wpUrl">WordPress Site URL</label>
                             <input type="url" id="wpUrl" name="url" placeholder="https://yoursite.com" required>
@@ -1779,13 +1787,13 @@ app.get('/', async (req, res) => {
                             <input type="password" id="wpPassword" name="password" placeholder="xxxx xxxx xxxx xxxx" required>
                             <small style="color: #666; font-size: 0.8rem;">Generate an application password in WordPress admin → Users → Profile</small>
                         </div>
-                    `;
+                    \`;
                     break;
                     
                 case 'shopify':
                     title = '🛒 Connect Shopify Store';
                     buttonText = 'Connect Shopify';
-                    content = `
+                    content = \`
                         <div class="form-group">
                             <label for="shopDomain">Shop Domain</label>
                             <input type="text" id="shopDomain" name="shopDomain" placeholder="your-shop.myshopify.com" required>
@@ -1795,13 +1803,13 @@ app.get('/', async (req, res) => {
                             <input type="password" id="accessToken" name="accessToken" placeholder="shpat_..." required>
                             <small style="color: #666; font-size: 0.8rem;">Create a private app in Shopify admin → Apps → Develop apps</small>
                         </div>
-                    `;
+                    \`;
                     break;
                     
                 case 'custom':
                     title = '⚙️ Connect Custom Site';
                     buttonText = 'Connect Site';
-                    content = `
+                    content = \`
                         <div class="form-group">
                             <label for="customUrl">Site URL</label>
                             <input type="url" id="customUrl" name="url" placeholder="https://yoursite.com" required>
@@ -1835,7 +1843,7 @@ app.get('/', async (req, res) => {
                                 <input type="password" id="ftpPassword" name="password" required>
                             </div>
                         </div>
-                    `;
+                    \`;
                     break;
             }
             
@@ -1863,25 +1871,25 @@ app.get('/', async (req, res) => {
                     if (result.platforms.length === 0) {
                         container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">No platforms connected yet. Connect your first platform below.</p>';
                     } else {
-                        container.innerHTML = result.platforms.map(platform => `
+                        container.innerHTML = result.platforms.map(platform => \`
                             <div style="border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 16px; background: white;">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                                     <div style="flex: 1;">
-                                        <h4 style="margin: 0 0 8px 0;">${platform.type === 'wordpress' ? '🌐' : platform.type === 'shopify' ? '🛒' : '⚙️'} ${platform.name}</h4>
-                                        <p style="margin: 0; color: #666; font-size: 0.9rem;">${platform.url}</p>
-                                        <p style="margin: 4px 0 0 0; color: #28a745; font-size: 0.8rem;">✅ Connected on ${new Date(platform.connectedAt).toLocaleDateString()}</p>
+                                        <h4 style="margin: 0 0 8px 0;">\${platform.type === 'wordpress' ? '🌐' : platform.type === 'shopify' ? '🛒' : '⚙️'} \${platform.name}</h4>
+                                        <p style="margin: 0; color: #666; font-size: 0.9rem;">\${platform.url}</p>
+                                        <p style="margin: 4px 0 0 0; color: #28a745; font-size: 0.8rem;">✅ Connected on \${new Date(platform.connectedAt).toLocaleDateString()}</p>
                                     </div>
                                     <div style="text-align: right; min-width: 200px;">
                                         <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-                                            <button onclick="deployAutomatedFixes('${platform.id}')" style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🚀 Deploy</button>
-                                            <button onclick="showBackupManager('${platform.id}')" style="background: #28a745; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">💾 Backups</button>
-                                            <button onclick="showDeploymentHistory('${platform.id}')" style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">📋 History</button>
+                                            <button onclick="deployAutomatedFixes('\${platform.id}')" style="background: #007bff; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">🚀 Deploy</button>
+                                            <button onclick="showBackupManager('\${platform.id}')" style="background: #28a745; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">💾 Backups</button>
+                                            <button onclick="showDeploymentHistory('\${platform.id}')" style="background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">📋 History</button>
                                         </div>
-                                        <small style="color: #666;">${platform.deploymentsCount || 0} deployments</small>
+                                        <small style="color: #666;">\${platform.deploymentsCount || 0} deployments</small>
                                     </div>
                                 </div>
                             </div>
-                        `).join('');
+                        \`).join('');
                     }
                 }
             } catch (error) {
@@ -1932,39 +1940,39 @@ app.get('/', async (req, res) => {
         
         async function showBackupManager(platformId) {
             try {
-                const response = await fetch(`/api/backup/list/${platformId}`);
+                const response = await fetch(\`/api/backup/list/\${platformId}\`);
                 const result = await response.json();
                 
                 if (result.success) {
-                    const backupsList = result.backups.map(backup => `
+                    const backupsList = result.backups.map(backup => \`
                         <div style="border: 1px solid #eee; padding: 12px; margin: 8px 0; border-radius: 4px; background: #f9f9f9;">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
-                                    <strong>${backup.description}</strong><br>
-                                    <small>Type: ${backup.type} | Size: ${backup.size} | ${new Date(backup.createdAt).toLocaleString()}</small>
+                                    <strong>\${backup.description}</strong><br>
+                                    <small>Type: \${backup.type} | Size: \${backup.size} | \${new Date(backup.createdAt).toLocaleString()}</small>
                                 </div>
                                 <div>
-                                    <button onclick="restoreBackup('${backup.id}')" style="background: #ffc107; color: #000; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-right: 4px;">🔄 Restore</button>
-                                    <button onclick="deleteBackup('${backup.id}')" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">🗑️ Delete</button>
+                                    <button onclick="restoreBackup('\${backup.id}')" style="background: #ffc107; color: #000; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-right: 4px;">🔄 Restore</button>
+                                    <button onclick="deleteBackup('\${backup.id}')" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">🗑️ Delete</button>
                                 </div>
                             </div>
                         </div>
-                    `).join('');
+                    \`).join('');
                     
-                    const modalHtml = `
+                    const modalHtml = \`
                         <div id="backupModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
                             <div style="background: white; padding: 30px; border-radius: 8px; max-width: 600px; width: 90%; max-height: 80%; overflow-y: auto;">
-                                <h3 style="margin-top: 0;">💾 Backup Manager - ${platformId}</h3>
+                                <h3 style="margin-top: 0;">💾 Backup Manager - \${platformId}</h3>
                                 <div style="margin: 20px 0;">
-                                    <button onclick="createBackup('${platformId}')" style="background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-bottom: 20px;">➕ Create New Backup</button>
+                                    <button onclick="createBackup('\${platformId}')" style="background: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-bottom: 20px;">➕ Create New Backup</button>
                                 </div>
-                                <div>${backupsList}</div>
+                                <div>\${backupsList}</div>
                                 <div style="text-align: right; margin-top: 20px;">
                                     <button onclick="closeBackupModal()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Close</button>
                                 </div>
                             </div>
                         </div>
-                    `;
+                    \`;
                     
                     document.body.insertAdjacentHTML('beforeend', modalHtml);
                 }
@@ -1975,41 +1983,41 @@ app.get('/', async (req, res) => {
         
         async function showDeploymentHistory(platformId) {
             try {
-                const response = await fetch(`/api/deploy/history/${platformId}`);
+                const response = await fetch(\`/api/deploy/history/\${platformId}\`);
                 const result = await response.json();
                 
                 if (result.success) {
-                    const historyList = result.deployments.map(deployment => `
-                        <div style="border: 1px solid #eee; padding: 12px; margin: 8px 0; border-radius: 4px; background: ${deployment.status === 'completed' ? '#f8f9fa' : deployment.status === 'failed' ? '#fff5f5' : '#fff9c4'};">
+                    const historyList = result.deployments.map(deployment => \`
+                        <div style="border: 1px solid #eee; padding: 12px; margin: 8px 0; border-radius: 4px; background: \${deployment.status === 'completed' ? '#f8f9fa' : deployment.status === 'failed' ? '#fff5f5' : '#fff9c4'};">
                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                 <div>
-                                    <strong>Deployment ${deployment.id.split('_')[1]}</strong> 
-                                    <span style="color: ${deployment.status === 'completed' ? '#28a745' : deployment.status === 'failed' ? '#dc3545' : '#ffc107'};">
-                                        ${deployment.status === 'completed' ? '✅' : deployment.status === 'failed' ? '❌' : '⏳'} ${deployment.status}
+                                    <strong>Deployment \${deployment.id.split('_')[1]}</strong> 
+                                    <span style="color: \${deployment.status === 'completed' ? '#28a745' : deployment.status === 'failed' ? '#dc3545' : '#ffc107'};">
+                                        \${deployment.status === 'completed' ? '✅' : deployment.status === 'failed' ? '❌' : '⏳'} \${deployment.status}
                                     </span><br>
-                                    <small>Started: ${new Date(deployment.startedAt).toLocaleString()}</small><br>
-                                    ${deployment.violationsFixed ? `<small>Fixed ${deployment.violationsFixed} violations</small>` : ''}
-                                    ${deployment.error ? `<small style="color: #dc3545;">Error: ${deployment.error}</small>` : ''}
+                                    <small>Started: \${new Date(deployment.startedAt).toLocaleString()}</small><br>
+                                    \${deployment.violationsFixed ? \`<small>Fixed \${deployment.violationsFixed} violations</small>\` : ''}
+                                    \${deployment.error ? \`<small style="color: #dc3545;">Error: \${deployment.error}</small>\` : ''}
                                 </div>
                                 <div>
-                                    ${deployment.canRollback ? `<button onclick="rollbackDeployment('${deployment.id}')" style="background: #ffc107; color: #000; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">🔄 Rollback</button>` : ''}
+                                    \${deployment.canRollback ? \`<button onclick="rollbackDeployment('\${deployment.id}')" style="background: #ffc107; color: #000; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">🔄 Rollback</button>\` : ''}
                                 </div>
                             </div>
-                            ${deployment.changes ? `<div style="margin-top: 8px; font-size: 0.85rem; color: #666;"><strong>Changes:</strong><ul style="margin: 4px 0; padding-left: 20px;">${deployment.changes.map(change => `<li>${change}</li>`).join('')}</ul></div>` : ''}
+                            \${deployment.changes ? \`<div style="margin-top: 8px; font-size: 0.85rem; color: #666;"><strong>Changes:</strong><ul style="margin: 4px 0; padding-left: 20px;">\${deployment.changes.map(change => \`<li>\${change}</li>\`).join('')}</ul></div>\` : ''}
                         </div>
-                    `).join('');
+                    \`).join('');
                     
-                    const modalHtml = `
+                    const modalHtml = \`
                         <div id="historyModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
                             <div style="background: white; padding: 30px; border-radius: 8px; max-width: 700px; width: 90%; max-height: 80%; overflow-y: auto;">
-                                <h3 style="margin-top: 0;">📋 Deployment History - ${platformId}</h3>
-                                <div>${historyList}</div>
+                                <h3 style="margin-top: 0;">📋 Deployment History - \${platformId}</h3>
+                                <div>\${historyList}</div>
                                 <div style="text-align: right; margin-top: 20px;">
                                     <button onclick="closeHistoryModal()" style="background: #6c757d; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">Close</button>
                                 </div>
                             </div>
                         </div>
-                    `;
+                    \`;
                     
                     document.body.insertAdjacentHTML('beforeend', modalHtml);
                 }
@@ -2034,7 +2042,7 @@ app.get('/', async (req, res) => {
                 const description = prompt('Enter backup description:', 'Manual backup - ' + new Date().toLocaleDateString());
                 if (!description) return;
                 
-                const response = await fetch(`/api/backup/create/${platformId}`, {
+                const response = await fetch(\`/api/backup/create/\${platformId}\`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ backupType: 'full', description: description })
@@ -2056,7 +2064,7 @@ app.get('/', async (req, res) => {
             if (!confirm('⚠️ Are you sure you want to restore from this backup?\\nThis will overwrite current data!')) return;
             
             try {
-                const response = await fetch(`/api/backup/restore/${backupId}`, {
+                const response = await fetch(\`/api/backup/restore/\${backupId}\`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ confirmRestore: true })
@@ -2078,7 +2086,7 @@ app.get('/', async (req, res) => {
             if (!confirm('⚠️ Are you sure you want to delete this backup?\\nThis action cannot be undone!')) return;
             
             try {
-                const response = await fetch(`/api/backup/delete/${backupId}`, { method: 'DELETE' });
+                const response = await fetch(\`/api/backup/delete/\${backupId}\`, { method: 'DELETE' });
                 const result = await response.json();
                 if (result.success) {
                     alert('✅ Backup deleted successfully!');
@@ -2098,7 +2106,7 @@ app.get('/', async (req, res) => {
             if (!confirm('⚠️ Are you sure you want to rollback this deployment?\\nThis will revert all changes made during the deployment.')) return;
             
             try {
-                const response = await fetch(`/api/deploy/rollback/${deploymentId}`, {
+                const response = await fetch(\`/api/deploy/rollback/\${deploymentId}\`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ reason: reason, restoreBackup: true })
@@ -2164,124 +2172,6 @@ app.get('/', async (req, res) => {
                 alert('❌ Error connecting platform: ' + error.message);
             }
         });
-        
-        // Scan form handler
-        document.getElementById('scanForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(e.target);
-            const url = formData.get('url');
-            const scanType = formData.get('scanType');
-            const standard = formData.get('standard');
-            
-            // Update current scan URL
-            currentScanUrl = url;
-            
-            // Show loading state
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('scanBtn').disabled = true;
-            
-            const statusElement = document.getElementById('loadingStatus');
-            
-            try {
-                // Update status
-                statusElement.textContent = 'Starting scan...';
-                
-                const response = await fetch('/api/scan', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        url: url,
-                        scanType: scanType,
-                        standard: standard
-                    })
-                });
-                
-                statusElement.textContent = 'Processing results...';
-                
-                const result = await response.json();
-                
-                // Hide loading
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('scanBtn').disabled = false;
-                
-                if (result.success) {
-                    displayResults(result);
-                } else {
-                    displayError(result.error || 'Scan failed');
-                }
-                
-            } catch (error) {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('scanBtn').disabled = false;
-                displayError('Network error: ' + error.message);
-            }
-        });
-        
-        function displayResults(result) {
-            const resultsDiv = document.getElementById('results');
-            const violations = result.violations || [];
-            
-            const score = violations.length === 0 ? 100 : Math.max(0, 100 - (violations.length * 2));
-            const scoreClass = score >= 95 ? 'score-excellent' : score >= 80 ? 'score-good' : 'score-needs-work';
-            
-            resultsDiv.innerHTML = `
-                <div class="alert alert-success">
-                    <strong>Scan completed successfully!</strong><br>
-                    Found ${violations.length} accessibility issues on ${result.url}
-                </div>
-                
-                <div class="stat-card" style="margin-bottom: 20px;">
-                    <div class="stat-number ${scoreClass}">${score}%</div>
-                    <div class="stat-label">Accessibility Score</div>
-                    <div class="stat-change">${violations.length} issues found</div>
-                </div>
-                
-                ${violations.length > 0 ? `
-                    <div class="violations-list">
-                        <div class="section-header">Accessibility Issues Found</div>
-                        ${violations.map(violation => `
-                            <div class="violation-item">
-                                <div class="violation-header">
-                                    <div>
-                                        <div class="violation-title">${violation.id}</div>
-                                        <span class="violation-impact impact-${violation.impact}">${violation.impact}</span>
-                                    </div>
-                                </div>
-                                <div class="violation-description">${violation.description}</div>
-                                <div class="violation-help">${violation.help}</div>
-                                ${violation.nodes && violation.nodes.length > 0 ? `
-                                    <details class="violation-nodes">
-                                        <summary>Show affected elements (${violation.nodes.length})</summary>
-                                        <div class="node-list">
-                                            ${violation.nodes.slice(0, 5).map(node => `
-                                                <div class="node-item">${node.target ? node.target.join(', ') : 'Element'}</div>
-                                            `).join('')}
-                                            ${violation.nodes.length > 5 ? `<div class="node-item">... and ${violation.nodes.length - 5} more</div>` : ''}
-                                        </div>
-                                    </details>
-                                ` : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-                ` : '<div class="alert alert-success">🎉 No accessibility issues found! Your website meets the selected accessibility standards.</div>'}
-            `;
-            
-            resultsDiv.style.display = 'block';
-        }
-        
-        function displayError(error) {
-            const resultsDiv = document.getElementById('results');
-            resultsDiv.innerHTML = `
-                <div class="alert alert-error">
-                    <strong>Scan failed:</strong> ${error}
-                </div>
-            `;
-            resultsDiv.style.display = 'block';
-        }
         
         function viewReport(scanId) {
             alert('Opening detailed report for scan #' + scanId);
