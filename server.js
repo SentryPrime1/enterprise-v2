@@ -4296,7 +4296,7 @@ app.get('/', (req, res) => {
             </div>
             <div class="guided-modal-footer">
                 <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
-
+                <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
                 
                 <!-- PHASE 2A: Enhanced Auto-Fix Buttons -->
                 <button class="auto-fix-btn" onclick="GuidedFixing.autoFixCurrent()" style="background: #28a745; color: white; border: none; padding: 10px 16px; border-radius: 4px; margin: 0 5px; cursor: pointer; font-size: 14px;">
