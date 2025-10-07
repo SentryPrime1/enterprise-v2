@@ -2467,6 +2467,22 @@ app.get('/', (req, res) => {
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
         
+        .integration-form select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            box-sizing: border-box;
+            background: white;
+        }
+        
+        .integration-form select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
         .connect-btn {
             background: #667eea;
             color: white;
@@ -2739,6 +2755,53 @@ app.get('/', (req, res) => {
                             <button class="connect-btn" onclick="connectWordPress()">Connect WordPress Site</button>
                         </div>
                     </div>
+                    
+                    <!-- Shopify Connection -->
+                    <div class="integration-card">
+                        <div class="integration-header">
+                            <h3>🛒 Shopify</h3>
+                            <p>Connect your Shopify store for automated accessibility monitoring</p>
+                        </div>
+                        <div class="integration-form">
+                            <div class="form-group">
+                                <label>Shop URL</label>
+                                <input type="text" id="shopify-url" placeholder="yourstore.myshopify.com" />
+                            </div>
+                            <div class="form-group">
+                                <label>Access Token</label>
+                                <input type="password" id="shopify-token" placeholder="shpat_••••••••••••••••" />
+                            </div>
+                            <button class="connect-btn" onclick="connectShopify()">Connect Shopify Store</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Custom Site Connection -->
+                    <div class="integration-card">
+                        <div class="integration-header">
+                            <h3>🌐 Custom Site</h3>
+                            <p>Connect any website using our flexible integration options</p>
+                        </div>
+                        <div class="integration-form">
+                            <div class="form-group">
+                                <label>Website URL</label>
+                                <input type="text" id="custom-url" placeholder="https://yoursite.com" />
+                            </div>
+                            <div class="form-group">
+                                <label>Connection Method</label>
+                                <select id="custom-method">
+                                    <option value="api">API Integration</option>
+                                    <option value="webhook">Webhook</option>
+                                    <option value="ftp">FTP Access</option>
+                                    <option value="manual">Manual Upload</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>API Key / Credentials</label>
+                                <input type="password" id="custom-credentials" placeholder="Enter credentials based on method" />
+                            </div>
+                            <button class="connect-btn" onclick="connectCustomSite()">Connect Custom Site</button>
+                        </div>
+                    </div>
                 </div>
                 
                 <div id="api" class="page">
@@ -2890,6 +2953,91 @@ app.get('/', (req, res) => {
                     document.getElementById('wp-url').value = '';
                     document.getElementById('wp-username').value = '';
                     document.getElementById('wp-password').value = '';
+                } else {
+                    alert('❌ ' + result.error);
+                }
+                
+            } catch (error) {
+                console.error('Connection error:', error);
+                alert('❌ Connection failed: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+        
+        async function connectShopify() {
+            const url = document.getElementById('shopify-url').value.trim();
+            const token = document.getElementById('shopify-token').value.trim();
+            
+            if (!url || !token) {
+                alert('Please fill in all fields');
+                return;
+            }
+            
+            const button = event.target;
+            const originalText = button.textContent;
+            
+            try {
+                button.disabled = true;
+                button.textContent = '🔄 Connecting...';
+                
+                const response = await fetch('/api/platforms/connect/shopify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ shopUrl: url, accessToken: token })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ ' + result.message);
+                    // Clear form
+                    document.getElementById('shopify-url').value = '';
+                    document.getElementById('shopify-token').value = '';
+                } else {
+                    alert('❌ ' + result.error);
+                }
+                
+            } catch (error) {
+                console.error('Connection error:', error);
+                alert('❌ Connection failed: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+        
+        async function connectCustomSite() {
+            const url = document.getElementById('custom-url').value.trim();
+            const method = document.getElementById('custom-method').value;
+            const credentials = document.getElementById('custom-credentials').value.trim();
+            
+            if (!url || !credentials) {
+                alert('Please fill in all fields');
+                return;
+            }
+            
+            const button = event.target;
+            const originalText = button.textContent;
+            
+            try {
+                button.disabled = true;
+                button.textContent = '🔄 Connecting...';
+                
+                const response = await fetch('/api/platforms/connect/custom', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, method, credentials })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ ' + result.message);
+                    // Clear form
+                    document.getElementById('custom-url').value = '';
+                    document.getElementById('custom-credentials').value = '';
                 } else {
                     alert('❌ ' + result.error);
                 }
