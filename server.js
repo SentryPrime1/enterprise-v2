@@ -2430,6 +2430,364 @@ app.get('/', (req, res) => {
             color: #856404;
         }
         
+        /* Platform Integration Styles */
+        .integration-status {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .status-icon {
+            font-size: 1.2rem;
+        }
+        
+        .status-text {
+            color: #1565c0;
+            font-weight: 500;
+        }
+        
+        .platforms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+        
+        .platform-card {
+            background: white;
+            border: 1px solid #e1e5e9;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .platform-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+        
+        .platform-header {
+            padding: 20px;
+            border-bottom: 1px solid #f1f3f4;
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        
+        .platform-icon {
+            font-size: 2rem;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f8f9fa;
+            border-radius: 8px;
+            flex-shrink: 0;
+        }
+        
+        .platform-info {
+            flex: 1;
+        }
+        
+        .platform-info h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .platform-info p {
+            font-size: 0.9rem;
+            color: #666;
+            line-height: 1.4;
+            margin: 0;
+        }
+        
+        .platform-status {
+            flex-shrink: 0;
+        }
+        
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-badge.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-badge.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-badge.connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .platform-body {
+            padding: 20px;
+        }
+        
+        .platform-features {
+            margin-bottom: 20px;
+        }
+        
+        .feature-item {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .connect-btn {
+            width: 100%;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        
+        .connect-btn:hover {
+            background: #5a6fd8;
+        }
+        
+        .connect-btn:disabled {
+            background: #e9ecef;
+            color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .connected-platforms {
+            margin-top: 32px;
+        }
+        
+        .connected-list {
+            display: grid;
+            gap: 16px;
+        }
+        
+        .connected-item {
+            background: white;
+            border: 1px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .connected-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .connected-icon {
+            font-size: 1.5rem;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        
+        .connected-details h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .connected-details p {
+            font-size: 0.8rem;
+            color: #666;
+            margin: 0;
+        }
+        
+        .connected-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #e1e5e9;
+            border-radius: 4px;
+            background: white;
+            color: #666;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .action-btn:hover {
+            background: #f8f9fa;
+            border-color: #667eea;
+            color: #667eea;
+        }
+        
+        .action-btn.danger:hover {
+            background: #f8d7da;
+            border-color: #dc3545;
+            color: #dc3545;
+        }
+        
+        /* Connection Modal Styles */
+        .connection-modal {
+            display: none;
+            position: fixed;
+            z-index: 1002;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .connection-modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .connection-modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .connection-modal-body {
+            padding: 24px;
+        }
+        
+        .connection-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .form-label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #333;
+        }
+        
+        .form-input {
+            padding: 10px 12px;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: border-color 0.2s ease;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .form-select {
+            padding: 10px 12px;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            background: white;
+            cursor: pointer;
+        }
+        
+        .form-select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .form-help {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 4px;
+        }
+        
+        .connection-modal-footer {
+            padding: 20px 24px;
+            border-top: 1px solid #e1e5e9;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        
+        .modal-btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .modal-btn.primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .modal-btn.primary:hover {
+            background: #5a6fd8;
+        }
+        
+        .modal-btn.secondary {
+            background: #e9ecef;
+            color: #6c757d;
+        }
+        
+        .modal-btn.secondary:hover {
+            background: #dee2e6;
+        }
+        
+        .modal-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
         /* Responsive Design */
         @media (max-width: 768px) {
             .dashboard-container {
@@ -2463,6 +2821,20 @@ app.get('/', (req, res) => {
             .scan-options {
                 flex-direction: column;
                 gap: 10px;
+            }
+            
+            .platforms-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .platform-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+            
+            .platform-status {
+                align-self: flex-start;
             }
         }
     </style>
@@ -2691,8 +3063,99 @@ app.get('/', (req, res) => {
                 
                 <div id="integrations" class="page">
                     <div class="dashboard-header">
-                        <h1>Integrations</h1>
-                        <p>Coming soon - Connect with your favorite tools</p>
+                        <h1>Platform Integrations</h1>
+                        <p>Connect your websites and applications for automated accessibility monitoring</p>
+                    </div>
+                    
+                    <!-- Integration Status -->
+                    <div class="integration-status" id="integration-status">
+                        <div class="status-item">
+                            <span class="status-icon">🔗</span>
+                            <span class="status-text">Ready to connect platforms</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Platform Cards -->
+                    <div class="platforms-grid">
+                        <div class="platform-card" data-platform="wordpress">
+                            <div class="platform-header">
+                                <div class="platform-icon">🔗</div>
+                                <div class="platform-info">
+                                    <h3>WordPress</h3>
+                                    <p>Connect your WordPress sites for automated accessibility scanning and fix suggestions</p>
+                                </div>
+                                <div class="platform-status" id="wordpress-status">
+                                    <span class="status-badge disconnected">Not Connected</span>
+                                </div>
+                            </div>
+                            <div class="platform-body">
+                                <div class="platform-features">
+                                    <div class="feature-item">✅ Automated scanning</div>
+                                    <div class="feature-item">✅ Fix suggestions</div>
+                                    <div class="feature-item">✅ Compliance monitoring</div>
+                                </div>
+                                <button class="connect-btn" onclick="openConnectionModal('wordpress')">
+                                    Connect WordPress Site
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="platform-card" data-platform="shopify">
+                            <div class="platform-header">
+                                <div class="platform-icon">🛍️</div>
+                                <div class="platform-info">
+                                    <h3>Shopify</h3>
+                                    <p>Integrate with your Shopify store to ensure your e-commerce site is accessible to all customers</p>
+                                </div>
+                                <div class="platform-status" id="shopify-status">
+                                    <span class="status-badge disconnected">Not Connected</span>
+                                </div>
+                            </div>
+                            <div class="platform-body">
+                                <div class="platform-features">
+                                    <div class="feature-item">✅ Product page scanning</div>
+                                    <div class="feature-item">✅ Checkout accessibility</div>
+                                    <div class="feature-item">✅ Theme compliance</div>
+                                </div>
+                                <button class="connect-btn" onclick="openConnectionModal('shopify')">
+                                    Connect Shopify Store
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="platform-card" data-platform="custom">
+                            <div class="platform-header">
+                                <div class="platform-icon">🔧</div>
+                                <div class="platform-info">
+                                    <h3>Custom Sites</h3>
+                                    <p>Connect any custom website or application using our flexible API integration</p>
+                                </div>
+                                <div class="platform-status" id="custom-status">
+                                    <span class="status-badge disconnected">Not Connected</span>
+                                </div>
+                            </div>
+                            <div class="platform-body">
+                                <div class="platform-features">
+                                    <div class="feature-item">✅ API integration</div>
+                                    <div class="feature-item">✅ Webhook support</div>
+                                    <div class="feature-item">✅ Multiple protocols</div>
+                                </div>
+                                <button class="connect-btn" onclick="openConnectionModal('custom')">
+                                    Connect Custom Site
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Connected Platforms -->
+                    <div class="connected-platforms" id="connected-platforms" style="display: none;">
+                        <div class="dashboard-header">
+                            <h2>Connected Platforms</h2>
+                            <p>Manage your connected platforms and their settings</p>
+                        </div>
+                        <div class="connected-list" id="connected-list">
+                            <!-- Connected platforms will appear here -->
+                        </div>
                     </div>
                 </div>
                 
@@ -4177,7 +4640,315 @@ app.get('/', (req, res) => {
             loadDashboardStats();
             loadDashboardRecentScans();
             loadRecentScans();
+            loadConnectedPlatforms();
         });
+
+        // Platform Integration Management
+        let connectedPlatforms = [];
+
+        // Open connection modal for specific platform
+        function openConnectionModal(platform) {
+            const modal = createConnectionModal(platform);
+            document.body.appendChild(modal);
+            modal.style.display = 'block';
+        }
+
+        // Create connection modal based on platform type
+        function createConnectionModal(platform) {
+            const modal = document.createElement('div');
+            modal.className = 'connection-modal';
+            modal.id = 'connection-modal-' + platform;
+
+            const modalContent = getModalContent(platform);
+            modal.innerHTML = modalContent;
+
+            return modal;
+        }
+
+        // Get modal content based on platform
+        function getModalContent(platform) {
+            const platformConfig = {
+                wordpress: {
+                    title: '🔗 Connect WordPress Site',
+                    icon: '🔗',
+                    fields: [
+                        { name: 'url', label: 'WordPress Site URL', type: 'text', placeholder: 'https://yoursite.com', required: true },
+                        { name: 'username', label: 'WordPress Username', type: 'text', placeholder: 'admin', required: true },
+                        { name: 'password', label: 'Application Password', type: 'password', placeholder: 'xxxx xxxx xxxx xxxx', required: true }
+                    ],
+                    help: 'Create an Application Password in WordPress Admin → Users → Your Profile'
+                },
+                shopify: {
+                    title: '🛍️ Connect Shopify Store',
+                    icon: '🛍️',
+                    fields: [
+                        { name: 'shopUrl', label: 'Shop URL', type: 'text', placeholder: 'yourstore.myshopify.com', required: true },
+                        { name: 'accessToken', label: 'Private App Access Token', type: 'password', placeholder: 'shpat_...', required: true }
+                    ],
+                    help: 'Create a Private App in Shopify Admin → Apps → Develop apps'
+                },
+                custom: {
+                    title: '🔧 Connect Custom Site',
+                    icon: '🔧',
+                    fields: [
+                        { name: 'url', label: 'Website URL', type: 'text', placeholder: 'https://yoursite.com', required: true },
+                        { name: 'method', label: 'Connection Method', type: 'select', options: [
+                            { value: 'api', label: 'API Integration' },
+                            { value: 'webhook', label: 'Webhook' },
+                            { value: 'ftp', label: 'FTP Access' },
+                            { value: 'ssh', label: 'SSH Access' },
+                            { value: 'manual', label: 'Manual Monitoring' }
+                        ], required: true },
+                        { name: 'apiKey', label: 'API Key / Credentials', type: 'password', placeholder: 'Optional - depends on method', required: false }
+                    ],
+                    help: 'Choose the best connection method for your site architecture'
+                }
+            };
+
+            const config = platformConfig[platform];
+            const fieldsHtml = config.fields.map(field => {
+                if (field.type === 'select') {
+                    const optionsHtml = field.options.map(option => 
+                        '<option value="' + option.value + '">' + option.label + '</option>'
+                    ).join('');
+                    return '<div class="form-group">' +
+                        '<label class="form-label" for="' + field.name + '">' + field.label + '</label>' +
+                        '<select class="form-select" id="' + field.name + '" name="' + field.name + '" ' + (field.required ? 'required' : '') + '>' +
+                        '<option value="">Select ' + field.label + '</option>' +
+                        optionsHtml +
+                        '</select>' +
+                        '</div>';
+                } else {
+                    return '<div class="form-group">' +
+                        '<label class="form-label" for="' + field.name + '">' + field.label + '</label>' +
+                        '<input class="form-input" type="' + field.type + '" id="' + field.name + '" name="' + field.name + '" ' +
+                        'placeholder="' + field.placeholder + '" ' + (field.required ? 'required' : '') + ' />' +
+                        '</div>';
+                }
+            }).join('');
+
+            return '<div class="connection-modal-content">' +
+                '<div class="connection-modal-header">' +
+                '<h2>' + config.title + '</h2>' +
+                '<span class="close" onclick="closeConnectionModal(\'' + platform + '\')">&times;</span>' +
+                '</div>' +
+                '<div class="connection-modal-body">' +
+                '<form class="connection-form" id="connection-form-' + platform + '">' +
+                fieldsHtml +
+                '<div class="form-help">' + config.help + '</div>' +
+                '</form>' +
+                '</div>' +
+                '<div class="connection-modal-footer">' +
+                '<button class="modal-btn secondary" onclick="closeConnectionModal(\'' + platform + '\')">Cancel</button>' +
+                '<button class="modal-btn primary" onclick="connectPlatform(\'' + platform + '\')" id="connect-btn-' + platform + '">' +
+                'Connect ' + config.title.split(' ')[1] +
+                '</button>' +
+                '</div>' +
+                '</div>';
+        }
+
+        // Close connection modal
+        function closeConnectionModal(platform) {
+            const modal = document.getElementById('connection-modal-' + platform);
+            if (modal) {
+                modal.remove();
+            }
+        }
+
+        // Connect platform
+        async function connectPlatform(platform) {
+            const form = document.getElementById('connection-form-' + platform);
+            const connectBtn = document.getElementById('connect-btn-' + platform);
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            // Validate required fields
+            const requiredFields = form.querySelectorAll('[required]');
+            let isValid = true;
+            requiredFields.forEach(field => {
+                if (!field.value.trim()) {
+                    field.style.borderColor = '#dc3545';
+                    isValid = false;
+                } else {
+                    field.style.borderColor = '#e1e5e9';
+                }
+            });
+
+            if (!isValid) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            // Show loading state
+            connectBtn.disabled = true;
+            connectBtn.textContent = 'Connecting...';
+
+            try {
+                const response = await fetch('/api/platforms/connect/' + platform, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Add to connected platforms
+                    const platformData = {
+                        id: Date.now(),
+                        platform: result.platform,
+                        url: result.url,
+                        method: result.method || platform,
+                        capabilities: result.capabilities || [],
+                        connectedAt: new Date().toISOString()
+                    };
+                    
+                    connectedPlatforms.push(platformData);
+                    updatePlatformStatus(platform, 'connected');
+                    updateConnectedPlatformsList();
+                    
+                    // Close modal and show success
+                    closeConnectionModal(platform);
+                    showSuccessMessage(result.message);
+                } else {
+                    alert('Connection failed: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Connection error:', error);
+                alert('Connection failed: ' + error.message);
+            } finally {
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect ' + platform.charAt(0).toUpperCase() + platform.slice(1);
+            }
+        }
+
+        // Update platform status
+        function updatePlatformStatus(platform, status) {
+            const statusElement = document.getElementById(platform + '-status');
+            const statusBadge = statusElement.querySelector('.status-badge');
+            const connectBtn = document.querySelector('[data-platform="' + platform + '"] .connect-btn');
+
+            if (status === 'connected') {
+                statusBadge.textContent = 'Connected';
+                statusBadge.className = 'status-badge connected';
+                connectBtn.textContent = 'Manage Connection';
+                connectBtn.onclick = () => manageConnection(platform);
+            } else if (status === 'connecting') {
+                statusBadge.textContent = 'Connecting...';
+                statusBadge.className = 'status-badge connecting';
+                connectBtn.disabled = true;
+            } else {
+                statusBadge.textContent = 'Not Connected';
+                statusBadge.className = 'status-badge disconnected';
+                connectBtn.textContent = 'Connect ' + platform.charAt(0).toUpperCase() + platform.slice(1) + ' Site';
+                connectBtn.disabled = false;
+                connectBtn.onclick = () => openConnectionModal(platform);
+            }
+        }
+
+        // Update connected platforms list
+        function updateConnectedPlatformsList() {
+            const connectedSection = document.getElementById('connected-platforms');
+            const connectedList = document.getElementById('connected-list');
+
+            if (connectedPlatforms.length > 0) {
+                connectedSection.style.display = 'block';
+                connectedList.innerHTML = connectedPlatforms.map(platform => 
+                    '<div class="connected-item">' +
+                        '<div class="connected-info">' +
+                            '<div class="connected-icon">' + getPlatformIcon(platform.platform) + '</div>' +
+                            '<div class="connected-details">' +
+                                '<h4>' + platform.url + '</h4>' +
+                                '<p>' + platform.platform.charAt(0).toUpperCase() + platform.platform.slice(1) + ' • Connected ' + new Date(platform.connectedAt).toLocaleDateString() + '</p>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="connected-actions">' +
+                            '<button class="action-btn" onclick="testConnection(' + platform.id + ')">Test</button>' +
+                            '<button class="action-btn" onclick="editConnection(' + platform.id + ')">Edit</button>' +
+                            '<button class="action-btn danger" onclick="disconnectPlatform(' + platform.id + ')">Disconnect</button>' +
+                        '</div>' +
+                    '</div>'
+                ).join('');
+            } else {
+                connectedSection.style.display = 'none';
+            }
+        }
+
+        // Get platform icon
+        function getPlatformIcon(platform) {
+            const icons = {
+                wordpress: '🔗',
+                shopify: '🛍️',
+                custom: '🔧'
+            };
+            return icons[platform] || '🌐';
+        }
+
+        // Show success message
+        function showSuccessMessage(message) {
+            const statusElement = document.getElementById('integration-status');
+            statusElement.innerHTML = 
+                '<div class="status-item">' +
+                    '<span class="status-icon">✅</span>' +
+                    '<span class="status-text">' + message + '</span>' +
+                '</div>';
+            statusElement.style.background = '#d4edda';
+            statusElement.style.borderColor = '#c3e6cb';
+            
+            // Reset after 5 seconds
+            setTimeout(() => {
+                statusElement.innerHTML = 
+                    '<div class="status-item">' +
+                        '<span class="status-icon">🔗</span>' +
+                        '<span class="status-text">Ready to connect platforms</span>' +
+                    '</div>';
+                statusElement.style.background = '#e3f2fd';
+                statusElement.style.borderColor = '#bbdefb';
+            }, 5000);
+        }
+
+        // Load connected platforms on page load
+        function loadConnectedPlatforms() {
+            // In a real app, this would load from the server
+            // For now, we'll start with an empty list
+            updateConnectedPlatformsList();
+        }
+
+        // Manage connection (placeholder)
+        function manageConnection(platform) {
+            alert('Managing ' + platform + ' connection - feature coming soon!');
+        }
+
+        // Test connection (placeholder)
+        function testConnection(platformId) {
+            alert('Testing connection - feature coming soon!');
+        }
+
+        // Edit connection (placeholder)
+        function editConnection(platformId) {
+            alert('Editing connection - feature coming soon!');
+        }
+
+        // Disconnect platform
+        function disconnectPlatform(platformId) {
+            if (confirm('Are you sure you want to disconnect this platform?')) {
+                connectedPlatforms = connectedPlatforms.filter(p => p.id !== platformId);
+                
+                // Update UI
+                updateConnectedPlatformsList();
+                
+                // Reset platform status if no connections remain for this platform type
+                const platform = connectedPlatforms.find(p => p.id === platformId);
+                if (platform) {
+                    const remainingConnections = connectedPlatforms.filter(p => p.platform === platform.platform);
+                    if (remainingConnections.length === 0) {
+                        updatePlatformStatus(platform.platform, 'disconnected');
+                    }
+                }
+            }
+        }
     </script>
     
     <!-- AI Suggestions Modal -->
