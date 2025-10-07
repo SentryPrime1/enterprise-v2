@@ -598,33 +598,7 @@ app.post('/api/detailed-report', (req, res) => {
                     </div>
                 </div>
                 
-                ${violations.some(v => v.businessImpact) ? `
-                <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                    <h4 style="margin: 0 0 15px 0; color: #856404; display: flex; align-items: center;">
-                        <span style="margin-right: 8px;">📊</span>Business Impact Analysis
-                    </h4>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
-                        ${(() => {
-                            const impactCounts = violations.reduce((acc, v) => {
-                                if (v.businessImpact) {
-                                    acc[v.businessImpact.level] = (acc[v.businessImpact.level] || 0) + 1;
-                                }
-                                return acc;
-                            }, {});
-                            return Object.entries(impactCounts).map(([level, count]) => 
-                                `<div style="text-align: center; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 6px;">
-                                    <div style="font-size: 1.2rem; font-weight: 600; color: ${
-                                        level === 'critical' ? '#dc3545' : 
-                                        level === 'high' ? '#fd7e14' : 
-                                        level === 'medium' ? '#ffc107' : '#28a745'
-                                    };">${count}</div>
-                                    <div style="font-size: 0.9rem; color: #856404; text-transform: capitalize;">${level} Impact</div>
-                                </div>`
-                            ).join('');
-                        })()}
-                    </div>
-                </div>
-                ` : ''}
+
             </div>
             
             <div class="violations-list">
@@ -639,29 +613,7 @@ app.post('/api/detailed-report', (req, res) => {
                         </div>
                         ${violation.help ? `<div class="violation-description"><strong>Help:</strong> ${violation.help}</div>` : ''}
                         ${violation.helpUrl ? `<div class="violation-description"><strong>Learn more:</strong> <a href="${violation.helpUrl}" target="_blank">${violation.helpUrl}</a></div>` : ''}
-                        
-                        ${violation.businessImpact ? `
-                        <div style="background: #f8f9fa; border-left: 4px solid ${
-                            violation.businessImpact.level === 'critical' ? '#dc3545' : 
-                            violation.businessImpact.level === 'high' ? '#fd7e14' : 
-                            violation.businessImpact.level === 'medium' ? '#ffc107' : '#28a745'
-                        }; padding: 15px; margin: 15px 0; border-radius: 4px;">
-                            <h4 style="margin: 0 0 10px 0; color: #333; display: flex; align-items: center;">
-                                <span style="margin-right: 8px;">📊</span>Business Impact Analysis
-                            </h4>
-                            <div style="margin-bottom: 8px;">
-                                <strong>Impact Level:</strong> 
-                                <span style="text-transform: capitalize; font-weight: 600; color: ${
-                                    violation.businessImpact.level === 'critical' ? '#dc3545' : 
-                                    violation.businessImpact.level === 'high' ? '#fd7e14' : 
-                                    violation.businessImpact.level === 'medium' ? '#ffc107' : '#28a745'
-                                };">${violation.businessImpact.level}</span>
-                            </div>
-                            <div style="color: #666; line-height: 1.4;">
-                                ${violation.businessImpact.description || 'This accessibility issue may impact user experience and business goals.'}
-                            </div>
-                        </div>
-                        ` : ''}
+
                     </div>
                 `).join('')}
             </div>
@@ -2465,6 +2417,76 @@ app.get('/', (req, res) => {
                 gap: 10px;
             }
         }
+        
+        /* Integration Card Styles */
+        .integration-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border: 1px solid #e1e5e9;
+        }
+        
+        .integration-header h3 {
+            margin: 0 0 8px 0;
+            color: #333;
+            font-size: 1.2rem;
+        }
+        
+        .integration-header p {
+            margin: 0 0 20px 0;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .integration-form .form-group {
+            margin-bottom: 16px;
+        }
+        
+        .integration-form label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #333;
+            font-size: 0.9rem;
+        }
+        
+        .integration-form input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            box-sizing: border-box;
+        }
+        
+        .integration-form input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .connect-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        
+        .connect-btn:hover {
+            background: #5a6fd8;
+        }
+        
+        .connect-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -2691,8 +2713,31 @@ app.get('/', (req, res) => {
                 
                 <div id="integrations" class="page">
                     <div class="dashboard-header">
-                        <h1>Integrations</h1>
-                        <p>Coming soon - Connect with your favorite tools</p>
+                        <h1>Platform Integrations</h1>
+                        <p>Connect your websites for automated accessibility monitoring</p>
+                    </div>
+                    
+                    <!-- WordPress Connection -->
+                    <div class="integration-card">
+                        <div class="integration-header">
+                            <h3>🔗 WordPress</h3>
+                            <p>Connect your WordPress sites for automated scanning</p>
+                        </div>
+                        <div class="integration-form">
+                            <div class="form-group">
+                                <label>Website URL</label>
+                                <input type="text" id="wp-url" placeholder="https://yoursite.com" />
+                            </div>
+                            <div class="form-group">
+                                <label>Username</label>
+                                <input type="text" id="wp-username" placeholder="admin" />
+                            </div>
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" id="wp-password" placeholder="••••••••" />
+                            </div>
+                            <button class="connect-btn" onclick="connectWordPress()">Connect WordPress Site</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -2810,6 +2855,51 @@ app.get('/', (req, res) => {
                 // Re-enable button
                 scanButton.disabled = false;
                 scanButton.textContent = '🔍 Start Accessibility Scan';
+            }
+        }
+        
+        // Platform Integration Functions
+        async function connectWordPress() {
+            const url = document.getElementById('wp-url').value.trim();
+            const username = document.getElementById('wp-username').value.trim();
+            const password = document.getElementById('wp-password').value.trim();
+            
+            if (!url || !username || !password) {
+                alert('Please fill in all fields');
+                return;
+            }
+            
+            const button = document.querySelector('.connect-btn');
+            const originalText = button.textContent;
+            
+            try {
+                button.disabled = true;
+                button.textContent = '🔄 Connecting...';
+                
+                const response = await fetch('/api/platforms/connect/wordpress', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, username, password })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ ' + result.message);
+                    // Clear form
+                    document.getElementById('wp-url').value = '';
+                    document.getElementById('wp-username').value = '';
+                    document.getElementById('wp-password').value = '';
+                } else {
+                    alert('❌ ' + result.error);
+                }
+                
+            } catch (error) {
+                console.error('Connection error:', error);
+                alert('❌ Connection failed: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
             }
         }
         
@@ -4206,7 +4296,7 @@ app.get('/', (req, res) => {
             </div>
             <div class="guided-modal-footer">
                 <button class="prev-btn" id="prev-btn" onclick="GuidedFixing.previousViolation()">← Previous</button>
-                <button class="get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">🤖 Get AI Fix</button>
+
                 
                 <!-- PHASE 2A: Enhanced Auto-Fix Buttons -->
                 <button class="auto-fix-btn" onclick="GuidedFixing.autoFixCurrent()" style="background: #28a745; color: white; border: none; padding: 10px 16px; border-radius: 4px; margin: 0 5px; cursor: pointer; font-size: 14px;">
