@@ -4,6 +4,29 @@ const axeCore = require('axe-core');
 const { Pool } = require('pg');
 const OpenAI = require('openai');
 
+// ENHANCEMENT: Import deployment engines (optional - with feature flag)
+const ENABLE_DEPLOYMENT_FEATURES = process.env.ENABLE_DEPLOYMENT_FEATURES || 'true';
+let DOMParsingEngine, PatchGenerationEngine, DeploymentAutomationEngine, RollbackSafetyEngine;
+let domParsingEngine, patchGenerationEngine, deploymentEngine, safetyEngine;
+
+if (ENABLE_DEPLOYMENT_FEATURES === 'true') {
+    try {
+        DOMParsingEngine = require('./dom-parsing-engine.js');
+        PatchGenerationEngine = require('./patch-generation-engine.js');
+        DeploymentAutomationEngine = require('./deployment-automation-engine.js');
+        RollbackSafetyEngine = require('./rollback-safety-engine.js');
+        
+        console.log('🚀 Initializing deployment engines...');
+        domParsingEngine = new DOMParsingEngine();
+        patchGenerationEngine = new PatchGenerationEngine();
+        deploymentEngine = new DeploymentAutomationEngine();
+        safetyEngine = new RollbackSafetyEngine();
+        console.log('✅ Deployment engines initialized successfully');
+    } catch (error) {
+        console.log('⚠️ Deployment engines not available:', error.message);
+    }
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -5582,6 +5605,96 @@ app.post('/api/platforms/connect/custom', async (req, res) => {
             success: false, 
             error: 'Connection failed: ' + error.message 
         });
+    }
+});
+
+// ENHANCEMENT: New deployment endpoints (only if engines are available)
+app.post('/api/analyze-website', async (req, res) => {
+    if (!domParsingEngine) {
+        return res.status(501).json({ success: false, error: 'Deployment features not available' });
+    }
+    
+    const { url } = req.body;
+    if (!url) {
+        return res.status(400).json({ success: false, error: 'URL is required' });
+    }
+
+    try {
+        const analysis = await domParsingEngine.performComprehensiveCrawl(url);
+        res.json({
+            success: true,
+            scanId: `scan_${Date.now()}`,
+            url: url,
+            analysis: analysis,
+            violations: analysis.violations || [],
+            deploymentReadiness: analysis.deploymentReadiness || {}
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.post('/api/generate-deployment-patches', async (req, res) => {
+    if (!patchGenerationEngine) {
+        return res.status(501).json({ success: false, error: 'Deployment features not available' });
+    }
+    
+    const { violations, platform } = req.body;
+    if (!violations) {
+        return res.status(400).json({ success: false, error: 'Violations required' });
+    }
+
+    try {
+        const patches = await patchGenerationEngine.generateDeploymentPatches(violations, platform || 'custom');
+        const packageId = await patchGenerationEngine.createPatchPackage(patches);
+        
+        res.json({
+            success: true,
+            patchId: packageId,
+            patches: patches,
+            summary: {
+                totalPatches: patches.length,
+                estimatedTime: patches.reduce((sum, p) => sum + (p.estimatedTime || 5), 0)
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.post('/api/deploy-patches', async (req, res) => {
+    if (!deploymentEngine) {
+        return res.status(501).json({ success: false, error: 'Deployment features not available' });
+    }
+    
+    const { patchId, deploymentConfig } = req.body;
+    if (!patchId || !deploymentConfig) {
+        return res.status(400).json({ success: false, error: 'Patch ID and deployment config required' });
+    }
+
+    try {
+        const result = await deploymentEngine.deployPatches(patchId, deploymentConfig);
+        res.json({ success: true, deploymentId: result.deploymentId, status: result.status });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.post('/api/rollback-deployment', async (req, res) => {
+    if (!safetyEngine) {
+        return res.status(501).json({ success: false, error: 'Deployment features not available' });
+    }
+    
+    const { deploymentId, reason } = req.body;
+    if (!deploymentId) {
+        return res.status(400).json({ success: false, error: 'Deployment ID required' });
+    }
+
+    try {
+        const result = await safetyEngine.rollbackDeployment(deploymentId, reason || 'Manual rollback');
+        res.json({ success: true, rollbackId: result.rollbackId, status: result.status });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
