@@ -1,5 +1,4 @@
 const cheerio = require('cheerio');
-const { generateSelector } = require('css-selector-generator');
 
 class DOMParsingEngine {
     constructor() {
@@ -11,7 +10,7 @@ class DOMParsingEngine {
         try {
             console.log('🕷️ Starting comprehensive crawl for:', url);
             
-            // Mock comprehensive analysis - in real implementation would use Puppeteer
+            // Simulate comprehensive analysis
             const analysis = {
                 url: url,
                 platform: await this.detectPlatform(url),
@@ -26,62 +25,101 @@ class DOMParsingEngine {
                     cssFiles: ['styles.css', 'theme.css'],
                     jsFiles: ['main.js', 'app.js'],
                     images: ['logo.png', 'hero.jpg'],
-                    fonts: ['roboto.woff2']
-                }
+                    fonts: ['custom-font.woff2']
+                },
+                violations: [
+                    {
+                        id: 'missing-alt-text',
+                        impact: 'serious',
+                        description: 'Images missing alt text',
+                        selector: 'img[src="example.jpg"]',
+                        count: 3
+                    },
+                    {
+                        id: 'color-contrast',
+                        impact: 'moderate',
+                        description: 'Insufficient color contrast',
+                        selector: '.text-light',
+                        count: 2
+                    }
+                ]
             };
 
             return analysis;
         } catch (error) {
-            console.error('DOM parsing error:', error);
+            console.error('Comprehensive crawl error:', error);
             throw error;
         }
     }
 
     async detectPlatform(url) {
-        // Mock platform detection
-        return {
-            type: 'custom',
-            name: 'Custom HTML/CSS',
-            version: 'unknown',
-            confidence: 0.8
-        };
+        // Simulate platform detection
+        if (url.includes('wordpress') || url.includes('wp-')) {
+            return {
+                type: 'wordpress',
+                version: '6.3',
+                theme: 'twentytwentythree',
+                plugins: ['yoast-seo', 'contact-form-7']
+            };
+        } else if (url.includes('shopify')) {
+            return {
+                type: 'shopify',
+                theme: 'dawn',
+                version: '2.0'
+            };
+        } else {
+            return {
+                type: 'custom',
+                framework: 'unknown',
+                cms: 'none'
+            };
+        }
     }
 
     async analyzeDOMStructure(url) {
-        // Mock DOM structure analysis
+        // Simulate DOM structure analysis
         return {
-            complexity: 'medium',
-            totalElements: 150,
-            headingStructure: ['h1', 'h2', 'h3'],
-            formElements: 5,
+            totalElements: 245,
+            headingStructure: ['h1', 'h2', 'h2', 'h3', 'h3', 'h2'],
+            formElements: 2,
             imageElements: 12,
-            linkElements: 25
+            linkElements: 34,
+            complexity: 'medium'
         };
     }
 
-    generateOptimalSelector(element, context = {}) {
-        try {
-            // Mock selector generation
-            const selectors = [
-                '#main-content img',
-                '.hero-section button',
-                'nav a[href]',
-                'form input[type="text"]'
-            ];
-            
-            return {
-                selector: selectors[Math.floor(Math.random() * selectors.length)],
-                specificity: 0.85,
-                reliability: 'high'
-            };
-        } catch (error) {
-            console.error('Selector generation error:', error);
-            return {
-                selector: '*',
-                specificity: 0.1,
-                reliability: 'low'
-            };
+    generateSelector(element, options = {}) {
+        // Simulate CSS selector generation
+        const strategies = [
+            () => element.id ? `#${element.id}` : null,
+            () => element.className ? `.${element.className.split(' ')[0]}` : null,
+            () => element.tagName ? element.tagName.toLowerCase() : null
+        ];
+
+        for (const strategy of strategies) {
+            const selector = strategy();
+            if (selector) {
+                return {
+                    selector: selector,
+                    specificity: this.calculateSpecificity(selector),
+                    reliability: 'high'
+                };
+            }
         }
+
+        return {
+            selector: 'body *',
+            specificity: 1,
+            reliability: 'low'
+        };
+    }
+
+    calculateSpecificity(selector) {
+        let specificity = 0;
+        if (selector.includes('#')) specificity += 100;
+        if (selector.includes('.')) specificity += 10;
+        specificity += (selector.match(/[a-zA-Z]/g) || []).length;
+        return specificity;
     }
 }
 
