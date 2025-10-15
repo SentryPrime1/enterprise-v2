@@ -5787,7 +5787,7 @@ app.get('/api/website-connections', async (req, res) => {
         const query = 'SELECT * FROM website_connections ORDER BY created_at DESC';
         console.log('Executing query:', query);
         
-        const result = await pool.query(query);
+const result = await db.query(query);
         console.log('Query result:', result.rows.length, 'connections found');
         
         // Decrypt sensitive data before sending
