@@ -30,13 +30,13 @@
     "jszip": "^3.10.1",
     "cheerio": "^1.0.0-rc.12",
     "css-selector-generator": "^3.6.5",
-    "css-tree": "^3.1.0",
-    "dom-serializer": "^2.0.0",
     "form-data": "^4.0.0",
-    "htmlparser2": "^9.1.0",
     "ssh2": "^1.14.0",
     "basic-ftp": "^5.0.3",
-    "axios": "^1.12.2",
+    "axios": "^1.6.8",
+    "css-tree": "^2.3.1",
+    "dom-serializer": "^2.0.0",
+    "htmlparser2": "^9.1.0",
     "optimal-select": "^4.0.1"
   },
   "engines": {
