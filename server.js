@@ -5741,6 +5741,224 @@ app.post('/api/rollback-deployment', async (req, res) => {
 });
 
 // Start server
+// MINIMAL WEBSITE CONNECTIONS API ADDITIONS
+// Add these endpoints to your existing server.js file (before the final app.listen)
+
+const crypto = require('crypto');
+
+// Simple encryption for credentials (using built-in crypto)
+function encryptCredential(text) {
+    if (!text) return null;
+    const algorithm = 'aes-256-cbc';
+    const key = crypto.scryptSync(process.env.ENCRYPTION_KEY || 'sentryprime-default-key', 'salt', 32);
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipher(algorithm, key);
+    let encrypted = cipher.update(text, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return iv.toString('hex') + ':' + encrypted;
+}
+
+function decryptCredential(encryptedData) {
+    if (!encryptedData) return null;
+    try {
+        const algorithm = 'aes-256-cbc';
+        const key = crypto.scryptSync(process.env.ENCRYPTION_KEY || 'sentryprime-default-key', 'salt', 32);
+        const parts = encryptedData.split(':');
+        const iv = Buffer.from(parts[0], 'hex');
+        const encrypted = parts[1];
+        const decipher = crypto.createDecipher(algorithm, key);
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (error) {
+        console.error('Decryption error:', error);
+        return null;
+    }
+}
+
+// API: Get user's website connections
+app.get('/api/website-connections', async (req, res) => {
+    try {
+        if (!db) {
+            return res.status(503).json({ error: 'Database not available' });
+        }
+
+        // For now, use a simple user ID (in production, get from JWT token)
+        const userId = 1; // TODO: Get from authentication
+
+        const query = `
+            SELECT 
+                id, website_url, connection_name, connection_type, host, port,
+                username, document_root, css_directory, platform_type, 
+                is_active, last_tested, last_test_status, created_at
+            FROM website_connections 
+            WHERE user_id = $1 AND is_active = true
+            ORDER BY created_at DESC
+        `;
+        
+        const result = await db.query(query, [userId]);
+        
+        res.json({ 
+            connections: result.rows,
+            message: 'Website connections loaded successfully'
+        });
+        
+    } catch (error) {
+        console.error('Error fetching connections:', error);
+        res.status(500).json({ error: 'Failed to fetch connections' });
+    }
+});
+
+// API: Add new website connection
+app.post('/api/website-connections', async (req, res) => {
+    try {
+        if (!db) {
+            return res.status(503).json({ error: 'Database not available' });
+        }
+
+        const userId = 1; // TODO: Get from authentication
+        const {
+            websiteUrl,
+            connectionName,
+            connectionType,
+            host,
+            port,
+            username,
+            password,
+            documentRoot,
+            cssDirectory
+        } = req.body;
+
+        if (!websiteUrl || !connectionName || !connectionType) {
+            return res.status(400).json({ 
+                error: 'Missing required fields: websiteUrl, connectionName, connectionType' 
+            });
+        }
+
+        // Encrypt sensitive data
+        const passwordEncrypted = password ? encryptCredential(password) : null;
+
+        const query = `
+            INSERT INTO website_connections (
+                user_id, website_url, connection_name, connection_type,
+                host, port, username, password_encrypted,
+                document_root, css_directory, last_test_status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+            RETURNING id, website_url, connection_name, connection_type, created_at
+        `;
+
+        const values = [
+            userId, websiteUrl, connectionName, connectionType,
+            host, port || (connectionType === 'ftp' ? 21 : 22), 
+            username, passwordEncrypted,
+            documentRoot || '/public_html', 
+            cssDirectory || '/css'
+        ];
+
+        const result = await db.query(query, values);
+        const newConnection = result.rows[0];
+
+        res.json({ 
+            connection: newConnection,
+            message: 'Connection added successfully'
+        });
+
+    } catch (error) {
+        console.error('Error adding connection:', error);
+        if (error.code === '23505') { // Unique constraint violation
+            res.status(409).json({ error: 'Connection already exists for this website' });
+        } else {
+            res.status(500).json({ error: 'Failed to add connection' });
+        }
+    }
+});
+
+// API: Test website connection
+app.post('/api/website-connections/:id/test', async (req, res) => {
+    try {
+        if (!db) {
+            return res.status(503).json({ error: 'Database not available' });
+        }
+
+        const connectionId = req.params.id;
+        const userId = 1; // TODO: Get from authentication
+
+        // Get connection details
+        const query = `
+            SELECT * FROM website_connections 
+            WHERE id = $1 AND user_id = $2
+        `;
+        const result = await db.query(query, [connectionId, userId]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Connection not found' });
+        }
+
+        const connection = result.rows[0];
+        
+        // Simple connection test (just verify we have the required fields)
+        let testResult = { success: false, message: 'Connection test not implemented yet' };
+        
+        if (connection.connection_type === 'ftp' && connection.host && connection.username) {
+            testResult = { success: true, message: 'FTP connection details look valid' };
+        } else if (connection.connection_type === 'wordpress' && connection.website_url) {
+            testResult = { success: true, message: 'WordPress connection details look valid' };
+        } else {
+            testResult = { success: false, message: 'Missing required connection details' };
+        }
+
+        // Update test results in database
+        const updateQuery = `
+            UPDATE website_connections 
+            SET last_tested = CURRENT_TIMESTAMP, 
+                last_test_status = $1
+            WHERE id = $2
+        `;
+        await db.query(updateQuery, [
+            testResult.success ? 'success' : 'failed',
+            connectionId
+        ]);
+
+        res.json(testResult);
+
+    } catch (error) {
+        console.error('Error testing connection:', error);
+        res.status(500).json({ error: 'Failed to test connection' });
+    }
+});
+
+// API: Delete website connection
+app.delete('/api/website-connections/:id', async (req, res) => {
+    try {
+        if (!db) {
+            return res.status(503).json({ error: 'Database not available' });
+        }
+
+        const connectionId = req.params.id;
+        const userId = 1; // TODO: Get from authentication
+
+        const query = `
+            UPDATE website_connections 
+            SET is_active = false 
+            WHERE id = $1 AND user_id = $2
+        `;
+        
+        const result = await db.query(query, [connectionId, userId]);
+        
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Connection not found' });
+        }
+        
+        res.json({ message: 'Connection deleted successfully' });
+        
+    } catch (error) {
+        console.error('Error deleting connection:', error);
+        res.status(500).json({ error: 'Failed to delete connection' });
+    }
+});
+
+// ADD THESE LINES BEFORE YOUR EXISTING app.listen() CALL
+
 app.listen(PORT, () => {
     console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
     console.log('📊 Health check: http://localhost:' + PORT + '/health');
