@@ -41,9 +41,8 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install --only=production
 
-# Copy application code
-COPY server.js ./
-COPY public/ ./public/
+# Copy all application files (including engine files)
+COPY . .
 
 # Create a non-privileged user that the app will run under
 RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
