@@ -5,6 +5,7 @@
  * 
  * Author: Manus AI
  * Date: October 7, 2025
+ * Version: Node.js Compatible
  */
 
 // CSS selector generator - handle browser vs Node.js environment
@@ -16,7 +17,8 @@ try {
     console.log('CSS selector generator not available, using fallback');
     getCssSelector = null;
 }
-const { parse, generate } = require('css-tree');
+
+// Use Node.js compatible dependencies only
 const { DomHandler, Parser } = require('htmlparser2');
 const serialize = require('dom-serializer');
 const cheerio = require('cheerio');
@@ -38,6 +40,8 @@ class DOMParsingEngine {
             },
             ...options
         };
+        
+        console.log('🔍 DOM Parsing Engine initialized (Node.js compatible)');
     }
 
     /**
@@ -55,10 +59,9 @@ class DOMParsingEngine {
 
             return {
                 $: $,
-                root: $.root(),
                 
-                // Find elements by various criteria
-                findBySelector: (selector) => $(selector),
+                // Query methods
+                find: (selector) => $(selector),
                 findByText: (text) => $(`*:contains("${text}")`),
                 findByAttribute: (attr, value) => value ? $(`[${attr}="${value}"]`) : $(`[${attr}]`),
                 
@@ -67,14 +70,12 @@ class DOMParsingEngine {
                 
                 // Manipulation methods
                 addClass: (selector, className) => $(selector).addClass(className),
+                removeClass: (selector, className) => $(selector).removeClass(className),
                 setAttribute: (selector, attr, value) => $(selector).attr(attr, value),
-                setStyle: (selector, styles) => $(selector).css(styles),
-                insertCSS: (css) => this.insertCSS($, css),
+                removeAttribute: (selector, attr) => $(selector).removeAttr(attr),
                 
                 // Serialization
-                toHTML: () => $.html(),
-                getElementHTML: (selector) => $(selector).html(),
-                getOuterHTML: (selector) => $(selector).prop('outerHTML')
+                serialize: () => $.html()
             };
         } catch (error) {
             console.error('DOM parsing error:', error);
@@ -83,40 +84,32 @@ class DOMParsingEngine {
     }
 
     /**
-     * Generate an optimal CSS selector for a given element
-     * Balances specificity with flexibility for deployment-ready fixes
-     * @param {Object} element - Cheerio element object
+     * Generate optimal CSS selector for an element
+     * @param {Object} element - Cheerio element
      * @param {Object} $ - Cheerio instance
      * @returns {Object} Selector information with metadata
      */
     generateOptimalSelector(element, $) {
         try {
-            // Convert cheerio element to DOM-like structure for css-selector-generator
-            const domElement = this.cheerioToDOMElement(element, $);
-            
             // Generate multiple selector candidates
             const candidates = this.generateSelectorCandidates(element, $);
             
             // Evaluate and rank selectors
             const rankedSelectors = this.rankSelectors(candidates, $);
             
-            // Return the best selector with metadata
-            const bestSelector = rankedSelectors[0];
-            
             return {
-                selector: bestSelector.selector,
-                specificity: bestSelector.specificity,
-                uniqueness: bestSelector.uniqueness,
-                flexibility: bestSelector.flexibility,
-                score: bestSelector.score,
-                alternatives: rankedSelectors.slice(1, 3), // Top 2 alternatives
+                selector: rankedSelectors[0]?.selector || this.generateFallbackSelector(element).selector,
+                specificity: rankedSelectors[0]?.specificity || 1,
+                uniqueness: rankedSelectors[0]?.uniqueness || false,
+                alternatives: rankedSelectors.slice(1, 3).map(s => s.selector),
                 metadata: {
-                    elementTag: element.prop('tagName')?.toLowerCase(),
-                    hasId: !!element.attr('id'),
-                    hasClass: !!element.attr('class'),
-                    hasUniqueAttributes: this.hasUniqueAttributes(element, $),
-                    depth: this.getElementDepth(element),
-                    siblingIndex: element.index()
+                    strategy: rankedSelectors[0]?.strategy || 'fallback',
+                    confidence: rankedSelectors[0]?.confidence || 'low',
+                    element: {
+                        tag: element.prop('tagName')?.toLowerCase(),
+                        id: element.attr('id'),
+                        classes: element.attr('class')?.split(/\s+/) || []
+                    }
                 }
             };
         } catch (error) {
@@ -127,7 +120,7 @@ class DOMParsingEngine {
     }
 
     /**
-     * Generate multiple selector candidates using different strategies
+     * Generate multiple selector candidates for an element
      * @param {Object} element - Cheerio element
      * @param {Object} $ - Cheerio instance
      * @returns {Array} Array of selector candidates
@@ -137,87 +130,67 @@ class DOMParsingEngine {
         
         // Strategy 1: ID-based selector (highest priority)
         const id = element.attr('id');
-        if (id && this.isUniqueId(id, $)) {
+        if (id && /^[a-zA-Z][\w-]*$/.test(id)) {
             candidates.push({
                 selector: `#${id}`,
                 strategy: 'id',
-                specificity: 100
+                specificity: 100,
+                confidence: 'high'
             });
         }
 
-        // Strategy 2: Class-based selector
+        // Strategy 2: Class-based selectors
         const classes = element.attr('class');
         if (classes) {
-            const classArray = classes.split(/\s+/).filter(c => c.length > 0);
-            if (classArray.length > 0) {
-                // Try single class first
-                for (const cls of classArray) {
-                    const selector = `.${cls}`;
-                    if (this.isUniqueSelector(selector, $)) {
-                        candidates.push({
-                            selector: selector,
-                            strategy: 'single-class',
-                            specificity: 10
-                        });
-                    }
-                }
-                
-                // Try class combinations
-                if (classArray.length > 1) {
-                    const combinedSelector = `.${classArray.join('.')}`;
+            const classList = classes.split(/\s+/).filter(cls => 
+                cls && /^[a-zA-Z][\w-]*$/.test(cls) && !cls.match(/^(active|selected|hover|focus)$/)
+            );
+            
+            if (classList.length > 0) {
+                // Single class selector
+                classList.forEach(cls => {
                     candidates.push({
-                        selector: combinedSelector,
+                        selector: `.${cls}`,
+                        strategy: 'class',
+                        specificity: 10,
+                        confidence: 'medium'
+                    });
+                });
+                
+                // Combined class selector
+                if (classList.length > 1) {
+                    candidates.push({
+                        selector: `.${classList.join('.')}`,
                         strategy: 'multi-class',
-                        specificity: 10 * classArray.length
+                        specificity: 10 * classList.length,
+                        confidence: 'high'
                     });
                 }
             }
         }
 
         // Strategy 3: Attribute-based selectors
-        const attributes = element.attr();
-        if (attributes) {
-            for (const [attr, value] of Object.entries(attributes)) {
-                if (this.options.preferredAttributes.some(pref => 
-                    pref.includes('*') ? attr.startsWith(pref.replace('*', '')) : attr === pref
-                )) {
-                    const selector = `[${attr}="${value}"]`;
-                    if (this.isUniqueSelector(selector, $)) {
-                        candidates.push({
-                            selector: selector,
-                            strategy: 'attribute',
-                            specificity: 10
-                        });
-                    }
-                }
-            }
-        }
-
-        // Strategy 4: Tag + attribute combinations
-        const tag = element.prop('tagName')?.toLowerCase();
-        if (tag) {
-            // Tag + class
-            if (classes) {
-                const firstClass = classes.split(/\s+/)[0];
-                const selector = `${tag}.${firstClass}`;
+        const attributes = element.get(0)?.attribs || {};
+        Object.entries(attributes).forEach(([attr, value]) => {
+            if (['name', 'type', 'role', 'data-testid'].includes(attr) && value) {
                 candidates.push({
-                    selector: selector,
-                    strategy: 'tag-class',
-                    specificity: 11
+                    selector: `[${attr}="${value}"]`,
+                    strategy: 'attribute',
+                    specificity: 10,
+                    confidence: 'medium'
                 });
             }
+        });
 
-            // Tag + attribute
-            for (const [attr, value] of Object.entries(attributes || {})) {
-                if (attr !== 'class' && attr !== 'id') {
-                    const selector = `${tag}[${attr}="${value}"]`;
-                    candidates.push({
-                        selector: selector,
-                        strategy: 'tag-attribute',
-                        specificity: 11
-                    });
-                }
-            }
+        // Strategy 4: Tag-based selectors with context
+        const tag = element.prop('tagName')?.toLowerCase();
+        if (tag) {
+            candidates.push({
+                selector: tag,
+                strategy: 'tag',
+                specificity: 1,
+                confidence: 'low'
+            });
         }
 
         // Strategy 5: Hierarchical selectors
@@ -236,7 +209,7 @@ class DOMParsingEngine {
     }
 
     /**
-     * Generate hierarchical selectors by traversing up the DOM tree
+     * Generate hierarchical selector candidates
      * @param {Object} element - Cheerio element
      * @param {Object} $ - Cheerio instance
      * @returns {Array} Array of hierarchical selector candidates
@@ -245,61 +218,50 @@ class DOMParsingEngine {
         const candidates = [];
         const hierarchy = [];
         let current = element;
-        let depth = 0;
-
-        // Build hierarchy up to configured depth
-        while (current.length > 0 && current.prop('tagName') && depth < this.options.depth) {
-            const tag = current.prop('tagName').toLowerCase();
+        
+        // Build hierarchy up to specified depth
+        for (let i = 0; i < this.options.depth && current.length > 0; i++) {
+            const tag = current.prop('tagName')?.toLowerCase();
             const id = current.attr('id');
             const classes = current.attr('class');
-
-            let levelSelector = tag;
-
-            // Prefer ID if unique
-            if (id && this.isUniqueId(id, $)) {
-                levelSelector = `#${id}`;
-                hierarchy.unshift(levelSelector);
+            
+            let selectorPart = tag || '';
+            
+            if (id && /^[a-zA-Z][\w-]*$/.test(id)) {
+                selectorPart = `#${id}`;
+                hierarchy.unshift(selectorPart);
                 break; // ID is unique, no need to go further up
+            } else if (classes) {
+                const classList = classes.split(/\s+/).filter(cls => 
+                    cls && /^[a-zA-Z][\w-]*$/.test(cls)
+                );
+                if (classList.length > 0) {
+                    selectorPart += `.${classList[0]}`;
+                }
             }
-
-            // Add class if available
-            if (classes) {
-                const firstClass = classes.split(/\s+/)[0];
-                levelSelector += `.${firstClass}`;
-            }
-
-            hierarchy.unshift(levelSelector);
+            
+            hierarchy.unshift(selectorPart);
             current = current.parent();
-            depth++;
         }
-
-        // Generate selectors with different hierarchy depths
-        for (let i = 1; i <= hierarchy.length; i++) {
-            const selector = hierarchy.slice(-i).join(' > ');
-            candidates.push({
-                selector: selector,
-                strategy: 'hierarchical',
-                specificity: this.calculateSpecificity(selector),
-                depth: i
-            });
-
-            // Also try descendant selector (space instead of >)
-            if (i > 1) {
-                const descendantSelector = hierarchy.slice(-i).join(' ');
+        
+        // Generate selectors of different lengths
+        for (let len = 1; len <= Math.min(hierarchy.length, 3); len++) {
+            const selector = hierarchy.slice(-len).join(' > ');
+            if (selector) {
                 candidates.push({
-                    selector: descendantSelector,
-                    strategy: 'descendant',
-                    specificity: this.calculateSpecificity(descendantSelector),
-                    depth: i
+                    selector: selector,
+                    strategy: 'hierarchical',
+                    specificity: len * 5,
+                    confidence: len === 1 ? 'low' : 'medium'
                 });
             }
         }
-
+        
         return candidates;
     }
 
     /**
-     * Generate nth-child selector as a last resort
+     * Generate nth-child selector for an element
      * @param {Object} element - Cheerio element
      * @param {Object} $ - Cheerio instance
      * @returns {Object|null} nth-child selector candidate
@@ -308,26 +270,19 @@ class DOMParsingEngine {
         const parent = element.parent();
         if (parent.length === 0) return null;
 
-        const siblings = parent.children();
-        const index = siblings.index(element);
+        const tag = element.prop('tagName')?.toLowerCase();
+        const index = element.index() + 1; // nth-child is 1-indexed
         
-        if (index >= 0) {
-            const tag = element.prop('tagName')?.toLowerCase();
-            const selector = `${tag}:nth-child(${index + 1})`;
-            
-            return {
-                selector: selector,
-                strategy: 'nth-child',
-                specificity: 1,
-                warning: 'nth-child selectors are fragile and may break with DOM changes'
-            };
-        }
-
-        return null;
+        return {
+            selector: `${tag}:nth-child(${index})`,
+            strategy: 'nth-child',
+            specificity: 2,
+            confidence: 'low'
+        };
     }
 
     /**
-     * Rank selectors based on multiple criteria
+     * Rank selector candidates by effectiveness
      * @param {Array} candidates - Array of selector candidates
      * @param {Object} $ - Cheerio instance
      * @returns {Array} Ranked selectors
@@ -335,181 +290,67 @@ class DOMParsingEngine {
     rankSelectors(candidates, $) {
         return candidates
             .map(candidate => {
-                const uniqueness = this.calculateUniqueness(candidate.selector, $);
-                const flexibility = this.calculateFlexibility(candidate);
-                const score = this.calculateOverallScore(candidate, uniqueness, flexibility);
-
-                return {
-                    ...candidate,
-                    uniqueness,
-                    flexibility,
-                    score
-                };
-            })
-            .sort((a, b) => b.score - a.score)
-            .filter(candidate => candidate.uniqueness > 0); // Remove non-unique selectors
-    }
-
-    /**
-     * Calculate selector specificity based on CSS rules
-     * @param {string} selector - CSS selector
-     * @returns {number} Specificity score
-     */
-    calculateSpecificity(selector) {
-        let specificity = 0;
-        
-        // Count IDs (100 points each)
-        const idMatches = selector.match(/#[\w-]+/g);
-        if (idMatches) specificity += idMatches.length * 100;
-        
-        // Count classes, attributes, pseudo-classes (10 points each)
-        const classMatches = selector.match(/\.[\w-]+/g);
-        if (classMatches) specificity += classMatches.length * 10;
-        
-        const attrMatches = selector.match(/\[[^\]]+\]/g);
-        if (attrMatches) specificity += attrMatches.length * 10;
-        
-        const pseudoMatches = selector.match(/:[\w-]+(\([^)]*\))?/g);
-        if (pseudoMatches) specificity += pseudoMatches.length * 10;
-        
-        // Count elements and pseudo-elements (1 point each)
-        const elementMatches = selector.match(/(?:^|[\s>+~])([a-zA-Z][\w-]*)/g);
-        if (elementMatches) specificity += elementMatches.length * 1;
-        
-        return specificity;
-    }
-
-    /**
-     * Calculate how unique a selector is (1 = unique, 0 = not unique)
-     * @param {string} selector - CSS selector
-     * @param {Object} $ - Cheerio instance
-     * @returns {number} Uniqueness score (0-1)
-     */
-    calculateUniqueness(selector, $) {
-        try {
-            const matches = $(selector);
-            return matches.length === 1 ? 1 : (matches.length === 0 ? 0 : 1 / matches.length);
-        } catch (error) {
-            return 0; // Invalid selector
-        }
-    }
-
-    /**
-     * Calculate flexibility score based on selector characteristics
-     * @param {Object} candidate - Selector candidate
-     * @returns {number} Flexibility score (0-1)
-     */
-    calculateFlexibility(candidate) {
-        let flexibility = 1;
-
-        // Penalize nth-child selectors (very fragile)
-        if (candidate.strategy === 'nth-child') {
-            flexibility *= 0.1;
-        }
-
-        // Penalize very deep hierarchical selectors
-        if (candidate.depth && candidate.depth > 4) {
-            flexibility *= Math.pow(0.8, candidate.depth - 4);
-        }
-
-        // Reward ID-based selectors
-        if (candidate.strategy === 'id') {
-            flexibility *= 1.2;
-        }
-
-        // Reward attribute-based selectors for accessibility elements
-        if (candidate.strategy === 'attribute' && candidate.selector.includes('aria-')) {
-            flexibility *= 1.1;
-        }
-
-        return Math.min(flexibility, 1);
-    }
-
-    /**
-     * Calculate overall score combining specificity, uniqueness, and flexibility
-     * @param {Object} candidate - Selector candidate
-     * @param {number} uniqueness - Uniqueness score
-     * @param {number} flexibility - Flexibility score
-     * @returns {number} Overall score
-     */
-    calculateOverallScore(candidate, uniqueness, flexibility) {
-        // Weighted scoring: uniqueness is most important, then flexibility, then specificity
-        const uniquenessWeight = 0.5;
-        const flexibilityWeight = 0.3;
-        const specificityWeight = 0.2;
-
-        // Normalize specificity (cap at 200 for scoring purposes)
-        const normalizedSpecificity = Math.min(candidate.specificity, 200) / 200;
-
-        return (uniqueness * uniquenessWeight) + 
-               (flexibility * flexibilityWeight) + 
-               (normalizedSpecificity * specificityWeight);
-    }
-
-    /**
-     * Check if an ID is unique in the document
-     * @param {string} id - ID to check
-     * @param {Object} $ - Cheerio instance
-     * @returns {boolean} True if unique
-     */
-    isUniqueId(id, $) {
-        return $(`#${id}`).length === 1;
-    }
-
-    /**
-     * Check if a selector is unique in the document
-     * @param {string} selector - Selector to check
-     * @param {Object} $ - Cheerio instance
-     * @returns {boolean} True if unique
-     */
-    isUniqueSelector(selector, $) {
-        try {
-            return $(selector).length === 1;
-        } catch (error) {
-            return false;
-        }
-    }
-
-    /**
-     * Check if element has unique attributes
-     * @param {Object} element - Cheerio element
-     * @param {Object} $ - Cheerio instance
-     * @returns {boolean} True if has unique attributes
-     */
-    hasUniqueAttributes(element, $) {
-        const attributes = element.attr();
-        if (!attributes) return false;
-
-        for (const [attr, value] of Object.entries(attributes)) {
-            if (attr !== 'class' && attr !== 'style') {
-                const selector = `[${attr}="${value}"]`;
-                if (this.isUniqueSelector(selector, $)) {
-                    return true;
+                try {
+                    const matches = $(candidate.selector);
+                    const uniqueness = matches.length === 1;
+                    const score = this.calculateSelectorScore(candidate, matches.length);
+                    
+                    return {
+                        ...candidate,
+                        uniqueness,
+                        matchCount: matches.length,
+                        score
+                    };
+                } catch (error) {
+                    return {
+                        ...candidate,
+                        uniqueness: false,
+                        matchCount: 0,
+                        score: 0
+                    };
                 }
-            }
-        }
-        return false;
+            })
+            .filter(candidate => candidate.matchCount > 0)
+            .sort((a, b) => b.score - a.score);
     }
 
     /**
-     * Get the depth of an element in the DOM tree
-     * @param {Object} element - Cheerio element
-     * @returns {number} Depth level
+     * Calculate score for a selector candidate
+     * @param {Object} candidate - Selector candidate
+     * @param {number} matchCount - Number of elements matched
+     * @returns {number} Selector score
      */
-    getElementDepth(element) {
-        let depth = 0;
-        let current = element;
+    calculateSelectorScore(candidate, matchCount) {
+        let score = candidate.specificity;
         
-        while (current.parent().length > 0) {
-            depth++;
-            current = current.parent();
+        // Penalty for non-unique selectors
+        if (matchCount > 1) {
+            score -= (matchCount - 1) * 10;
         }
         
-        return depth;
+        // Bonus for unique selectors
+        if (matchCount === 1) {
+            score += 50;
+        }
+        
+        // Strategy-based scoring
+        const strategyBonus = {
+            'id': 100,
+            'multi-class': 50,
+            'class': 30,
+            'attribute': 25,
+            'hierarchical': 20,
+            'tag': 10,
+            'nth-child': 5
+        };
+        
+        score += strategyBonus[candidate.strategy] || 0;
+        
+        return Math.max(0, score);
     }
 
     /**
-     * Generate a fallback selector when advanced generation fails
+     * Generate fallback selector for an element
      * @param {Object} element - Cheerio element
      * @returns {Object} Fallback selector info
      */
@@ -520,57 +361,93 @@ class DOMParsingEngine {
         return {
             selector: `${tag}:nth-child(${index + 1})`,
             specificity: 1,
-            uniqueness: 0.5,
-            flexibility: 0.1,
-            score: 0.2,
+            uniqueness: false,
             alternatives: [],
             metadata: {
-                elementTag: tag,
-                hasId: false,
-                hasClass: false,
-                hasUniqueAttributes: false,
-                depth: 0,
-                siblingIndex: index,
-                fallback: true
+                strategy: 'fallback',
+                confidence: 'low',
+                element: {
+                    tag: tag,
+                    index: index
+                }
             }
         };
     }
 
     /**
-     * Insert CSS into the document
-     * @param {Object} $ - Cheerio instance
-     * @param {string} css - CSS to insert
-     * @returns {Object} Cheerio instance with CSS inserted
+     * Extract accessibility-relevant elements from HTML
+     * @param {string} html - HTML content
+     * @returns {Array} Array of accessibility elements with selectors
      */
-    insertCSS($, css) {
-        const head = $('head');
-        if (head.length === 0) {
-            $('html').prepend('<head></head>');
-        }
-        
-        $('head').append(`<style type="text/css">\n${css}\n</style>`);
-        return $;
+    extractAccessibilityElements(html) {
+        const dom = this.parseHTML(html);
+        const $ = dom.$;
+        const elements = [];
+
+        // Interactive elements
+        const interactiveSelectors = [
+            'button', 'input', 'select', 'textarea', 'a[href]',
+            '[role="button"]', '[role="link"]', '[role="menuitem"]',
+            '[tabindex]', '[onclick]'
+        ];
+
+        interactiveSelectors.forEach(selector => {
+            $(selector).each((i, el) => {
+                const $el = $(el);
+                const selectorInfo = this.generateOptimalSelector($el, $);
+                
+                elements.push({
+                    type: 'interactive',
+                    tag: $el.prop('tagName')?.toLowerCase(),
+                    selector: selectorInfo.selector,
+                    attributes: $el.get(0)?.attribs || {},
+                    text: $el.text().trim(),
+                    accessibility: {
+                        hasAriaLabel: !!$el.attr('aria-label'),
+                        hasAriaDescribedBy: !!$el.attr('aria-describedby'),
+                        hasRole: !!$el.attr('role'),
+                        isKeyboardAccessible: $el.attr('tabindex') !== '-1'
+                    }
+                });
+            });
+        });
+
+        // Form elements
+        $('form').each((i, form) => {
+            const $form = $(form);
+            const selectorInfo = this.generateOptimalSelector($form, $);
+            
+            elements.push({
+                type: 'form',
+                tag: 'form',
+                selector: selectorInfo.selector,
+                attributes: $form.get(0)?.attribs || {},
+                fields: $form.find('input, select, textarea').length,
+                hasLabels: $form.find('label').length > 0
+            });
+        });
+
+        // Images
+        $('img').each((i, img) => {
+            const $img = $(img);
+            const selectorInfo = this.generateOptimalSelector($img, $);
+            
+            elements.push({
+                type: 'image',
+                tag: 'img',
+                selector: selectorInfo.selector,
+                attributes: $img.get(0)?.attribs || {},
+                hasAlt: !!$img.attr('alt'),
+                altText: $img.attr('alt') || '',
+                isDecorative: $img.attr('alt') === '' || $img.attr('role') === 'presentation'
+            });
+        });
+
+        return elements;
     }
 
     /**
-     * Convert Cheerio element to DOM-like structure for compatibility
-     * @param {Object} element - Cheerio element
-     * @param {Object} $ - Cheerio instance
-     * @returns {Object} DOM-like element
-     */
-    cheerioToDOMElement(element, $) {
-        // This is a simplified conversion for compatibility with css-selector-generator
-        // In practice, we use our own selector generation logic above
-        return {
-            tagName: element.prop('tagName'),
-            attributes: element.attr(),
-            parentNode: element.parent().length > 0 ? this.cheerioToDOMElement(element.parent(), $) : null,
-            children: element.children().toArray().map(child => this.cheerioToDOMElement($(child), $))
-        };
-    }
-
-    /**
-     * Analyze a website's DOM structure for complexity assessment
+     * Analyze DOM complexity and structure
      * @param {string} html - HTML content
      * @returns {Object} DOM complexity analysis
      */
@@ -580,44 +457,83 @@ class DOMParsingEngine {
 
         const analysis = {
             totalElements: $('*').length,
-            maxDepth: 0,
-            elementsWithIds: $('[id]').length,
-            elementsWithClasses: $('[class]').length,
-            duplicateIds: 0,
-            semanticElements: 0,
-            accessibilityElements: 0,
+            depth: this.calculateMaxDepth($('body').length ? $('body') : $.root()),
+            interactiveElements: $('button, input, select, textarea, a[href], [role="button"], [tabindex]').length,
+            images: $('img').length,
+            forms: $('form').length,
+            headings: $('h1, h2, h3, h4, h5, h6').length,
+            landmarks: $('[role="main"], [role="navigation"], [role="banner"], [role="contentinfo"], main, nav, header, footer').length,
             complexity: 'low'
         };
 
-        // Calculate max depth
-        $('*').each((i, el) => {
-            const depth = this.getElementDepth($(el));
-            analysis.maxDepth = Math.max(analysis.maxDepth, depth);
-        });
-
-        // Check for duplicate IDs
-        const ids = {};
-        $('[id]').each((i, el) => {
-            const id = $(el).attr('id');
-            ids[id] = (ids[id] || 0) + 1;
-        });
-        analysis.duplicateIds = Object.values(ids).filter(count => count > 1).length;
-
-        // Count semantic elements
-        const semanticTags = ['header', 'nav', 'main', 'section', 'article', 'aside', 'footer'];
-        analysis.semanticElements = semanticTags.reduce((count, tag) => count + $(tag).length, 0);
-
-        // Count accessibility elements
-        analysis.accessibilityElements = $('[aria-label], [aria-labelledby], [aria-describedby], [role]').length;
-
-        // Determine complexity
-        if (analysis.totalElements > 1000 || analysis.maxDepth > 10 || analysis.duplicateIds > 5) {
+        // Determine complexity level
+        if (analysis.totalElements > 1000 || analysis.depth > 10) {
             analysis.complexity = 'high';
-        } else if (analysis.totalElements > 300 || analysis.maxDepth > 6 || analysis.duplicateIds > 0) {
+        } else if (analysis.totalElements > 500 || analysis.depth > 7) {
             analysis.complexity = 'medium';
         }
 
         return analysis;
+    }
+
+    /**
+     * Calculate maximum depth of DOM tree
+     * @param {Object} element - Starting element
+     * @returns {number} Maximum depth
+     */
+    calculateMaxDepth(element) {
+        let maxDepth = 0;
+        
+        const traverse = (el, depth) => {
+            maxDepth = Math.max(maxDepth, depth);
+            el.children().each((i, child) => {
+                traverse(element.constructor(child), depth + 1);
+            });
+        };
+        
+        traverse(element, 0);
+        return maxDepth;
+    }
+
+    /**
+     * Generate CSS modifications for accessibility fixes
+     * @param {Array} violations - Accessibility violations
+     * @returns {Object} CSS modifications
+     */
+    generateCSSFixes(violations) {
+        const fixes = {
+            rules: [],
+            variables: {},
+            mediaQueries: {}
+        };
+
+        violations.forEach(violation => {
+            switch (violation.id) {
+                case 'color-contrast':
+                    fixes.rules.push({
+                        selector: violation.target[0],
+                        properties: {
+                            'color': '#000000',
+                            'background-color': '#ffffff'
+                        },
+                        comment: 'Improved color contrast for accessibility'
+                    });
+                    break;
+                    
+                case 'focus-order-semantics':
+                    fixes.rules.push({
+                        selector: `${violation.target[0]}:focus`,
+                        properties: {
+                            'outline': '2px solid #0066cc',
+                            'outline-offset': '2px'
+                        },
+                        comment: 'Enhanced focus indicator'
+                    });
+                    break;
+            }
+        });
+
+        return fixes;
     }
 }
 
