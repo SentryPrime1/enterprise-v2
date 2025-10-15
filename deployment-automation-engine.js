@@ -27,27 +27,21 @@ class DeploymentAutomationEngine {
             // Perform platform-specific deployment
             const result = await this.performPlatformDeployment(patchId, deploymentConfig);
             
-            // Record deployment
-            const deploymentRecord = {
-                id: deploymentId,
-                patchId: patchId,
-                platform: deploymentConfig.platform,
-                method: deploymentConfig.method,
-                backupId: backupId,
+            // Track deployment
+            this.activeDeployments.set(deploymentId, {
+                patchId,
+                deploymentConfig,
+                backupId,
                 status: 'completed',
-                startTime: new Date().toISOString(),
-                endTime: new Date().toISOString(),
-                appliedFixes: result.appliedFixes || 0
-            };
+                startedAt: new Date().toISOString(),
+                completedAt: new Date().toISOString()
+            });
 
-            await this.saveDeploymentRecord(deploymentRecord);
-            
             return {
-                success: true,
-                deploymentId: deploymentId,
-                backupId: backupId,
-                appliedFixes: result.appliedFixes,
-                message: 'Deployment completed successfully'
+                deploymentId,
+                status: 'completed',
+                backupId,
+                result
             };
 
         } catch (error) {
@@ -67,62 +61,48 @@ class DeploymentAutomationEngine {
             errors.push('Deployment method is required');
         }
         
-        if (!this.supportedPlatforms.includes(config.platform)) {
-            errors.push(`Unsupported platform: ${config.platform}`);
+        if (config.method === 'ftp' && (!config.host || !config.username)) {
+            errors.push('FTP deployment requires host and username');
         }
         
-        if (!this.deploymentMethods.includes(config.method)) {
-            errors.push(`Unsupported method: ${config.method}`);
+        if (config.method === 'ssh' && (!config.host || !config.username)) {
+            errors.push('SSH deployment requires host and username');
         }
-
-        // Platform-specific validation
-        if (config.platform === 'wordpress' && config.method === 'api') {
-            if (!config.credentials?.url || !config.credentials?.username || !config.credentials?.password) {
-                errors.push('WordPress API requires URL, username, and application password');
-            }
-        }
-
-        if (config.platform === 'shopify' && config.method === 'api') {
-            if (!config.credentials?.shop || !config.credentials?.accessToken) {
-                errors.push('Shopify API requires shop domain and access token');
-            }
-        }
-
-        if (['ftp', 'ssh'].includes(config.method)) {
-            if (!config.credentials?.host || !config.credentials?.username || !config.credentials?.password) {
-                errors.push(`${config.method.toUpperCase()} requires host, username, and password`);
-            }
+        
+        if (config.method === 'api' && !config.apiKey) {
+            errors.push('API deployment requires API key');
         }
 
         return {
             valid: errors.length === 0,
-            errors: errors
+            errors
         };
     }
 
     async createBackup(deploymentConfig) {
         try {
             const backupId = `backup_${Date.now()}`;
-            const backupDir = `./deployment-backups/${backupId}`;
+            console.log(`💾 Creating backup: ${backupId}`);
             
-            await fs.mkdir(backupDir, { recursive: true });
-            
-            // Mock backup creation - in real implementation would backup actual files
+            // Simulate backup creation
             const backupInfo = {
                 id: backupId,
                 platform: deploymentConfig.platform,
                 createdAt: new Date().toISOString(),
                 files: [
-                    'style.css',
-                    'functions.php',
-                    'theme.liquid',
-                    'index.html'
+                    'index.html',
+                    'styles.css',
+                    'script.js',
+                    'config.php'
                 ],
-                size: '2.5MB'
+                size: '2.4 MB'
             };
 
+            // Save backup info
+            const backupDir = './backups';
+            await fs.mkdir(backupDir, { recursive: true });
             await fs.writeFile(
-                path.join(backupDir, 'backup-info.json'),
+                path.join(backupDir, `${backupId}.json`),
                 JSON.stringify(backupInfo, null, 2)
             );
 
@@ -151,103 +131,117 @@ class DeploymentAutomationEngine {
     async deployToWordPress(patchId, config) {
         console.log('🔧 Deploying to WordPress...');
         
-        // Mock WordPress deployment
-        if (config.method === 'api') {
-            // WordPress REST API deployment
-            return {
-                success: true,
-                appliedFixes: 3,
-                method: 'WordPress REST API',
-                files: ['functions.php', 'style.css']
-            };
-        } else if (config.method === 'ftp') {
-            // FTP deployment
-            return {
-                success: true,
-                appliedFixes: 3,
-                method: 'FTP',
-                files: ['wp-content/themes/active-theme/style.css']
-            };
-        }
+        // Simulate WordPress deployment
+        const result = {
+            method: config.method,
+            platform: 'wordpress',
+            filesDeployed: [
+                'wp-content/themes/active-theme/functions.php',
+                'wp-content/themes/active-theme/style.css'
+            ],
+            pluginsUpdated: ['accessibility-fixes'],
+            status: 'success'
+        };
+
+        // Simulate API calls or file operations
+        await this.simulateDeploymentDelay(2000);
+
+        return result;
     }
 
     async deployToShopify(patchId, config) {
         console.log('🛍️ Deploying to Shopify...');
         
-        // Mock Shopify deployment
-        if (config.method === 'api') {
-            // Shopify Admin API deployment
-            return {
-                success: true,
-                appliedFixes: 2,
-                method: 'Shopify Admin API',
-                files: ['theme.liquid', 'assets/theme.css']
-            };
-        }
+        // Simulate Shopify deployment
+        const result = {
+            method: config.method,
+            platform: 'shopify',
+            filesDeployed: [
+                'templates/index.liquid',
+                'assets/theme.css',
+                'assets/accessibility.js'
+            ],
+            themeUpdated: true,
+            status: 'success'
+        };
+
+        // Simulate API calls
+        await this.simulateDeploymentDelay(3000);
+
+        return result;
     }
 
     async deployToCustomSite(patchId, config) {
         console.log('🌐 Deploying to custom site...');
         
-        // Mock custom site deployment
-        return {
-            success: true,
-            appliedFixes: 4,
-            method: config.method.toUpperCase(),
-            files: ['index.html', 'styles.css', 'script.js']
+        // Simulate custom site deployment
+        const result = {
+            method: config.method,
+            platform: 'custom',
+            filesDeployed: [
+                'index.html',
+                'css/styles.css',
+                'js/accessibility-fixes.js'
+            ],
+            status: 'success'
         };
+
+        // Simulate file transfer
+        await this.simulateDeploymentDelay(1500);
+
+        return result;
     }
 
-    async saveDeploymentRecord(record) {
-        try {
-            const recordsDir = './deployment-records';
-            await fs.mkdir(recordsDir, { recursive: true });
-            
-            await fs.writeFile(
-                path.join(recordsDir, `${record.id}.json`),
-                JSON.stringify(record, null, 2)
-            );
-
-            console.log(`📝 Deployment record saved: ${record.id}`);
-        } catch (error) {
-            console.error('Error saving deployment record:', error);
-        }
+    async simulateDeploymentDelay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     async getDeploymentStatus(deploymentId) {
-        try {
-            const recordPath = `./deployment-records/${deploymentId}.json`;
-            const recordData = await fs.readFile(recordPath, 'utf8');
-            return JSON.parse(recordData);
-        } catch (error) {
-            return null;
+        const deployment = this.activeDeployments.get(deploymentId);
+        if (!deployment) {
+            throw new Error(`Deployment not found: ${deploymentId}`);
         }
+
+        return {
+            deploymentId,
+            status: deployment.status,
+            startedAt: deployment.startedAt,
+            completedAt: deployment.completedAt,
+            patchId: deployment.patchId
+        };
     }
 
-    async rollbackDeployment(deploymentId) {
-        try {
-            console.log(`🔄 Rolling back deployment: ${deploymentId}`);
-            
-            const deploymentRecord = await this.getDeploymentStatus(deploymentId);
-            if (!deploymentRecord) {
-                throw new Error('Deployment record not found');
-            }
-
-            // Mock rollback process
-            const rollbackResult = {
-                success: true,
-                deploymentId: deploymentId,
-                backupRestored: deploymentRecord.backupId,
-                rolledBackAt: new Date().toISOString()
-            };
-
-            console.log(`✅ Rollback completed for: ${deploymentId}`);
-            return rollbackResult;
-
-        } catch (error) {
-            console.error('Rollback error:', error);
-            throw error;
+    async listActiveDeployments() {
+        const deployments = [];
+        for (const [id, deployment] of this.activeDeployments) {
+            deployments.push({
+                deploymentId: id,
+                status: deployment.status,
+                platform: deployment.deploymentConfig.platform,
+                startedAt: deployment.startedAt
+            });
         }
+        return deployments;
+    }
+
+    async cancelDeployment(deploymentId) {
+        const deployment = this.activeDeployments.get(deploymentId);
+        if (!deployment) {
+            throw new Error(`Deployment not found: ${deploymentId}`);
+        }
+
+        if (deployment.status === 'completed') {
+            throw new Error('Cannot cancel completed deployment');
+        }
+
+        deployment.status = 'cancelled';
+        deployment.cancelledAt = new Date().toISOString();
+
+        return {
+            deploymentId,
+            status: 'cancelled',
+            message: 'Deployment cancelled successfully'
+        };
     }
 }
 
