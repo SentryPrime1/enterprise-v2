@@ -5776,36 +5776,53 @@ function decryptCredential(encryptedData) {
     }
 }
 
-// API: Get user's website connections
+// CORRECTED API ENDPOINT - Replace the existing GET /api/website-connections endpoint in your server.js
+
+// Get all website connections for a user
 app.get('/api/website-connections', async (req, res) => {
     try {
-        if (!db) {
-            return res.status(503).json({ error: 'Database not available' });
-        }
-
-        // For now, use a simple user ID (in production, get from JWT token)
-        const userId = 1; // TODO: Get from authentication
-
-        const query = `
-            SELECT 
-                id, website_url, connection_name, connection_type, host, port,
-                username, document_root, css_directory, platform_type, 
-                is_active, last_tested, last_test_status, created_at
-            FROM website_connections 
-            WHERE user_id = $1 AND is_active = true
-            ORDER BY created_at DESC
-        `;
+        console.log('Fetching website connections...');
         
-        const result = await db.query(query, [userId]);
+        // For now, we'll get all connections (later we can filter by user)
+        const query = 'SELECT * FROM website_connections ORDER BY created_at DESC';
+        console.log('Executing query:', query);
         
-        res.json({ 
-            connections: result.rows,
-            message: 'Website connections loaded successfully'
+        const result = await pool.query(query);
+        console.log('Query result:', result.rows.length, 'connections found');
+        
+        // Decrypt sensitive data before sending
+        const connections = result.rows.map(conn => ({
+            id: conn.id,
+            name: conn.name,
+            website_url: conn.website_url,
+            connection_type: conn.connection_type,
+            host: conn.host,
+            port: conn.port,
+            username: conn.username,
+            // Don't send encrypted password to frontend
+            document_root: conn.document_root,
+            css_directory: conn.css_directory,
+            is_active: conn.is_active,
+            last_tested: conn.last_tested,
+            last_test_status: conn.last_test_status,
+            platform_type: conn.platform_type,
+            created_at: conn.created_at,
+            updated_at: conn.updated_at
+        }));
+        
+        res.json({
+            success: true,
+            connections: connections,
+            count: connections.length
         });
         
     } catch (error) {
-        console.error('Error fetching connections:', error);
-        res.status(500).json({ error: 'Failed to fetch connections' });
+        console.error('Error fetching website connections:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to fetch connections',
+            details: error.message 
+        });
     }
 });
 
