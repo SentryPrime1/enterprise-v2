@@ -75,6 +75,14 @@ const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 
+// Serve static files from public directory
+app.use(express.static('public'));
+
+// Serve the enhanced dashboard
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
 // Database connection - PRESERVED FROM WORKING VERSION
 let db = null;
 
