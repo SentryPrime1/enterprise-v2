@@ -551,8 +551,7 @@ app.post('/api/detailed-report', (req, res) => {
     const { violations, websiteContext, platformInfo } = req.body;
     
     if (!violations || violations.length === 0) {
-        return res.status(400).send('<html><body><h1>No violations data provided</h1>    <script src="/phase2-status.js"></script>
-</body></html>');
+        return res.status(400).send('<html><body><h1>No violations data provided</h1></body></html>');
     }
     
     const reportHtml = `
@@ -5781,50 +5780,6 @@ app.get('/api/engine-status', (req, res) => {
     }
 });
 // Start server
-
-// Phase 2 status script
-app.get('/phase2-status.js', (req, res) => {
-    res.setHeader('Content-Type', 'application/javascript');
-    res.send(`
-(function() {
-    document.addEventListener('DOMContentLoaded', function() {
-        if (document.getElementById('phase2-status')) return;
-        
-        const statusDiv = document.createElement('div');
-        statusDiv.id = 'phase2-status';
-        statusDiv.style.cssText = 'position: fixed; top: 10px; right: 10px; background: linear-gradient(135deg, #4CAF50, #45a049); color: white; padding: 8px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 1000; font-family: -apple-system, BlinkMacSystemFont, sans-serif; cursor: pointer; transition: all 0.3s ease; opacity: 0.9;';
-        statusDiv.innerHTML = '⚡ Phase 2: Loading...';
-        
-        statusDiv.addEventListener('mouseenter', function() {
-            this.style.opacity = '1';
-            this.style.transform = 'scale(1.05)';
-        });
-        
-        statusDiv.addEventListener('mouseleave', function() {
-            this.style.opacity = '0.9';
-            this.style.transform = 'scale(1)';
-        });
-        
-        document.body.appendChild(statusDiv);
-        
-        fetch('/api/engine-status')
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    statusDiv.innerHTML = '⚡ Phase 2: ' + data.phase2Status;
-                    statusDiv.title = 'Enhanced accessibility features active';
-                } else {
-                    statusDiv.innerHTML = '⚡ Phase 2: Active';
-                }
-            })
-            .catch(error => {
-                statusDiv.innerHTML = '⚡ Phase 2: Active';
-            });
-    });
-})();
-    `);
-});
-
 app.listen(PORT, () => {
     console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
     console.log('📊 Health check: http://localhost:' + PORT + '/health');
