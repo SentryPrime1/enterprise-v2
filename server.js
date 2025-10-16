@@ -5782,6 +5782,68 @@ app.get('/api/engine-status', (req, res) => {
         });
     }
 });
+
+// DEPLOYMENT INTEGRATION PATCH - MINIMAL ADDITION
+// Platform connection status endpoint
+app.get('/api/platforms/status', async (req, res) => {
+    try {
+        // Simple platform status check
+        // In production, this would check a database for stored credentials
+        const platformStatus = {
+            wordpress: { connected: false, url: null },
+            shopify: { connected: false, url: null },
+            custom: { connected: false, url: null }
+        };
+        
+        res.json({
+            success: true,
+            platforms: platformStatus,
+            hasAnyConnection: false // For now, always false until user connects
+        });
+        
+    } catch (error) {
+        console.error('Platform status check error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to check platform status' 
+        });
+    }
+});
+
+// Deploy fix endpoint - minimal implementation
+app.post('/api/deploy-fix', async (req, res) => {
+    try {
+        const { violationId, platform, url } = req.body;
+        
+        if (!violationId || !platform) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Violation ID and platform are required' 
+            });
+        }
+        
+        console.log(`🚀 Deployment requested for violation: ${violationId} on platform: ${platform}`);
+        
+        // For now, simulate successful deployment
+        // In production, this would call the actual deployment engine
+        res.json({
+            success: true,
+            deploymentId: `demo-deploy-${Date.now()}`,
+            status: 'completed',
+            message: 'Fix deployed successfully (demo mode)',
+            appliedAt: new Date().toISOString(),
+            note: 'Demo deployment - in production this would modify your live website'
+        });
+        
+    } catch (error) {
+        console.error('Deploy fix error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Deployment failed' 
+        });
+    }
+});
+
 // Start server
 app.listen(PORT, () => {
     console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
