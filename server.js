@@ -6048,16 +6048,18 @@ app.get('/api/dashboard/stats', async (req, res) => {
     }
 });
 
-// API: Start new scan (enhanced)
+// CRITICAL FIX: Replace the broken /api/scans endpoint with this working version
+// This connects the new UI to your existing working scan logic
+
+// REMOVE the broken /api/scans endpoint and replace with this:
+
+// API: Start new scan (FIXED - uses your existing scan logic)
 app.post('/api/scans', async (req, res) => {
-    // This should redirect to your existing /api/scan endpoint
-    const { url, scanType = 'single' } = req.body;
+    const startTime = Date.now();
+    let browser = null;
     
-    // Forward to existing scan endpoint
     try {
-        // Use your existing scan logic here
-        const startTime = Date.now();
-        let browser = null;
+        const { url, scanType = 'single' } = req.body;
         
         console.log(`🔍 Starting accessibility scan for: ${url} (type: ${scanType})`);
         
@@ -6072,24 +6074,208 @@ app.post('/api/scans', async (req, res) => {
             return res.status(400).json({ error: 'Invalid URL format' });
         }
         
-        // For now, return a success response and let the existing scan endpoint handle it
+        browser = await puppeteer.launch({
+            headless: 'new',
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ],
+            timeout: 60000
+        });
+        
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1200, height: 800 });
+        
+        console.log(`🌐 Navigating to: ${url}`);
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        
+        // Wait for page to stabilize
+        console.log('⏳ Waiting for page to stabilize...');
+        await page.waitForTimeout(3000);
+        
+        // Inject axe-core
+        console.log('🔧 Injecting axe-core...');
+        await page.addScriptTag({ content: axeCore.source });
+        
+        // PHASE 2A: Enhanced Platform Detection
+        console.log('🔍 Detecting website context...');
+        const websiteContext = await page.evaluate(() => {
+            const context = {
+                websiteType: 'unknown',
+                industry: 'unknown',
+                businessModel: 'unknown',
+                targetAudience: 'unknown'
+            };
+            
+            // Detect platform
+            if (window.Shopify) {
+                context.websiteType = 'e-commerce';
+                context.platform = 'shopify';
+            } else if (document.querySelector('meta[name="generator"][content*="WordPress"]')) {
+                context.platform = 'wordpress';
+            } else if (document.querySelector('script[src*="shopify"]')) {
+                context.websiteType = 'e-commerce';
+                context.platform = 'shopify';
+            }
+            
+            // Detect business type from content
+            const bodyText = document.body.textContent.toLowerCase();
+            if (bodyText.includes('shop') || bodyText.includes('buy') || bodyText.includes('cart')) {
+                context.websiteType = 'e-commerce';
+                context.businessModel = 'retail';
+            } else if (bodyText.includes('service') || bodyText.includes('consultation')) {
+                context.businessModel = 'service';
+            }
+            
+            // Detect industry
+            if (bodyText.includes('fashion') || bodyText.includes('clothing')) {
+                context.industry = 'retail-fashion';
+            } else if (bodyText.includes('tech') || bodyText.includes('software')) {
+                context.industry = 'technology';
+            } else if (bodyText.includes('health') || bodyText.includes('medical')) {
+                context.industry = 'healthcare';
+            }
+            
+            // Detect target audience
+            if (bodyText.includes('family') || bodyText.includes('families')) {
+                context.targetAudience = 'families';
+            } else if (bodyText.includes('business') || bodyText.includes('enterprise')) {
+                context.targetAudience = 'business';
+            }
+            
+            return context;
+        });
+        
+        console.log('📊 Website context detected:', JSON.stringify(websiteContext));
+        
+        // Run axe accessibility scan
+        console.log('🔍 Running axe accessibility scan...');
+        const results = await page.evaluate(() => {
+            return new Promise((resolve) => {
+                axe.run((err, results) => {
+                    if (err) {
+                        resolve({ violations: [], passes: [], incomplete: [] });
+                    } else {
+                        resolve(results);
+                    }
+                });
+            });
+        });
+        
+        console.log(`✅ Scan completed. Found ${results.violations.length} violations.`);
+        
+        // PHASE 2A: Business Impact Analysis
+        console.log('📈 Adding business impact analysis to violations...');
+        const enhancedViolations = results.violations.map(violation => {
+            const businessImpact = calculateBusinessImpact(violation, websiteContext);
+            return {
+                ...violation,
+                businessImpact: businessImpact
+            };
+        });
+        
+        const scanTimeMs = Date.now() - startTime;
+        
+        // Save scan to database
+        const scanId = await saveScan(
+            1, // userId - TODO: get from authentication
+            1, // organizationId - TODO: get from authentication
+            url,
+            scanType,
+            enhancedViolations.length,
+            scanTimeMs,
+            1, // pagesScanned
+            enhancedViolations
+        );
+        
+        await browser.close();
+        browser = null;
+        
+        console.log(`✅ Single page scan completed in ${scanTimeMs}ms. Found ${enhancedViolations.length} violations.`);
+        
         res.json({
             success: true,
-            message: 'Scan started successfully',
-            scanId: Math.floor(Math.random() * 1000),
+            scanId: scanId,
             url: url,
             scanType: scanType,
-            status: 'started'
+            totalViolations: enhancedViolations.length,
+            scanTimeMs: scanTimeMs,
+            violations: enhancedViolations,
+            websiteContext: websiteContext,
+            summary: {
+                critical: enhancedViolations.filter(v => v.impact === 'critical').length,
+                serious: enhancedViolations.filter(v => v.impact === 'serious').length,
+                moderate: enhancedViolations.filter(v => v.impact === 'moderate').length,
+                minor: enhancedViolations.filter(v => v.impact === 'minor').length
+            }
         });
         
     } catch (error) {
         console.error('❌ Scan error:', error);
+        
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (closeError) {
+                console.error('❌ Error closing browser:', closeError);
+            }
+        }
+        
         res.status(500).json({ 
             success: false,
-            error: 'Scan failed: ' + error.message
+            error: 'Scan failed: ' + error.message,
+            scanTimeMs: Date.now() - startTime
         });
     }
 });
+
+function calculateBusinessImpact(violation, context) {
+    let impact = {
+        level: 'low',
+        description: 'Minor accessibility issue',
+        businessRisk: 'Low risk of user experience degradation',
+        priority: 3
+    };
+    
+    // High impact violations
+    if (['color-contrast', 'link-name', 'image-alt', 'form-field-multiple-labels'].includes(violation.id)) {
+        impact.level = 'critical';
+        impact.priority = 1;
+        
+        if (context.websiteType === 'e-commerce') {
+            impact.description = 'Critical accessibility issue affecting purchase flow';
+            impact.businessRisk = 'High risk of lost sales and legal compliance issues';
+        } else {
+            impact.description = 'Critical accessibility issue affecting user engagement';
+            impact.businessRisk = 'High risk of user abandonment and legal compliance issues';
+        }
+    }
+    
+    // Medium impact violations
+    else if (['heading-order', 'landmark-one-main', 'region'].includes(violation.id)) {
+        impact.level = 'medium';
+        impact.priority = 2;
+        impact.description = 'Moderate accessibility issue affecting navigation';
+        impact.businessRisk = 'Medium risk of user confusion and reduced engagement';
+    }
+    
+    // Adjust based on target audience
+    if (context.targetAudience === 'families' && ['color-contrast', 'image-alt'].includes(violation.id)) {
+        impact.level = 'critical';
+        impact.priority = 1;
+        impact.businessRisk += ' - Particularly important for family-oriented content';
+    }
+    
+    return impact;
+}
+
 
 app.listen(PORT, () => {
     console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
