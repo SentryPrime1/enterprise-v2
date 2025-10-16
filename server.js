@@ -3,6 +3,7 @@ const puppeteer = require('puppeteer');
 const axeCore = require('axe-core');
 const { Pool } = require('pg');
 const OpenAI = require('openai');
+const path = require('path');
 
 // ENHANCEMENT: Import deployment engines (optional - with feature flag)
 const ENABLE_DEPLOYMENT_FEATURES = process.env.ENABLE_DEPLOYMENT_FEATURES || 'true';
