@@ -3785,10 +3785,11 @@ app.get('/', (req, res) => {
                                     <p style="color: #856404; margin-bottom: 15px;">Fix generated for <strong>\${currentViolation.id}</strong>. Connect your platform for automatic deployment!</p>
                                     
                                     <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                        <button onclick="window.open('#integrations', '_self')" 
+                                                                                <button onclick="window.location.href = window.location.origin + '/#integrations'" 
                                                 style="background: #ffc107; color: #212529; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
                                             🔗 Connect Platform
                                         </button>
+
                                         <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'css')" 
                                                 style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                                             📄 Download CSS Fix
