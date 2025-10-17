@@ -1298,7 +1298,7 @@ CURRENT HTML: ${elementDetails?.html || 'Not available'}`;
     return defaultSuggestion;
 }
 
-// PHASE 2A ENHANCEMENT: Auto-Fix Code Generation Function
+// PHASE 2A ENHANCEMENT: Smart Auto-Fix Code Generation Function with Real Element Targeting
 function generateFixCode(violation, platformInfo) {
     const { id, impact, description, help, nodes } = violation;
     const platform = platformInfo?.type || 'custom';
@@ -1308,131 +1308,190 @@ function generateFixCode(violation, platformInfo) {
         html: '',
         javascript: '',
         instructions: [],
-        filename: `fix-${id}-${Date.now()}`
+        filename: `fix-${id}-${Date.now()}`,
+        targetedSelectors: []
     };
+
+    // Extract actual selectors from the enhanced scan data
+    const actualSelectors = [];
+    const elementData = [];
+    
+    if (nodes && nodes.length > 0) {
+        nodes.forEach(node => {
+            if (node.enhancedData) {
+                actualSelectors.push(node.enhancedData.selector);
+                elementData.push(node.enhancedData);
+            } else if (node.target && node.target[0]) {
+                // Fallback to basic target selector
+                actualSelectors.push(node.target[0]);
+            }
+        });
+    }
+
+    // Generate smart CSS selectors
+    const smartSelectors = generateSmartSelectors(actualSelectors, elementData);
+    fixCode.targetedSelectors = smartSelectors;
 
     switch (id) {
         case 'color-contrast':
+            // Use actual element selectors instead of generic classes
+            const contrastSelectors = smartSelectors.length > 0 ? smartSelectors.join(', ') : '.low-contrast-element';
+            
             if (platform === 'shopify') {
-                fixCode.css = `/* Fix for color contrast issue in Shopify theme */
-.elementor-button, .btn, .button, a[href] {
+                fixCode.css = `/* Fix for color contrast issue - Shopify theme */
+/* Targeting actual problematic elements found in scan */
+${contrastSelectors} {
     color: #000000 !important;
     background-color: #ffffff !important;
     border: 2px solid #000000 !important;
 }
 
-/* Ensure sufficient contrast for text elements */
-.text-content, p, span, div {
-    color: #000000 !important;
-    background-color: transparent !important;
+/* Ensure sufficient contrast for nested text elements */
+${contrastSelectors} * {
+    color: inherit !important;
 }`;
                 fixCode.instructions = [
                     'Log in to your Shopify admin dashboard',
                     'Navigate to Online Store > Themes',
                     'Click "Actions" > "Edit code" on your active theme',
                     'Find the assets/theme.css file or create a new CSS file',
-                    'Add the provided CSS code to fix color contrast issues',
+                    `Add the provided CSS code targeting: ${contrastSelectors}`,
                     'Save the changes and preview your store'
                 ];
             } else if (platform === 'wordpress') {
                 fixCode.css = `/* WordPress color contrast fix */
-.wp-block-button__link, .button, .btn {
+/* Targeting actual problematic elements found in scan */
+${contrastSelectors} {
     color: #000000 !important;
     background-color: #ffffff !important;
     border: 2px solid #000000 !important;
+}
+
+/* Ensure sufficient contrast for nested elements */
+${contrastSelectors} * {
+    color: inherit !important;
 }`;
                 fixCode.instructions = [
                     'Log in to your WordPress admin dashboard',
                     'Go to Appearance > Customize',
                     'Click on "Additional CSS"',
-                    'Paste the provided CSS code',
+                    `Paste the provided CSS code targeting: ${contrastSelectors}`,
                     'Click "Publish" to save changes'
                 ];
             } else {
                 fixCode.css = `/* Universal color contrast fix */
-.low-contrast-element {
+/* Targeting actual problematic elements found in scan */
+${contrastSelectors} {
     color: #000000 !important;
     background-color: #ffffff !important;
     border: 2px solid #000000 !important;
+}
+
+/* Ensure sufficient contrast for nested elements */
+${contrastSelectors} * {
+    color: inherit !important;
 }`;
                 fixCode.instructions = [
-                    'Add the provided CSS to your main stylesheet',
-                    'Apply the .low-contrast-element class to problematic elements',
+                    `Add the provided CSS to your main stylesheet`,
+                    `The CSS targets these specific elements: ${contrastSelectors}`,
                     'Test the contrast ratio using browser developer tools'
                 ];
             }
             break;
 
         case 'link-name':
-            fixCode.html = `<!-- Before: Problematic link -->
+            // Generate targeted HTML fixes for actual link elements
+            const linkExamples = elementData.map((data, index) => {
+                const currentText = data.textContent || 'Link text';
+                const href = data.attributes?.href || '#';
+                return `<!-- Problematic link ${index + 1} -->
+<a href="${href}">${currentText}</a>
+
+<!-- Fixed version with descriptive text -->
+<a href="${href}" aria-label="Learn more about ${currentText.toLowerCase()}">${currentText}</a>`;
+            }).join('\n\n');
+            
+            fixCode.html = linkExamples || `<!-- Generic link fix example -->
 <a href="/learn-more">Learn More</a>
-
-<!-- After: Accessible link with descriptive text -->
-<a href="/learn-more" aria-label="Learn more about our accessibility features">Learn More</a>
-
-<!-- Alternative: Add descriptive text -->
-<a href="/learn-more">Learn More About Our Accessibility Features</a>`;
+<a href="/learn-more" aria-label="Learn more about our accessibility features">Learn More</a>`;
             
             fixCode.instructions = [
-                'Locate the problematic link in your HTML',
-                'Add descriptive text or aria-label attribute',
+                `Update ${actualSelectors.length} problematic link(s) found in scan`,
+                'Add descriptive text or aria-label attributes to each link',
                 'Ensure the link purpose is clear from the text alone',
                 'Test with screen readers to verify accessibility'
             ];
             break;
 
         case 'image-alt':
-            fixCode.html = `<!-- Before: Image without alt text -->
-<img src="product-image.jpg">
+            // Generate targeted HTML fixes for actual image elements
+            const imageExamples = elementData.map((data, index) => {
+                const src = data.attributes?.src || 'image.jpg';
+                const currentAlt = data.attributes?.alt || '';
+                return `<!-- Problematic image ${index + 1} -->
+<img src="${src}" alt="${currentAlt}">
 
-<!-- After: Image with descriptive alt text -->
-<img src="product-image.jpg" alt="Blue cotton t-shirt with round neck, size medium">
-
-<!-- For decorative images -->
-<img src="decorative-border.jpg" alt="" role="presentation">`;
+<!-- Fixed version with descriptive alt text -->
+<img src="${src}" alt="[Add descriptive text based on image content]">`;
+            }).join('\n\n');
+            
+            fixCode.html = imageExamples || `<!-- Generic image fix example -->
+<img src="image.jpg" alt="[Add descriptive alt text]">`;
             
             fixCode.instructions = [
+                `Update ${actualSelectors.length} image(s) without proper alt text`,
                 'Add meaningful alt text that describes the image content',
                 'For decorative images, use alt="" and role="presentation"',
-                'Keep alt text concise but descriptive',
-                'Avoid phrases like "image of" or "picture of"'
-            ];
-            break;
-
-        case 'heading-order':
-            fixCode.html = `<!-- Before: Incorrect heading hierarchy -->
-<h1>Main Title</h1>
-<h3>Subsection</h3>
-<h2>Section Title</h2>
-
-<!-- After: Correct heading hierarchy -->
-<h1>Main Title</h1>
-<h2>Section Title</h2>
-<h3>Subsection</h3>`;
-            
-            fixCode.instructions = [
-                'Review your heading structure (h1, h2, h3, etc.)',
-                'Ensure headings follow a logical hierarchy',
-                'Use only one h1 per page',
-                'Don\'t skip heading levels (h1 to h3 without h2)'
+                'Keep alt text concise but descriptive'
             ];
             break;
 
         default:
-            fixCode.css = `/* Generic accessibility fix for ${id} */
-.accessibility-fix {
+            const defaultSelectors = smartSelectors.length > 0 ? smartSelectors.join(', ') : '.accessibility-fix';
+            fixCode.css = `/* Accessibility fix for ${id} */
+/* Targeting actual problematic elements found in scan */
+${defaultSelectors} {
     /* Add appropriate styles based on the specific issue */
+    /* Modify these styles according to the violation requirements */
 }`;
             fixCode.instructions = [
-                'Review the specific accessibility violation',
+                `Fix ${actualSelectors.length} element(s) with ${id} violations`,
+                'Review the specific accessibility violation details',
                 'Apply the recommended fixes from WCAG guidelines',
-                'Test the changes with accessibility tools',
-                'Verify the fix doesn\'t break existing functionality'
+                'Test the changes with accessibility tools'
             ];
     }
 
     return fixCode;
 }
+
+// Helper function to generate smart CSS selectors from scan data
+function generateSmartSelectors(selectors, elementData) {
+    if (!selectors || selectors.length === 0) return [];
+    
+    // Clean and optimize selectors
+    const smartSelectors = selectors.map(selector => {
+        // Remove any pseudo-selectors that might cause issues
+        let cleanSelector = selector.replace(/:hover|:focus|:active|:visited/g, '');
+        
+        // If selector is too complex, try to simplify while maintaining specificity
+        if (cleanSelector.length > 100) {
+            // Try to use class or ID if available
+            const parts = cleanSelector.split(' ');
+            const lastPart = parts[parts.length - 1];
+            if (lastPart.includes('.') || lastPart.includes('#')) {
+                cleanSelector = lastPart;
+            }
+        }
+        
+        return cleanSelector;
+    });
+    
+    // Remove duplicates and return
+    return [...new Set(smartSelectors)].filter(selector => selector && selector.trim());
+}
+
+
 
 // PHASE 2A ENHANCEMENT: Generate downloadable fix files
 function createFixFiles(violations, platformInfo) {
