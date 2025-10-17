@@ -4175,7 +4175,147 @@ app.get('/', (req, res) => {
                 link.click();
                 document.body.removeChild(link);
             },
+                        // PHASE 2 ENHANCEMENT: Deploy fix function with tier checking
+            deployFix: async function(violationId, platform) {
+                try {
+                    // Step 1: Check user tier first
+                    const tierResponse = await fetch('/api/user/tier');
+                    const tierInfo = await tierResponse.json();
+                    
+                    if (!tierInfo.success) {
+                        throw new Error('Failed to check account tier');
+                    }
+                    
+                    // Step 2: For premium users, attempt deployment
+                    if (tierInfo.isPremium && tierInfo.features.auto_deployment) {
+                        const response = await fetch('/api/deploy-fix', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                violationId,
+                                platform,
+                                url: window.location.href
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            // Show success message
+                            const modalBody = document.getElementById('guided-modal-body');
+                            modalBody.innerHTML = \`
+                                <div style="padding: 20px; text-align: center;">
+                                    <div style="font-size: 48px; margin-bottom: 15px;">🎉</div>
+                                    <h3 style="color: #28a745; margin-bottom: 15px;">Deployment Successful!</h3>
+                                    <p style="color: #666; margin-bottom: 20px;">
+                                        \${result.message}
+                                    </p>
+                                    
+                                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: left;">
+                                        <strong>Deployment Details:</strong>  
+
+                                        <small>
+                                            • Platform: \${result.platform}  
+
+                                            • Website: \${result.websiteName}  
+
+                                            • Deployed at: \${new Date(result.appliedAt).toLocaleString()}  
+
+                                            • Deployment ID: \${result.deploymentId}
+                                        </small>
+                                    </div>
+                                    
+                                    <button onclick="GuidedFixing.close()" 
+                                            style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px;">
+                                        Continue Scanning
+                                    </button>
+                                </div>
+                            \`;
+                        } else if (result.upgradeRequired) {
+                            // Show upgrade required message
+                            this.showUpgradePrompt();
+                        } else if (result.requiresConnection) {
+                            // Show connection required message
+                            this.showConnectionPrompt(platform);
+                        } else {
+                            throw new Error(result.error || 'Deployment failed');
+                        }
+                    } else {
+                        // Basic user - show upgrade prompt
+                        this.showUpgradePrompt();
+                    }
+                    
+                } catch (error) {
+                    console.error('Deploy error:', error);
+                    alert('Deployment failed: ' + error.message);
+                }
+            },
             
+            // PHASE 2 ENHANCEMENT: Show upgrade prompt for basic users
+            showUpgradePrompt: function() {
+                const modalBody = document.getElementById('guided-modal-body');
+                modalBody.innerHTML = \`
+                    <div style="padding: 20px; text-align: center;">
+                        <h3 style="color: #333; margin-bottom: 15px;">💎 Upgrade to Premium</h3>
+                        <p style="color: #666; margin-bottom: 20px;">
+                            Unlock one-click deployment and advanced accessibility features
+                        </p>
+                        
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+                            <h4 style="margin: 0 0 10px 0;">Premium Features</h4>
+                            <ul style="text-align: left; margin: 0; padding-left: 20px;">
+                                <li>🚀 One-click deployment to live websites</li>
+                                <li>🛡️ Automatic backup and rollback protection</li>
+                                <li>🔄 Unlimited scans and fixes</li>
+                                <li>📞 Priority support</li>
+                                <li>📊 Advanced reporting and analytics</li>
+                            </ul>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px; justify-content: center;">
+                            <button onclick="window.open('/upgrade', '_blank')" 
+                                    style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                                Upgrade Now - $99/month
+                            </button>
+                            <button onclick="GuidedFixing.close()" 
+                                    style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+                                Maybe Later
+                            </button>
+                        </div>
+                    </div>
+                \`;
+            },
+            
+            // PHASE 2 ENHANCEMENT: Show connection prompt for users without connected platforms
+            showConnectionPrompt: function(platform) {
+                const modalBody = document.getElementById('guided-modal-body');
+                modalBody.innerHTML = \`
+                    <div style="padding: 20px; text-align: center;">
+                        <h3 style="color: #333; margin-bottom: 15px;">🔗 Connect Your Platform</h3>
+                        <p style="color: #666; margin-bottom: 20px;">
+                            Connect your \${platform} site to enable one-click deployment of accessibility fixes.
+                        </p>
+                        
+                        <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                            <p style="color: #856404; margin: 0;">
+                                <strong>Note:</strong> You need to connect your \${platform} site before you can deploy fixes automatically.
+                            </p>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px; justify-content: center;">
+                            <button onclick="GuidedFixing.close(); setTimeout(() => window.location.href = window.location.origin + '/#integrations', 100)" 
+                                    style="background: #ffc107; color: #212529; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                                🔗 Connect \${platform.charAt(0).toUpperCase() + platform.slice(1)}
+                            </button>
+                            <button onclick="GuidedFixing.close()" 
+                                    style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                \`;
+            },
+
             // PHASE 2D: Visual Preview Methods
             showVisualPreview: async function() {
                 const currentViolation = this.currentViolations[this.currentViolationIndex];
