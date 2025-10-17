@@ -5831,6 +5831,42 @@ app.get('/api/engine-status', (req, res) => {
         });
     }
 });
+// Platform connection status endpoint
+app.get('/api/platforms/status', async (req, res) => {
+    try {
+        const platformStatus = {
+            wordpress: { connected: false, url: null },
+            shopify: { connected: false, url: null },
+            custom: { connected: false, url: null }
+        };
+        
+        res.json({
+            success: true,
+            platforms: platformStatus,
+            hasAnyConnection: false
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Failed to check platform status' });
+    }
+});
+
+// Deploy fix endpoint
+app.post('/api/deploy-fix', async (req, res) => {
+    try {
+        const { violationId, platform, url } = req.body;
+        res.json({
+            success: true,
+            deploymentId: `demo-deploy-${Date.now()}`,
+            status: 'completed',
+            message: 'Fix deployed successfully (demo mode)',
+            appliedAt: new Date().toISOString(),
+            note: 'Demo deployment - in production this would modify your live website'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Start server
 app.listen(PORT, () => {
     console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
