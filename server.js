@@ -1484,31 +1484,180 @@ ${defaultSelectors} {
     return fixCode;
 }
 
-// Helper function to generate smart CSS selectors from scan data
+// ENTERPRISE ENHANCEMENT: Multi-strategy selector generation for robust targeting
 function generateSmartSelectors(selectors, elementData) {
     if (!selectors || selectors.length === 0) return [];
     
-    // Clean and optimize selectors
-    const smartSelectors = selectors.map(selector => {
-        // Remove any pseudo-selectors that might cause issues
-        let cleanSelector = selector.replace(/:hover|:focus|:active|:visited/g, '');
-        
-        // If selector is too complex, try to simplify while maintaining specificity
-        if (cleanSelector.length > 100) {
-            // Try to use class or ID if available
-            const parts = cleanSelector.split(' ');
-            const lastPart = parts[parts.length - 1];
-            if (lastPart.includes('.') || lastPart.includes('#')) {
-                cleanSelector = lastPart;
-            }
-        }
-        
-        return cleanSelector;
+    const allStrategies = [];
+    
+    // Process each element to generate multiple targeting strategies
+    selectors.forEach((selector, index) => {
+        const data = elementData[index];
+        const strategies = generateSelectorStrategies(selector, data);
+        allStrategies.push(...strategies);
     });
     
-    // Remove duplicates and return
-    return [...new Set(smartSelectors)].filter(selector => selector && selector.trim());
+    // Score and rank strategies by reliability
+    const scoredStrategies = allStrategies.map(strategy => ({
+        selector: strategy,
+        score: calculateSelectorReliability(strategy),
+        type: getSelectorType(strategy)
+    }));
+    
+    // Sort by reliability score (higher is better)
+    scoredStrategies.sort((a, b) => b.score - a.score);
+    
+    // Return top strategies, ensuring diversity
+    const selectedStrategies = selectDiverseStrategies(scoredStrategies);
+    
+    return selectedStrategies.map(s => s.selector);
 }
+
+// Generate multiple targeting strategies for a single element
+function generateSelectorStrategies(originalSelector, elementData) {
+    const strategies = [];
+    
+    // Strategy 1: Original selector (cleaned)
+    let cleanSelector = originalSelector.replace(/:hover|:focus|:active|:visited/g, '');
+    if (cleanSelector.length > 100) {
+        const parts = cleanSelector.split(' ');
+        const lastPart = parts[parts.length - 1];
+        if (lastPart.includes('.') || lastPart.includes('#')) {
+            cleanSelector = lastPart;
+        }
+    }
+    strategies.push(cleanSelector);
+    
+    // Strategy 2: Class-based targeting (avoid dynamic IDs)
+    if (elementData && elementData.attributes) {
+        const classes = elementData.attributes.class;
+        if (classes) {
+            const stableClasses = classes.split(' ').filter(cls => 
+                !cls.match(/\d{4,}/) && // Avoid classes with 4+ digits
+                !cls.includes('temp') &&
+                !cls.includes('generated') &&
+                cls.length > 2
+            );
+            if (stableClasses.length > 0) {
+                strategies.push('.' + stableClasses.slice(0, 2).join('.'));
+            }
+        }
+    }
+    
+    // Strategy 3: Attribute-based targeting
+    if (elementData && elementData.attributes) {
+        const attrs = elementData.attributes;
+        if (attrs.role) {
+            strategies.push(`[role="${attrs.role}"]`);
+        }
+        if (attrs['data-testid']) {
+            strategies.push(`[data-testid="${attrs['data-testid']}"]`);
+        }
+        if (attrs.type && attrs.type !== 'text') {
+            strategies.push(`[type="${attrs.type}"]`);
+        }
+    }
+    
+    // Strategy 4: Content-based targeting (for text elements)
+    if (elementData && elementData.textContent) {
+        const text = elementData.textContent.trim();
+        if (text.length > 0 && text.length < 50) {
+            strategies.push(`[aria-label*="${text}"]`);
+            if (text.includes('button') || text.includes('link')) {
+                strategies.push(`:contains("${text}")`);
+            }
+        }
+    }
+    
+    // Strategy 5: Structural targeting (parent-child relationships)
+    if (originalSelector.includes('>')) {
+        const parts = originalSelector.split('>');
+        if (parts.length >= 2) {
+            const parentPart = parts[parts.length - 2].trim();
+            const childPart = parts[parts.length - 1].trim();
+            
+            // Create simplified structural selector
+            const parentClass = parentPart.split('.')[1] || parentPart.split(' ').pop();
+            const childClass = childPart.split('.')[1] || childPart.split(' ').pop();
+            
+            if (parentClass && childClass) {
+                strategies.push(`.${parentClass} .${childClass}`);
+            }
+        }
+    }
+    
+    // Remove duplicates and invalid selectors
+    return [...new Set(strategies)].filter(selector => 
+        selector && 
+        selector.trim() && 
+        selector.length > 1 &&
+        !selector.includes('undefined')
+    );
+}
+
+// Calculate reliability score for a selector (0-100)
+function calculateSelectorReliability(selector) {
+    let score = 50; // Base score
+    
+    // Prefer class-based selectors
+    if (selector.includes('.')) score += 20;
+    
+    // Prefer attribute-based selectors
+    if (selector.includes('[')) score += 15;
+    
+    // Penalize overly specific selectors
+    const specificity = (selector.match(/[.#]/g) || []).length;
+    if (specificity > 4) score -= 10;
+    
+    // Penalize selectors with numbers (likely dynamic)
+    if (selector.match(/\d{4,}/)) score -= 30;
+    
+    // Prefer shorter selectors (less fragile)
+    if (selector.length < 50) score += 10;
+    if (selector.length > 100) score -= 15;
+    
+    // Prefer semantic attributes
+    if (selector.includes('role=') || selector.includes('aria-')) score += 25;
+    
+    // Penalize pseudo-selectors
+    if (selector.includes(':')) score -= 5;
+    
+    return Math.max(0, Math.min(100, score));
+}
+
+// Determine selector type
+function getSelectorType(selector) {
+    if (selector.includes('[')) return 'attribute';
+    if (selector.includes('#')) return 'id';
+    if (selector.includes('.')) return 'class';
+    if (selector.includes('>')) return 'structural';
+    return 'element';
+}
+
+// Select diverse strategies to avoid all being the same type
+function selectDiverseStrategies(scoredStrategies) {
+    const selected = [];
+    const typesSeen = new Set();
+    
+    // First pass: select highest scoring strategy of each type
+    for (const strategy of scoredStrategies) {
+        if (!typesSeen.has(strategy.type) && selected.length < 3) {
+            selected.push(strategy);
+            typesSeen.add(strategy.type);
+        }
+    }
+    
+    // Second pass: fill remaining slots with highest scores
+    for (const strategy of scoredStrategies) {
+        if (selected.length >= 5) break;
+        if (!selected.includes(strategy)) {
+            selected.push(strategy);
+        }
+    }
+    
+    return selected;
+}
+
 
 
 
