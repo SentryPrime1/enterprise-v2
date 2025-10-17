@@ -3785,6 +3785,13 @@ app.get('/', (req, res) => {
                 
                 // Update navigation buttons
                 this.updateNavigationButtons();
+                                // PHASE 2 FIX: Reset Auto-Fix button state for new violations
+                const autoFixBtn = document.querySelector('.auto-fix-btn');
+                if (autoFixBtn && !this.currentViolations[this.currentViolationIndex].fixGenerated) {
+                    autoFixBtn.textContent = '🔧 Auto-Fix';
+                    autoFixBtn.style.background = '#28a745';
+                    autoFixBtn.disabled = false;
+                }
             },
             
             updateNavigationButtons: function() {
