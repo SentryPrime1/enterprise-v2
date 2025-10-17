@@ -3718,8 +3718,15 @@ app.get('/', (req, res) => {
                 const originalText = button.textContent;
                 
                 try {
-                    button.textContent = '🔄 Applying Fix...';
+                    // Step 1: Check platform connection status first
+                    button.textContent = '🔄 Checking Platform...';
                     button.disabled = true;
+                    
+                    const platformStatusResponse = await fetch('/api/platforms/status');
+                    const platformStatus = await platformStatusResponse.json();
+                    
+                    // Step 2: Generate the fix
+                    button.textContent = '🔄 Generating Fix...';
                     
                     const response = await fetch('/api/implement-fix', {
                         method: 'POST',
@@ -3737,32 +3744,74 @@ app.get('/', (req, res) => {
                         button.textContent = '✅ Fix Generated';
                         button.style.background = '#28a745';
                         
-                        // Show fix details in the modal body
+                        // Step 3: Show deployment options based on platform connections
                         const modalBody = document.getElementById('guided-modal-body');
-                        const fixDetailsHtml = \`
-                            <div style="margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
-                                <h4 style="color: #155724; margin-bottom: 10px;">✅ Auto-Fix Generated Successfully!</h4>
-                                <p style="color: #155724; margin-bottom: 15px;">The fix has been generated for <strong>\${currentViolation.id}</strong>. Download the files below:</p>
-                                
-                                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                    <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'css')" 
-                                            style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                        📄 Download CSS Fix
-                                    </button>
-                                    <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'instructions')" 
-                                            style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                        📋 Download Instructions
-                                    </button>
+                        
+                        // Check if user has any connected platforms
+                        const hasConnection = platformStatus.success && platformStatus.hasAnyConnection;
+                        const connectedPlatform = hasConnection ? 
+                            Object.keys(platformStatus.platforms).find(key => platformStatus.platforms[key].connected) : null;
+                        
+                        let fixDetailsHtml;
+                        
+                        if (hasConnection) {
+                            // User has connected platform - show deployment option
+                            fixDetailsHtml = \`
+                                <div style="margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
+                                    <h4 style="color: #155724; margin-bottom: 10px;">✅ Fix Ready for Deployment!</h4>
+                                    <p style="color: #155724; margin-bottom: 15px;">Fix generated for <strong>\${currentViolation.id}</strong> on your <strong>\${connectedPlatform}</strong> site.</p>
+                                    
+                                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                                        <button onclick="GuidedFixing.deployFix('\${currentViolation.id}', '\${connectedPlatform}')" 
+                                                style="background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                                            🚀 Deploy to Live Site
+                                        </button>
+                                        <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'css')" 
+                                                style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                            📄 Download Instead
+                                        </button>
+                                    </div>
+                                    
+                                    <div style="font-size: 12px; color: #155724; background: #f8f9fa; padding: 8px; border-radius: 4px;">
+                                        <strong>🛡️ Safe Deployment:</strong> We'll backup your current settings before applying changes.
+                                    </div>
                                 </div>
-                                
-                                <div style="font-size: 14px; color: #155724;">
-                                    <strong>Next Steps:</strong>
-                                    <ol style="margin: 8px 0 0 20px;">
-                                        \${result.nextSteps.map(step => \`<li>\${step}</li>\`).join('')}
-                                    </ol>
+                            \`;
+                        } else {
+                            // No platform connected - show connection prompt with download fallback
+                            fixDetailsHtml = \`
+                                <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+                                    <h4 style="color: #856404; margin-bottom: 10px;">⚡ Enable One-Click Deployment!</h4>
+                                    <p style="color: #856404; margin-bottom: 15px;">Fix generated for <strong>\${currentViolation.id}</strong>. Connect your platform for automatic deployment!</p>
+                                    
+                                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                                        <button onclick="window.open('#integrations', '_self')" 
+                                                style="background: #ffc107; color: #212529; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                                            🔗 Connect Platform
+                                        </button>
+                                        <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'css')" 
+                                                style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                            📄 Download CSS Fix
+                                        </button>
+                                        <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'instructions')" 
+                                                style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                                            📋 Download Instructions
+                                        </button>
+                                    </div>
+                                    
+                                    <div style="font-size: 12px; color: #856404;">
+                                        <strong>💡 Pro Tip:</strong> Connect your Shopify or WordPress site to deploy fixes automatically!
+                                    </div>
+                                    
+                                    <div style="font-size: 14px; color: #856404; margin-top: 10px;">
+                                        <strong>Next Steps:</strong>
+                                        <ol style="margin: 8px 0 0 20px;">
+                                            \${result.nextSteps.map(step => \`<li>\${step}</li>\`).join('')}
+                                        </ol>
+                                    </div>
                                 </div>
-                            </div>
-                        \`;
+                            \`;
+                        }
                         
                         modalBody.innerHTML += fixDetailsHtml;
                         
@@ -5782,68 +5831,6 @@ app.get('/api/engine-status', (req, res) => {
         });
     }
 });
-
-// DEPLOYMENT INTEGRATION PATCH - MINIMAL ADDITION
-// Platform connection status endpoint
-app.get('/api/platforms/status', async (req, res) => {
-    try {
-        // Simple platform status check
-        // In production, this would check a database for stored credentials
-        const platformStatus = {
-            wordpress: { connected: false, url: null },
-            shopify: { connected: false, url: null },
-            custom: { connected: false, url: null }
-        };
-        
-        res.json({
-            success: true,
-            platforms: platformStatus,
-            hasAnyConnection: false // For now, always false until user connects
-        });
-        
-    } catch (error) {
-        console.error('Platform status check error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: 'Failed to check platform status' 
-        });
-    }
-});
-
-// Deploy fix endpoint - minimal implementation
-app.post('/api/deploy-fix', async (req, res) => {
-    try {
-        const { violationId, platform, url } = req.body;
-        
-        if (!violationId || !platform) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Violation ID and platform are required' 
-            });
-        }
-        
-        console.log(`🚀 Deployment requested for violation: ${violationId} on platform: ${platform}`);
-        
-        // For now, simulate successful deployment
-        // In production, this would call the actual deployment engine
-        res.json({
-            success: true,
-            deploymentId: `demo-deploy-${Date.now()}`,
-            status: 'completed',
-            message: 'Fix deployed successfully (demo mode)',
-            appliedAt: new Date().toISOString(),
-            note: 'Demo deployment - in production this would modify your live website'
-        });
-        
-    } catch (error) {
-        console.error('Deploy fix error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message || 'Deployment failed' 
-        });
-    }
-});
-
 // Start server
 app.listen(PORT, () => {
     console.log('🚀 SentryPrime Enterprise Dashboard running on port ' + PORT);
