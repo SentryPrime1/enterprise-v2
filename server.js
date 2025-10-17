@@ -151,6 +151,7 @@ if (process.env.OPENAI_API_KEY) {
 } else {
     console.log('⚠️ No OpenAI API key found, AI suggestions will use predefined responses');
 }
+
 // PHASE 2 ENHANCEMENT: Helper functions for user tier and platform management
 async function getUserTierInfo(userId = 1) {
     // In production, this would query your database
@@ -198,23 +199,24 @@ async function getUserPlatforms(userId = 1) {
         }
     }
     
-    // Mock data - user ID 1 has a connected WordPress site
+    // Mock data for testing - user ID 1 has connected platforms
     if (userId === 1) {
         return [
             {
+                id: 1,
+                user_id: userId,
                 platform_type: 'wordpress',
-                website_url: 'https://demo.company.com',
+                website_url: 'https://company.com',
                 connection_name: 'Company Main Site',
                 connection_status: 'active',
-                last_connected_at: new Date( ).toISOString(),
-                connection_config: { method: 'rest_api', authenticated: true }
+                created_at: new Date().toISOString()
             }
         ];
     }
     return [];
 }
 
-// PHASE 2 API ENDPOINT: User tier information
+// PHASE 2 API ENDPOINT: Get user tier information
 app.get('/api/user/tier', async (req, res) => {
     try {
         const userId = req.query.user_id || 1;
@@ -222,40 +224,37 @@ app.get('/api/user/tier', async (req, res) => {
         
         res.json({
             success: true,
+            isPremium: tierInfo.tier_name === 'premium',
             tier: tierInfo.tier_name,
             features: tierInfo.tier_features,
-            isActive: tierInfo.is_active,
             subscriptionStatus: tierInfo.subscription_status,
-            connectedPlatforms: tierInfo.connected_platforms,
-            isPremium: tierInfo.tier_name === 'premium' || tierInfo.tier_name === 'enterprise'
+            connectedPlatforms: tierInfo.connected_platforms
         });
     } catch (error) {
-        console.error('User tier error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get user tier information' });
+        console.error('Tier check error:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// PHASE 2 API ENDPOINT: Enhanced platform status
+// PHASE 2 API ENDPOINT: Get platform connection status
 app.get('/api/platforms/status', async (req, res) => {
     try {
         const userId = req.query.user_id || 1;
         const userPlatforms = await getUserPlatforms(userId);
         
         const platformStatus = {
-            wordpress: { connected: false, url: null, name: null },
-            shopify: { connected: false, url: null, name: null },
-            custom: { connected: false, url: null, name: null },
-            wix: { connected: false, url: null, name: null },
-            squarespace: { connected: false, url: null, name: null }
+            wordpress: { connected: false, name: null, url: null },
+            shopify: { connected: false, name: null, url: null },
+            custom: { connected: false, name: null, url: null }
         };
         
         userPlatforms.forEach(platform => {
             if (platformStatus[platform.platform_type]) {
                 platformStatus[platform.platform_type] = {
-                    connected: platform.connection_status === 'active',
-                    url: platform.website_url,
+                    connected: true,
                     name: platform.connection_name,
-                    lastConnected: platform.last_connected_at
+                    url: platform.website_url,
+                    id: platform.id
                 };
             }
         });
@@ -264,98 +263,83 @@ app.get('/api/platforms/status', async (req, res) => {
         
         res.json({
             success: true,
+            hasAnyConnection: hasAnyConnection,
             platforms: platformStatus,
-            hasAnyConnection,
             totalConnections: userPlatforms.length
         });
     } catch (error) {
         console.error('Platform status error:', error);
-        res.status(500).json({ success: false, error: 'Failed to check platform status' });
-    }
-});
-
-// PHASE 2 API ENDPOINT: Enhanced deploy-fix with tier checking
-app.post('/api/deploy-fix', async (req, res) => {
-    try {
-        const { violationId, platform, url, userId = 1 } = req.body;
-        
-        // Check user tier and permissions
-        const tierInfo = await getUserTierInfo(userId);
-        const isPremium = tierInfo.tier_name === 'premium' || tierInfo.tier_name === 'enterprise';
-        const hasAutoDeployment = tierInfo.tier_features?.auto_deployment === true;
-        
-        if (!isPremium || !hasAutoDeployment) {
-            return res.status(403).json({
-                success: false,
-                error: 'Premium subscription required for auto-deployment',
-                tier: tierInfo.tier_name,
-                upgradeRequired: true,
-                message: 'Upgrade to Premium to enable one-click deployment to your live website'
-            });
-        }
-        
-        // Check if user has the platform connected
-        const userPlatforms = await getUserPlatforms(userId);
-        const connectedPlatform = userPlatforms.find(p => 
-            p.platform_type === platform && p.connection_status === 'active'
-        );
-        
-        if (!connectedPlatform) {
-            return res.status(400).json({
-                success: false,
-                error: 'Platform not connected',
-                message: `Please connect your ${platform} site before deploying fixes`,
-                requiresConnection: true
-            });
-        }
-        
-        const deploymentId = `deploy_${violationId}_${Date.now()}`;
-        
-        // In production, this would trigger the actual deployment using the engines
-        if (deploymentEngine && patchGenerationEngine) {
-            console.log(`🚀 Deploying fix ${violationId} to ${platform} site: ${connectedPlatform.website_url}`);
-            // Real deployment logic would go here
-        }
-        
-        res.json({
-            success: true,
-            deploymentId,
-            status: 'completed',
-            message: 'Fix deployed successfully to your live website',
-            appliedAt: new Date().toISOString(),
-            platform: connectedPlatform.platform_type,
-            websiteUrl: connectedPlatform.website_url,
-            websiteName: connectedPlatform.connection_name,
-            isPremiumDeployment: true
-        });
-        
-    } catch (error) {
-        console.error('Deploy fix error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// PHASE 2 API ENDPOINT: Add platform connection
-app.post('/api/user/connections', async (req, res) => {
+// PHASE 2 API ENDPOINT: Deploy fix to connected platform
+app.post('/api/deploy-fix', async (req, res) => {
     try {
-        const { userId = 1, platformType, websiteUrl, connectionName, connectionConfig = {} } = req.body;
+        const { violationId, platform, websiteUrl } = req.body;
+        const userId = req.body.user_id || 1;
         
+        // Check user tier first
+        const tierInfo = await getUserTierInfo(userId);
+        if (tierInfo.tier_name !== 'premium') {
+            return res.status(403).json({
+                success: false,
+                error: 'Premium subscription required for automatic deployment'
+            });
+        }
+        
+        // Check platform connection
+        const userPlatforms = await getUserPlatforms(userId);
+        const connectedPlatform = userPlatforms.find(p => p.platform_type === platform);
+        
+        if (!connectedPlatform) {
+            return res.status(400).json({
+                success: false,
+                error: `No ${platform} connection found. Please connect your platform first.`
+            });
+        }
+        
+        // In a real implementation, this would use the deployment automation engine
+        // For now, simulate successful deployment
+        const deploymentId = `deploy_${violationId}_${Date.now()}`;
+        
+        // Mock success response
+        res.json({
+            success: true,
+            deploymentId: deploymentId,
+            platform: platform,
+            website: connectedPlatform.connection_name,
+            deployedAt: new Date().toISOString(),
+            message: 'Fix deployed successfully to live website'
+        });
+        
+    } catch (error) {
+        console.error('Deployment error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// PHASE 2 API ENDPOINT: Connect new platform
+app.post('/api/platforms/connect', async (req, res) => {
+    try {
+        const { platformType, websiteUrl, connectionName } = req.body;
+        const userId = req.body.user_id || 1;
+        
+        // In production, this would save to your database
         if (db) {
-            // In production, save to database
             try {
                 const result = await db.query(
-                    'INSERT INTO website_connections (user_id, platform_type, website_url, connection_name, connection_config, connection_status) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-                    [userId, platformType, websiteUrl, connectionName, connectionConfig, 'active']
+                    'INSERT INTO website_connections (user_id, platform_type, website_url, connection_name, connection_status) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+                    [userId, platformType, websiteUrl, connectionName, 'active']
                 );
                 
-                res.json({
+                return res.json({
                     success: true,
                     connection: result.rows[0],
                     message: 'Platform connected successfully'
                 });
-                return;
-            } catch (error) {
-                console.error('Database insert failed:', error);
+            } catch (dbError) {
+                console.log('Database insert failed, using mock response:', dbError.message);
             }
         }
         
@@ -3785,7 +3769,8 @@ app.get('/', (req, res) => {
                 
                 // Update navigation buttons
                 this.updateNavigationButtons();
-                                // PHASE 2 FIX: Reset Auto-Fix button state for new violations
+                
+                // PHASE 2 FIX: Reset Auto-Fix button state for new violations
                 const autoFixBtn = document.querySelector('.auto-fix-btn');
                 if (autoFixBtn && !this.currentViolations[this.currentViolationIndex].fixGenerated) {
                     autoFixBtn.textContent = '🔧 Auto-Fix';
@@ -3961,25 +3946,25 @@ app.get('/', (req, res) => {
                 alert('Report generated! ' + this.fixedViolations.length + ' fixes saved to your downloads.');
             },
             
-                      // PHASE 2A: Auto-Fix functionality for current violation
+            // PHASE 2A: Auto-Fix functionality for current violation
             autoFixCurrent: async function() {
                 const currentViolation = this.currentViolations[this.currentViolationIndex];
                 if (!currentViolation) return;
-
+                
                 const button = document.querySelector('.auto-fix-btn');
                 const originalText = button.textContent;
-
+                
                 try {
                     // Step 1: Check platform connection status first
                     button.textContent = '🔄 Checking Platform...';
                     button.disabled = true;
-
+                    
                     const platformStatusResponse = await fetch('/api/platforms/status');
                     const platformStatus = await platformStatusResponse.json();
-
+                    
                     // Step 2: Generate the fix
                     button.textContent = '🔄 Generating Fix...';
-
+                    
                     const response = await fetch('/api/implement-fix', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -3989,36 +3974,36 @@ app.get('/', (req, res) => {
                             platformInfo: window.platformInfo || { type: 'custom' }
                         })
                     });
-
+                    
                     const result = await response.json();
-
+                    
                     if (result.success) {
                         button.textContent = '✅ Fix Generated';
                         button.style.background = '#28a745';
-
+                        
                         // Step 3: Show deployment options based on platform connections
                         const modalBody = document.getElementById('guided-modal-body');
-
+                        
                         // Check if user has any connected platforms
                         const hasConnection = platformStatus.success && platformStatus.hasAnyConnection;
                         const connectedPlatform = hasConnection ? 
                             Object.keys(platformStatus.platforms).find(key => platformStatus.platforms[key].connected) : null;
-
+                        
                         let fixDetailsHtml;
-
+                        
                         if (hasConnection) {
                             // User has connected platform - show deployment option
-                            fixDetailsHtml = `
+                            fixDetailsHtml = \`
                                 <div style="margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
                                     <h4 style="color: #155724; margin-bottom: 10px;">✅ Fix Ready for Deployment!</h4>
-                                    <p style="color: #155724; margin-bottom: 15px;">Fix generated for <strong>${currentViolation.id}</strong> on your <strong>${connectedPlatform}</strong> site.</p>
+                                    <p style="color: #155724; margin-bottom: 15px;">Fix generated for <strong>\${currentViolation.id}</strong> on your <strong>\${connectedPlatform}</strong> site.</p>
                                     
                                     <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                        <button onclick="GuidedFixing.deployFix('${currentViolation.id}', '${connectedPlatform}')" 
+                                        <button onclick="GuidedFixing.deployFix('\${currentViolation.id}', '\${connectedPlatform}')" 
                                                 style="background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
                                             🚀 Deploy to Live Site
                                         </button>
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'css')" 
+                                        <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'css')" 
                                                 style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                                             📄 Download Instead
                                         </button>
@@ -4028,24 +4013,25 @@ app.get('/', (req, res) => {
                                         <strong>🛡️ Safe Deployment:</strong> We'll backup your current settings before applying changes.
                                     </div>
                                 </div>
-                            `;
+                            \`;
                         } else {
                             // No platform connected - show connection prompt with download fallback
-                            fixDetailsHtml = `
+                            fixDetailsHtml = \`
                                 <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-                                    <h4 style="color: #856404; margin-bottom: 10px;">🔗 Enable One-Click Deployment!</h4>
-                                    <p style="color: #856404; margin-bottom: 15px;">Fix generated for <strong>${currentViolation.id}</strong>. Connect your platform for automatic deployment!</p>
+                                    <h4 style="color: #856404; margin-bottom: 10px;">⚡ Enable One-Click Deployment!</h4>
+                                    <p style="color: #856404; margin-bottom: 15px;">Fix generated for <strong>\${currentViolation.id}</strong>. Connect your platform for automatic deployment!</p>
                                     
                                     <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                        <button onclick="GuidedFixing.close(); setTimeout(() => window.location.href = window.location.origin + '/#integrations', 100)" 
+<button onclick="GuidedFixing.closeModal(); setTimeout(() => window.location.href = window.location.origin + '/#integrations', 100)"
                                                 style="background: #ffc107; color: #212529; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
                                             🔗 Connect Platform
                                         </button>
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'css')" 
+
+                                        <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'css')" 
                                                 style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                                             📄 Download CSS Fix
                                         </button>
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'instructions')" 
+                                        <button onclick="GuidedFixing.downloadFix('\${currentViolation.id}', 'instructions')" 
                                                 style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
                                             📋 Download Instructions
                                         </button>
@@ -4058,22 +4044,22 @@ app.get('/', (req, res) => {
                                     <div style="font-size: 14px; color: #856404; margin-top: 10px;">
                                         <strong>Next Steps:</strong>
                                         <ol style="margin: 8px 0 0 20px;">
-                                            ${result.nextSteps ? result.nextSteps.map(step => `<li>${step}</li>`).join('') : '<li>Apply the downloaded fix to your website</li>'}
+                                            \${result.nextSteps.map(step => \`<li>\${step}</li>\`).join('')}
                                         </ol>
                                     </div>
                                 </div>
-                            `;
+                            \`;
                         }
-
+                        
                         modalBody.innerHTML += fixDetailsHtml;
-
+                        
                         // Mark this violation as having a fix generated
                         currentViolation.fixGenerated = true;
-
+                        
                     } else {
                         throw new Error(result.error || 'Fix generation failed');
                     }
-
+                    
                 } catch (error) {
                     console.error('Auto-fix error:', error);
                     button.textContent = '❌ Fix Failed';
@@ -4085,7 +4071,6 @@ app.get('/', (req, res) => {
                     }, 3000);
                 }
             },
-
             
             // PHASE 2A: Preview Fix functionality for current violation
             previewFixCurrent: async function() {
@@ -4182,7 +4167,8 @@ app.get('/', (req, res) => {
                 link.click();
                 document.body.removeChild(link);
             },
-                        // PHASE 2 ENHANCEMENT: Deploy fix function with tier checking
+
+            // PHASE 2 ENHANCEMENT: Deploy fix function with tier checking
             deployFix: async function(violationId, platform) {
                 try {
                     // Step 1: Check user tier first
@@ -4199,128 +4185,79 @@ app.get('/', (req, res) => {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ 
-                                violationId,
-                                platform,
-                                url: window.location.href
+                                violationId: violationId, 
+                                platform: platform,
+                                user_id: 1 // In production, get from session
                             })
                         });
                         
                         const result = await response.json();
                         
                         if (result.success) {
-                            // Show success message
-                            const modalBody = document.getElementById('guided-modal-body');
-                            modalBody.innerHTML = \`
-                                <div style="padding: 20px; text-align: center;">
-                                    <div style="font-size: 48px; margin-bottom: 15px;">🎉</div>
-                                    <h3 style="color: #28a745; margin-bottom: 15px;">Deployment Successful!</h3>
-                                    <p style="color: #666; margin-bottom: 20px;">
-                                        \${result.message}
-                                    </p>
-                                    
-                                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: left;">
-                                        <strong>Deployment Details:</strong>  
-
-                                        <small>
-                                            • Platform: \${result.platform}  
-
-                                            • Website: \${result.websiteName}  
-
-                                            • Deployed at: \${new Date(result.appliedAt).toLocaleString()}  
-
-                                            • Deployment ID: \${result.deploymentId}
-                                        </small>
-                                    </div>
-                                    
-                                    <button onclick="GuidedFixing.close()" 
-                                            style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px;">
-                                        Continue Scanning
-                                    </button>
-                                </div>
-                            \`;
-                        } else if (result.upgradeRequired) {
-                            // Show upgrade required message
-                            this.showUpgradePrompt();
-                        } else if (result.requiresConnection) {
-                            // Show connection required message
-                            this.showConnectionPrompt(platform);
+                            // Show success screen
+                            this.showDeploymentSuccess(result);
                         } else {
                             throw new Error(result.error || 'Deployment failed');
                         }
                     } else {
                         // Basic user - show upgrade prompt
-                        this.showUpgradePrompt();
+                        this.showUpgradePrompt(platform);
                     }
                     
                 } catch (error) {
-                    console.error('Deploy error:', error);
+                    console.error('Deployment error:', error);
                     alert('Deployment failed: ' + error.message);
                 }
             },
             
-            // PHASE 2 ENHANCEMENT: Show upgrade prompt for basic users
-            showUpgradePrompt: function() {
+            showDeploymentSuccess: function(deploymentResult) {
                 const modalBody = document.getElementById('guided-modal-body');
-                modalBody.innerHTML = \`
-                    <div style="padding: 20px; text-align: center;">
-                        <h3 style="color: #333; margin-bottom: 15px;">💎 Upgrade to Premium</h3>
-                        <p style="color: #666; margin-bottom: 20px;">
-                            Unlock one-click deployment and advanced accessibility features
-                        </p>
-                        
-                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
-                            <h4 style="margin: 0 0 10px 0;">Premium Features</h4>
-                            <ul style="text-align: left; margin: 0; padding-left: 20px;">
-                                <li>🚀 One-click deployment to live websites</li>
-                                <li>🛡️ Automatic backup and rollback protection</li>
-                                <li>🔄 Unlimited scans and fixes</li>
-                                <li>📞 Priority support</li>
-                                <li>📊 Advanced reporting and analytics</li>
-                            </ul>
-                        </div>
-                        
-                        <div style="display: flex; gap: 10px; justify-content: center;">
-                            <button onclick="window.open('/upgrade', '_blank')" 
-                                    style="background: #28a745; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
-                                Upgrade Now - $99/month
-                            </button>
-                            <button onclick="GuidedFixing.close()" 
-                                    style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
-                                Maybe Later
-                            </button>
-                        </div>
-                    </div>
-                \`;
+                modalBody.innerHTML = '<div style="text-align: center; padding: 40px 20px;">' +
+                    '<div style="font-size: 48px; margin-bottom: 20px;">🎉</div>' +
+                    '<h2 style="color: #28a745; margin-bottom: 15px;">Deployment Successful!</h2>' +
+                    '<p style="color: #6c757d; margin-bottom: 25px; font-size: 16px;">' +
+                    'Fix deployed successfully to your live website' +
+                    '</p>' +
+                    '<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px; text-align: left;">' +
+                    '<h4 style="margin-bottom: 15px; color: #495057;">Deployment Details:</h4>' +
+                    '<p style="margin: 5px 0; color: #6c757d;">• Platform: ' + deploymentResult.platform + '</p>' +
+                    '<p style="margin: 5px 0; color: #6c757d;">• Website: ' + deploymentResult.website + '</p>' +
+                    '<p style="margin: 5px 0; color: #6c757d;">• Deployed at: ' + new Date(deploymentResult.deployedAt).toLocaleString() + '</p>' +
+                    '<p style="margin: 5px 0; color: #6c757d;">• Deployment ID: ' + deploymentResult.deploymentId + '</p>' +
+                    '</div>' +
+                    '<button onclick="GuidedFixing.close()" ' +
+                    'style="background: #28a745; color: white; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">' +
+                    'Continue Scanning' +
+                    '</button>' +
+                    '</div>';
             },
             
-            // PHASE 2 ENHANCEMENT: Show connection prompt for users without connected platforms
-            showConnectionPrompt: function(platform) {
+            showUpgradePrompt: function(platform) {
                 const modalBody = document.getElementById('guided-modal-body');
-                modalBody.innerHTML = \`
-                    <div style="padding: 20px; text-align: center;">
-                        <h3 style="color: #333; margin-bottom: 15px;">🔗 Connect Your Platform</h3>
-                        <p style="color: #666; margin-bottom: 20px;">
-                            Connect your \${platform} site to enable one-click deployment of accessibility fixes.
-                        </p>
-                        
-                        <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                            <p style="color: #856404; margin: 0;">
-                                <strong>Note:</strong> You need to connect your \${platform} site before you can deploy fixes automatically.
-                            </p>
-                        </div>
-                        
-                        <div style="display: flex; gap: 10px; justify-content: center;">
-                            <button onclick="GuidedFixing.close(); setTimeout(() => window.location.href = window.location.origin + '/#integrations', 100)" 
-                                    style="background: #ffc107; color: #212529; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">
-                                🔗 Connect \${platform.charAt(0).toUpperCase() + platform.slice(1)}
-                            </button>
-                            <button onclick="GuidedFixing.close()" 
-                                    style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                \`;
+                modalBody.innerHTML = '<div style="text-align: center; padding: 40px 20px;">' +
+                    '<div style="font-size: 48px; margin-bottom: 20px;">💎</div>' +
+                    '<h2 style="color: #ffc107; margin-bottom: 15px;">Premium Feature Required</h2>' +
+                    '<p style="color: #6c757d; margin-bottom: 25px; font-size: 16px;">' +
+                    'Automatic deployment requires a Premium subscription' +
+                    '</p>' +
+                    '<div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 8px; margin-bottom: 25px; color: white;">' +
+                    '<h4 style="margin-bottom: 15px;">Premium Benefits:</h4>' +
+                    '<p style="margin: 8px 0;">✅ One-click deployment to live websites</p>' +
+                    '<p style="margin: 8px 0;">✅ Automatic backup and rollback protection</p>' +
+                    '<p style="margin: 8px 0;">✅ Unlimited scans and fixes</p>' +
+                    '<p style="margin: 8px 0;">✅ Priority support</p>' +
+                    '</div>' +
+                    '<div style="display: flex; gap: 15px; justify-content: center;">' +
+                    '<button onclick="window.open(\'/upgrade\', \'_blank\')" ' +
+                    'style="background: #ffc107; color: #212529; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;">' +
+                    'Upgrade to Premium' +
+                    '</button>' +
+                    '<button onclick="GuidedFixing.close()" ' +
+                    'style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">' +
+                    'Maybe Later' +
+                    '</button>' +
+                    '</div>' +
+                    '</div>';
             },
 
             // PHASE 2D: Visual Preview Methods
