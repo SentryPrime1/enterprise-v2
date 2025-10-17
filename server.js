@@ -3961,7 +3961,7 @@ app.get('/', (req, res) => {
                 alert('Report generated! ' + this.fixedViolations.length + ' fixes saved to your downloads.');
             },
             
-                        // PHASE 2 ENHANCED: Auto-Fix functionality with tier detection
+            // PHASE 2 ENHANCED: Auto-Fix functionality with tier detection
             autoFixCurrent: async function() {
                 const currentViolation = this.currentViolations[this.currentViolationIndex];
                 if (!currentViolation) return;
@@ -4014,7 +4014,7 @@ app.get('/', (req, res) => {
                         const modalBody = document.getElementById('guided-modal-body');
                         
                         const isPremium = tierInfo.isPremium;
-                        const hasAutoDeployment = tierInfo.features?.auto_deployment === true;
+                        const hasAutoDeployment = tierInfo.features && tierInfo.features.auto_deployment === true;
                         const hasConnection = platformStatus.hasAnyConnection;
                         const connectedPlatform = hasConnection ? 
                             Object.keys(platformStatus.platforms).find(key => platformStatus.platforms[key].connected) : null;
@@ -4024,116 +4024,76 @@ app.get('/', (req, res) => {
                         if (isPremium && hasAutoDeployment && hasConnection) {
                             // Premium user with connected platform - show one-click deployment
                             const platformInfo = platformStatus.platforms[connectedPlatform];
-                            fixDetailsHtml = `
-                                <div style="margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">
-                                    <h4 style="color: #155724; margin-bottom: 10px;">🚀 Premium One-Click Deployment!</h4>
-                                    <p style="color: #155724; margin-bottom: 15px;">
-                                        Fix ready for <strong>${currentViolation.id}</strong> on your <strong>${connectedPlatform}</strong> site: 
-                                        <strong>${platformInfo.name || platformInfo.url}</strong>
-                                    </p>
-                                    
-                                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                        <button onclick="GuidedFixing.deployFix('${currentViolation.id}', '${connectedPlatform}')" 
-                                                style="background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
-                                            🚀 Deploy to Live Site Now
-                                        </button>
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'css')" 
-                                                style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                            📄 Download Instead
-                                        </button>
-                                    </div>
-                                    
-                                    <div style="font-size: 12px; color: #155724; background: #f8f9fa; padding: 8px; border-radius: 4px;">
-                                        <strong>🛡️ Safe Deployment:</strong> We'll backup your current settings and can rollback if needed.
-                                    </div>
-                                    
-                                    <div style="margin-top: 10px; padding: 8px; background: #e7f3ff; border-radius: 4px; border-left: 3px solid #007bff;">
-                                        <small style="color: #004085;">
-                                            <strong>💎 Premium Feature:</strong> Automatic deployment with rollback protection
-                                        </small>
-                                    </div>
-                                </div>
-                            `;
+                            const platformName = platformInfo.name || platformInfo.url || 'Connected Site';
+                            fixDetailsHtml = '<div style="margin-top: 20px; padding: 15px; background: #d4edda; border-radius: 8px; border-left: 4px solid #28a745;">' +
+                                '<h4 style="color: #155724; margin-bottom: 10px;">🚀 Premium One-Click Deployment!</h4>' +
+                                '<p style="color: #155724; margin-bottom: 15px;">' +
+                                'Fix ready for <strong>' + currentViolation.id + '</strong> on your <strong>' + connectedPlatform + '</strong> site: ' +
+                                '<strong>' + platformName + '</strong>' +
+                                '</p>' +
+                                '<div style="display: flex; gap: 10px; margin-bottom: 15px;">' +
+                                '<button onclick="GuidedFixing.deployFix(\'' + currentViolation.id + '\', \'' + connectedPlatform + '\')" ' +
+                                'style="background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">' +
+                                '🚀 Deploy to Live Site Now' +
+                                '</button>' +
+                                '<button onclick="GuidedFixing.downloadFix(\'' + currentViolation.id + '\', \'css\')" ' +
+                                'style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">' +
+                                '📄 Download Instead' +
+                                '</button>' +
+                                '</div>' +
+                                '<div style="font-size: 12px; color: #155724; background: #f8f9fa; padding: 8px; border-radius: 4px;">' +
+                                '<strong>🛡️ Safe Deployment:</strong> We will backup your current settings and can rollback if needed.' +
+                                '</div>' +
+                                '</div>';
                         } else if (isPremium && hasAutoDeployment && !hasConnection) {
                             // Premium user without connected platform - show connection prompt
-                            fixDetailsHtml = `
-                                <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
-                                    <h4 style="color: #856404; margin-bottom: 10px;">💎 Premium: Connect Platform for One-Click Deployment!</h4>
-                                    <p style="color: #856404; margin-bottom: 15px;">
-                                        Fix generated for <strong>${currentViolation.id}</strong>. Connect your platform to enable automatic deployment!
-                                    </p>
-                                    
-                                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                        <button onclick="GuidedFixing.close(); setTimeout(() => window.location.href = window.location.origin + '/#integrations', 100)" 
-                                                style="background: #ffc107; color: #212529; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
-                                            🔗 Connect Platform
-                                        </button>
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'css')" 
-                                                style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                            📄 Download CSS Fix
-                                        </button>
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'instructions')" 
-                                                style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                            📋 Download Instructions
-                                        </button>
-                                    </div>
-                                    
-                                    <div style="margin-top: 10px; padding: 8px; background: #e7f3ff; border-radius: 4px; border-left: 3px solid #007bff;">
-                                        <small style="color: #004085;">
-                                            <strong>💎 Premium Feature Available:</strong> One-click deployment once you connect your platform
-                                        </small>
-                                    </div>
-                                    
-                                    <div style="font-size: 14px; color: #856404; margin-top: 10px;">
-                                        <strong>Next Steps:</strong>
-                                        <ol style="margin: 8px 0 0 20px;">
-                                            ${result.nextSteps ? result.nextSteps.map(step => `<li>${step}</li>`).join('') : '<li>Apply the downloaded fix to your website</li>'}
-                                        </ol>
-                                    </div>
-                                </div>
-                            `;
+                            fixDetailsHtml = '<div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">' +
+                                '<h4 style="color: #856404; margin-bottom: 10px;">💎 Premium: Connect Platform for One-Click Deployment!</h4>' +
+                                '<p style="color: #856404; margin-bottom: 15px;">' +
+                                'Fix generated for <strong>' + currentViolation.id + '</strong>. Connect your platform to enable automatic deployment!' +
+                                '</p>' +
+                                '<div style="display: flex; gap: 10px; margin-bottom: 15px;">' +
+                                '<button onclick="GuidedFixing.close(); setTimeout(() => window.location.href = window.location.origin + \'/#integrations\', 100)" ' +
+                                'style="background: #ffc107; color: #212529; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">' +
+                                '🔗 Connect Platform' +
+                                '</button>' +
+                                '<button onclick="GuidedFixing.downloadFix(\'' + currentViolation.id + '\', \'css\')" ' +
+                                'style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">' +
+                                '📄 Download CSS Fix' +
+                                '</button>' +
+                                '</div>' +
+                                '</div>';
                         } else {
                             // Basic user - show download options with upgrade prompt
-                            fixDetailsHtml = `
-                                <div style="margin-top: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">
-                                    <h4 style="color: #721c24; margin-bottom: 10px;">📄 Fix Ready for Download</h4>
-                                    <p style="color: #721c24; margin-bottom: 15px;">
-                                        Fix generated for <strong>${currentViolation.id}</strong>. Download and apply manually to your website.
-                                    </p>
-                                    
-                                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'css')" 
-                                                style="background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">
-                                            📄 Download CSS Fix
-                                        </button>
-                                        <button onclick="GuidedFixing.downloadFix('${currentViolation.id}', 'instructions')" 
-                                                style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">
-                                            📋 Download Instructions
-                                        </button>
-                                    </div>
-                                    
-                                    <div style="margin-top: 15px; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: white;">
-                                        <div style="display: flex; align-items: center; justify-content: space-between;">
-                                            <div>
-                                                <strong>💎 Want One-Click Deployment?</strong>  
-
-                                                <small>Upgrade to Premium for automatic deployment to your live website</small>
-                                            </div>
-                                            <button onclick="window.open('/upgrade', '_blank')" 
-                                                    style="background: #fff; color: #667eea; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;">
-                                                Upgrade Now
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div style="font-size: 14px; color: #721c24; margin-top: 15px;">
-                                        <strong>Manual Installation Steps:</strong>
-                                        <ol style="margin: 8px 0 0 20px;">
-                                            ${result.nextSteps ? result.nextSteps.map(step => `<li>${step}</li>`).join('') : '<li>Download the CSS fix</li><li>Add it to your website\'s stylesheet</li><li>Test the changes</li>'}
-                                        </ol>
-                                    </div>
-                                </div>
-                            `;
+                            fixDetailsHtml = '<div style="margin-top: 20px; padding: 15px; background: #f8d7da; border-radius: 8px; border-left: 4px solid #dc3545;">' +
+                                '<h4 style="color: #721c24; margin-bottom: 10px;">📄 Fix Ready for Download</h4>' +
+                                '<p style="color: #721c24; margin-bottom: 15px;">' +
+                                'Fix generated for <strong>' + currentViolation.id + '</strong>. Download and apply manually to your website.' +
+                                '</p>' +
+                                '<div style="display: flex; gap: 10px; margin-bottom: 15px;">' +
+                                '<button onclick="GuidedFixing.downloadFix(\'' + currentViolation.id + '\', \'css\')" ' +
+                                'style="background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">' +
+                                '📄 Download CSS Fix' +
+                                '</button>' +
+                                '<button onclick="GuidedFixing.downloadFix(\'' + currentViolation.id + '\', \'instructions\')" ' +
+                                'style="background: #6f42c1; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px;">' +
+                                '📋 Download Instructions' +
+                                '</button>' +
+                                '</div>' +
+                                '<div style="margin-top: 15px; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: white;">' +
+                                '<div style="display: flex; align-items: center; justify-content: space-between;">' +
+                                '<div>' +
+                                '<strong>💎 Want One-Click Deployment?</strong>  
+' +
+                                '<small>Upgrade to Premium for automatic deployment to your live website</small>' +
+                                '</div>' +
+                                '<button onclick="window.open(\'/upgrade\', \'_blank\')" ' +
+                                'style="background: #fff; color: #667eea; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;">' +
+                                'Upgrade Now' +
+                                '</button>' +
+                                '</div>' +
+                                '</div>' +
+                                '</div>';
                         }
                         
                         modalBody.innerHTML += fixDetailsHtml;
@@ -4156,6 +4116,7 @@ app.get('/', (req, res) => {
                     }, 3000);
                 }
             },
+
 
             
             // PHASE 2A: Preview Fix functionality for current violation
