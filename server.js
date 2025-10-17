@@ -309,7 +309,7 @@ app.post('/api/deploy-fix', async (req, res) => {
             });
         }
         
-        const deploymentId = `deploy_${violationId}_${Date.now()}`;
+let deploymentId = `deploy_${violationId}_${Date.now()}`;
         
                // STEP 3 ENHANCEMENT: Generate and deploy actual CSS fixes
         if (deploymentEngine && patchGenerationEngine) {
