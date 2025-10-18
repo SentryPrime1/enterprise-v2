@@ -496,7 +496,7 @@ app.post('/api/deploy-fix', async (req, res) => {
         
 let deploymentId = `deploy_${violationId}_${Date.now()}`;
         
-               // STEP 3 ENHANCEMENT: Generate and deploy actual CSS fixes
+               // STEP B1: Real Platform API Deployment with validated CSS fixes
         if (deploymentEngine && patchGenerationEngine) {
             console.log(`🚀 Deploying fix ${violationId} to ${platform} site: ${connectedPlatform.website_url}`);
             
@@ -510,16 +510,42 @@ let deploymentId = `deploy_${violationId}_${Date.now()}`;
             // Generate the actual CSS fix using our enhanced function
             const fixCode = generateFixCode(violationData, { type: platform });
             
-            // Log the actual CSS being deployed
-            console.log(`📝 Generated CSS fix:`, fixCode.css);
-            console.log(`🎯 Targeted selectors:`, fixCode.targetedSelectors);
+            // Prepare backup data for deployment
+            const backupData = {
+                violationId: violationId,
+                targetedSelectors: fixCode.targetedSelectors,
+                originalCSS: fixCode.css,
+                platform: platform,
+                timestamp: new Date().toISOString()
+            };
             
-            // In a real deployment, this CSS would be applied to the platform
-            // For now, we'll store it in the deployment record
-            deploymentId = `deploy_${violationId}_${Date.now()}_with_css`;
+            // Deploy using real platform APIs
+            let deploymentResult;
+            if (platform === 'shopify') {
+                deploymentResult = await deployToShopify(fixCode.css, connectedPlatform, backupData);
+            } else if (platform === 'wordpress') {
+                deploymentResult = await deployToWordPress(fixCode.css, connectedPlatform, backupData);
+            } else {
+                // Fallback for other platforms
+                deploymentResult = {
+                    success: true,
+                    deploymentId: `${platform}_${Date.now()}`,
+                    message: `CSS fix prepared for ${platform} (manual implementation required)`
+                };
+            }
             
-            console.log(`✅ CSS fix deployed successfully with ${fixCode.targetedSelectors.length} targeted selectors`);
+            if (deploymentResult.success) {
+                deploymentId = deploymentResult.deploymentId;
+                console.log(`✅ Real deployment successful:`, deploymentResult);
+                console.log(`📝 Generated CSS fix:`, fixCode.css);
+                console.log(`🎯 Targeted selectors:`, fixCode.targetedSelectors);
+                console.log(`🔄 Backup ID:`, deploymentResult.backupId);
+                console.log(`🛡️ Rollback available:`, deploymentResult.rollbackAvailable);
+            } else {
+                throw new Error(`Deployment failed: ${deploymentResult.error}`);
+            }
         }
+       
         
         res.json({
             success: true,
