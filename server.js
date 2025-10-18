@@ -1512,6 +1512,223 @@ function generateSmartSelectors(selectors, elementData) {
     
     return selectedStrategies.map(s => s.selector);
 }
+// STEP A2: Selector Reliability Testing - Validate selectors against actual DOM
+function validateSelectorsAgainstDOM(selectors, originalNodes, pageContent) {
+    if (!selectors || selectors.length === 0) return [];
+    
+    const validatedSelectors = [];
+    
+    selectors.forEach(selector => {
+        const validation = testSelectorReliability(selector, originalNodes, pageContent);
+        validatedSelectors.push({
+            selector: selector,
+            isValid: validation.isValid,
+            reliability: validation.reliability,
+            elementsFound: validation.elementsFound,
+            matchesOriginal: validation.matchesOriginal,
+            fallbackScore: validation.fallbackScore
+        });
+    });
+    
+    // Sort by reliability and validity
+    validatedSelectors.sort((a, b) => {
+        if (a.isValid !== b.isValid) return b.isValid - a.isValid; // Valid first
+        return b.reliability - a.reliability; // Higher reliability first
+    });
+    
+    return validatedSelectors;
+}
+
+// Test individual selector reliability against DOM
+function testSelectorReliability(selector, originalNodes, pageContent) {
+    const result = {
+        isValid: false,
+        reliability: 0,
+        elementsFound: 0,
+        matchesOriginal: false,
+        fallbackScore: 0,
+        issues: []
+    };
+    
+    try {
+        // Test 1: Basic CSS selector validity
+        if (!isValidCSSSelector(selector)) {
+            result.issues.push('Invalid CSS syntax');
+            return result;
+        }
+        
+        // Test 2: Check for problematic patterns
+        const problematicPatterns = [
+            /\d{4,}/, // Long numbers (likely dynamic IDs)
+            /temp|tmp|generated|random/, // Temporary classes
+            /\[style.*=.*\]/, // Inline style selectors (fragile)
+        ];
+        
+        let hasProblematicPattern = false;
+        problematicPatterns.forEach(pattern => {
+            if (pattern.test(selector)) {
+                result.issues.push(`Contains problematic pattern: ${pattern.source}`);
+                hasProblematicPattern = true;
+            }
+        });
+        
+        // Test 3: Selector specificity scoring
+        const specificity = calculateSelectorSpecificity(selector);
+        if (specificity.total > 100) {
+            result.issues.push('Overly specific selector (may be fragile)');
+        }
+        
+        // Test 4: Simulate DOM matching (basic validation)
+        const estimatedMatches = estimateDOMMatches(selector, originalNodes);
+        result.elementsFound = estimatedMatches.count;
+        result.matchesOriginal = estimatedMatches.matchesOriginal;
+        
+        // Calculate reliability score
+        let reliability = 50; // Base score
+        
+        // Positive factors
+        if (selector.includes('[role=') || selector.includes('[aria-')) reliability += 25;
+        if (selector.includes('.') && !selector.includes('#')) reliability += 15;
+        if (selector.length < 80) reliability += 10;
+        if (result.matchesOriginal) reliability += 20;
+        if (result.elementsFound === 1) reliability += 15; // Unique targeting
+        
+        // Negative factors
+        if (hasProblematicPattern) reliability -= 30;
+        if (specificity.total > 100) reliability -= 20;
+        if (selector.length > 150) reliability -= 15;
+        if (result.elementsFound === 0) reliability -= 40;
+        if (result.elementsFound > 10) reliability -= 10; // Too broad
+        
+        result.reliability = Math.max(0, Math.min(100, reliability));
+        result.isValid = result.reliability >= 30 && result.elementsFound > 0;
+        result.fallbackScore = calculateFallbackScore(selector);
+        
+    } catch (error) {
+        result.issues.push(`Validation error: ${error.message}`);
+    }
+    
+    return result;
+}
+
+// Check if CSS selector syntax is valid
+function isValidCSSSelector(selector) {
+    try {
+        // Basic syntax checks
+        if (!selector || selector.trim() === '') return false;
+        
+        // Check for balanced brackets and quotes
+        const brackets = selector.match(/[\[\]]/g) || [];
+        if (brackets.length % 2 !== 0) return false;
+        
+        const quotes = selector.match(/['"]/g) || [];
+        if (quotes.length % 2 !== 0) return false;
+        
+        // Check for invalid characters at start
+        if (/^[0-9]/.test(selector.trim())) return false;
+        
+        // Basic CSS selector pattern validation
+        const validPattern = /^[a-zA-Z0-9\s\.\#\[\]\(\)\:\-_='">,\+~\*\|^$]+$/;
+        return validPattern.test(selector);
+        
+    } catch (error) {
+        return false;
+    }
+}
+
+// Calculate CSS selector specificity
+function calculateSelectorSpecificity(selector) {
+    const specificity = {
+        ids: 0,
+        classes: 0,
+        elements: 0,
+        total: 0
+    };
+    
+    // Count IDs
+    specificity.ids = (selector.match(/#/g) || []).length;
+    
+    // Count classes, attributes, and pseudo-classes
+    specificity.classes = (selector.match(/\.|:|\[/g) || []).length;
+    
+    // Count elements
+    const elements = selector.replace(/[#\.\[\]:]/g, '').split(/[\s>+~]/).filter(e => e.trim());
+    specificity.elements = elements.length;
+    
+    // Calculate total specificity score
+    specificity.total = (specificity.ids * 100) + (specificity.classes * 10) + specificity.elements;
+    
+    return specificity;
+}
+
+// Estimate how many DOM elements this selector would match
+function estimateDOMMatches(selector, originalNodes) {
+    const result = {
+        count: 1, // Default estimate
+        matchesOriginal: false
+    };
+    
+    try {
+        // If we have original node data, try to match against it
+        if (originalNodes && originalNodes.length > 0) {
+            const firstNode = originalNodes[0];
+            
+            // Check if selector appears to target the original element
+            if (firstNode.target && firstNode.target[0]) {
+                const originalSelector = firstNode.target[0];
+                
+                // Simple matching - check if selectors reference similar elements
+                const selectorParts = selector.toLowerCase().split(/[\s>+~]/).filter(p => p.trim());
+                const originalParts = originalSelector.toLowerCase().split(/[\s>+~]/).filter(p => p.trim());
+                
+                let matches = 0;
+                selectorParts.forEach(part => {
+                    if (originalParts.some(origPart => origPart.includes(part.replace(/[#\.]/g, '')))) {
+                        matches++;
+                    }
+                });
+                
+                result.matchesOriginal = matches > 0;
+                
+                // Estimate count based on selector specificity
+                if (selector.includes('#')) {
+                    result.count = 1; // IDs should be unique
+                } else if (selector.includes('.')) {
+                    result.count = Math.max(1, 5 - matches); // Classes might match multiple
+                } else {
+                    result.count = Math.max(1, 10 - matches); // Element selectors are broader
+                }
+            }
+        }
+        
+    } catch (error) {
+        // Default to conservative estimate
+        result.count = 1;
+    }
+    
+    return result;
+}
+
+// Calculate fallback score for selector reliability
+function calculateFallbackScore(selector) {
+    let score = 50;
+    
+    // Prefer semantic selectors
+    if (selector.includes('[role=')) score += 20;
+    if (selector.includes('[aria-')) score += 15;
+    if (selector.includes('[data-')) score += 10;
+    
+    // Prefer stable class patterns
+    if (selector.includes('.btn') || selector.includes('.button')) score += 10;
+    if (selector.includes('.nav') || selector.includes('.menu')) score += 10;
+    
+    // Penalize fragile patterns
+    if (/\d{3,}/.test(selector)) score -= 20;
+    if (selector.includes('nth-child')) score -= 10;
+    if (selector.length > 100) score -= 15;
+    
+    return Math.max(0, Math.min(100, score));
+}
 
 // Generate multiple targeting strategies for a single element
 function generateSelectorStrategies(originalSelector, elementData) {
