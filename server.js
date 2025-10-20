@@ -3,11 +3,14 @@ const puppeteer = require('puppeteer');
 const axeCore = require('axe-core');
 const { Pool } = require('pg');
 const OpenAI = require('openai');
+const { generateAccessibilityJS } = require('./accessibility-js-generator');
+const DeploymentStatusTracker = require('./deployment-status-tracker');
+const { setupDeploymentStatusEndpoints } = require('./deployment-status-endpoints');
 
 // ENHANCEMENT: Import deployment engines (optional - with feature flag)
 const ENABLE_DEPLOYMENT_FEATURES = process.env.ENABLE_DEPLOYMENT_FEATURES || 'true';
-let DOMParsingEngine, PatchGenerationEngine, DeploymentAutomationEngine, RollbackSafetyEngine;
-let domParsingEngine, patchGenerationEngine, deploymentEngine, safetyEngine;
+let DOMParsingEngine, PatchGenerationEngine, DeploymentAutomationEngine, RollbackSafetyEngine, ShopifyDeploymentEngine, WordPressDeploymentEngine;
+let domParsingEngine, patchGenerationEngine, deploymentEngine, safetyEngine, shopifyEngine, wordpressEngine;
 
 // SURGICAL PATCH: Replace lines 12-28 in your server.js with this improved engine loading code
 
@@ -59,9 +62,31 @@ if (ENABLE_DEPLOYMENT_FEATURES === 'true') {
         safetyEngine = null;
     }
     
+    try {
+        console.log('Loading Shopify Deployment Engine...');
+        ShopifyDeploymentEngine = require('./shopify-deployment-engine.js');
+        shopifyEngine = new ShopifyDeploymentEngine();
+        console.log('✅ Shopify Deployment Engine loaded successfully');
+    } catch (error) {
+        console.log('⚠️ Shopify Deployment Engine failed:', error.message);
+        ShopifyDeploymentEngine = null;
+        shopifyEngine = null;
+    }
+    
+    try {
+        console.log('Loading WordPress Deployment Engine...');
+        WordPressDeploymentEngine = require('./wordpress-deployment-engine.js');
+        wordpressEngine = new WordPressDeploymentEngine();
+        console.log('✅ WordPress Deployment Engine loaded successfully');
+    } catch (error) {
+        console.log('⚠️ WordPress Deployment Engine failed:', error.message);
+        WordPressDeploymentEngine = null;
+        wordpressEngine = null;
+    }
+    
     // Summary of loaded engines
-    const loadedEngines = [domParsingEngine, patchGenerationEngine, deploymentEngine, safetyEngine].filter(Boolean);
-    console.log(`✅ Phase 2 Status: ${loadedEngines.length}/4 engines loaded successfully`);
+    const loadedEngines = [domParsingEngine, patchGenerationEngine, deploymentEngine, safetyEngine, shopifyEngine, wordpressEngine].filter(Boolean);
+    console.log(`✅ Phase 2 Status: ${loadedEngines.length}/6 engines loaded successfully`);
     
     if (loadedEngines.length === 0) {
         console.log('⚠️ No Phase 2 engines available - running in core mode');
@@ -150,6 +175,18 @@ if (process.env.OPENAI_API_KEY) {
     console.log('✅ OpenAI client initialized successfully');
 } else {
     console.log('⚠️ No OpenAI API key found, AI suggestions will use predefined responses');
+}
+
+// Initialize deployment status tracker
+let deploymentTracker = null;
+if (ENABLE_DEPLOYMENT_FEATURES === 'true') {
+    deploymentTracker = new DeploymentStatusTracker(db);
+    console.log('✅ Deployment status tracker initialized');
+    
+    // Clean up old deployments every hour
+    setInterval(() => {
+        deploymentTracker.cleanup();
+    }, 60 * 60 * 1000);
 }
 // PHASE 2 ENHANCEMENT: Helper functions for user tier and platform management
 async function getUserTierInfo(userId = 1) {
@@ -502,48 +539,281 @@ app.post('/api/deploy-fix', async (req, res) => {
             });
         }
         
-let deploymentId = `deploy_${violationId}_${Date.now()}`;
+        // Initialize deployment tracking
+        const deploymentId = `deploy_${violationId}_${Date.now()}`;
+        let deployment = null;
         
-               // STEP 3 ENHANCEMENT: Generate and deploy actual CSS fixes
-        if (deploymentEngine && patchGenerationEngine) {
-            console.log(`🚀 Deploying fix ${violationId} to ${platform} site: ${connectedPlatform.website_url}`);
-            
-            // Get the violation data to generate targeted fix
-            const violationData = { 
-                id: violationId.replace('violation_', ''),
-                impact: 'serious',
-                nodes: [{ enhancedData: { selector: `.violation-${violationId}` } }]
-            };
-            
-            // Generate the actual CSS fix using our enhanced function
-            const fixCode = generateFixCode(violationData, { type: platform });
-            
-            // Log the actual CSS being deployed
-            console.log(`📝 Generated CSS fix:`, fixCode.css);
-            console.log(`🎯 Targeted selectors:`, fixCode.targetedSelectors);
-            
-            // In a real deployment, this CSS would be applied to the platform
-            // For now, we'll store it in the deployment record
-            deploymentId = `deploy_${violationId}_${Date.now()}_with_css`;
-            
-            console.log(`✅ CSS fix deployed successfully with ${fixCode.targetedSelectors.length} targeted selectors`);
+        if (deploymentTracker) {
+            deployment = deploymentTracker.startDeployment(deploymentId, {
+                platform: platform,
+                websiteUrl: connectedPlatform.website_url,
+                userId: userId,
+                violationId: violationId
+            });
         }
         
-        res.json({
-            success: true,
-            deploymentId,
-            status: 'completed',
-            message: 'Fix deployed successfully to your live website',
-            appliedAt: new Date().toISOString(),
-            platform: connectedPlatform.platform_type,
-            websiteUrl: connectedPlatform.website_url,
-            websiteName: connectedPlatform.connection_name,
-            isPremiumDeployment: true
-        });
+        let deploymentResult = {
+            deploymentId: deploymentId,
+            status: 'pending',
+            platform: platform,
+            violationId: violationId
+        };
+        
+        // ENHANCED DEPLOYMENT: Use platform-specific deployment engines
+        if (platform === 'shopify' && shopifyEngine) {
+            if (deploymentTracker) {
+                deploymentTracker.updateStatus(deploymentId, 'validating', 'Validating Shopify connection...');
+                deploymentTracker.updateStep(deploymentId, 'validation', 'in_progress', 'Checking Shopify API access');
+            }
+            console.log(`🛍️ Deploying Shopify fix ${violationId} to ${connectedPlatform.website_url}`);
+            
+            // Generate patch package for the violation
+            const patchPackage = {
+                scanId: `scan_${Date.now()}`,
+                url: connectedPlatform.website_url,
+                platform: 'shopify',
+                violations: [{
+                    id: violationId.replace('violation_', ''),
+                    impact: 'serious',
+                    description: `Accessibility violation: ${violationId}`
+                }],
+                cssContent: generateFixCode({ id: violationId.replace('violation_', '') }, { type: 'shopify' }).css,
+                jsContent: generateAccessibilityJS(violationId)
+            };
+            
+            // Update tracking for deployment phase
+            if (deploymentTracker) {
+                deploymentTracker.updateStep(deploymentId, 'validation', 'completed', 'Shopify connection validated');
+                deploymentTracker.updateStatus(deploymentId, 'deploying', 'Deploying fixes to Shopify store...');
+                deploymentTracker.updateStep(deploymentId, 'deployment', 'in_progress', 'Uploading CSS and JavaScript fixes');
+            }
+            
+            // Deploy to Shopify using the specialized engine
+            const shopifyResult = await shopifyEngine.deployToShopify(patchPackage, connectedPlatform);
+            
+            // Update tracking with deployment results
+            if (deploymentTracker) {
+                shopifyResult.deployedAssets?.forEach(asset => {
+                    deploymentTracker.addDeployedAsset(deploymentId, asset);
+                });
+                shopifyResult.failedAssets?.forEach(asset => {
+                    deploymentTracker.addFailedAsset(deploymentId, asset);
+                });
+                shopifyResult.backups?.forEach(backup => {
+                    deploymentTracker.addBackup(deploymentId, backup);
+                });
+            }
+            
+            if (shopifyResult.status === 'completed') {
+                if (deploymentTracker) {
+                    deploymentTracker.updateStep(deploymentId, 'deployment', 'completed', 'Fixes deployed successfully');
+                    deploymentTracker.updateStep(deploymentId, 'verification', 'completed', 'Deployment verified');
+                    deploymentTracker.updateStep(deploymentId, 'completion', 'completed', 'Deployment completed');
+                    await deploymentTracker.completeDeployment(deploymentId, 'completed', shopifyResult);
+                }
+                // Log deployment to database
+                if (db) {
+                    try {
+                        await db.query(`
+                            INSERT INTO deployment_history 
+                            (user_id, website_connection_id, scan_id, violation_type, fix_type, 
+                             deployment_status, deployment_method, fix_content, deployed_at)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        `, [
+                            userId,
+                            connectedPlatform.id,
+                            patchPackage.scanId,
+                            violationId,
+                            'css_js_fix',
+                            'completed',
+                            'shopify_api',
+                            JSON.stringify(patchPackage),
+                            new Date()
+                        ]);
+                    } catch (dbError) {
+                        console.error('Failed to log deployment:', dbError);
+                    }
+                }
+                
+                deploymentResult = {
+                    success: true,
+                    deploymentId: shopifyResult.id,
+                    status: 'completed',
+                    message: 'Fix deployed successfully to your Shopify store',
+                    appliedAt: shopifyResult.endTime,
+                    platform: 'shopify',
+                    websiteUrl: connectedPlatform.website_url,
+                    websiteName: connectedPlatform.connection_name,
+                    deployedAssets: shopifyResult.deployedAssets,
+                    themeId: shopifyResult.themeId,
+                    themeName: shopifyResult.themeName,
+                    isPremiumDeployment: true
+                };
+                
+                console.log(`✅ Shopify deployment completed: ${shopifyResult.deployedAssets.length} assets deployed`);
+                
+            } else {
+                if (deploymentTracker) {
+                    deploymentTracker.updateStep(deploymentId, 'deployment', 'failed', shopifyResult.error || 'Deployment failed');
+                    await deploymentTracker.completeDeployment(deploymentId, 'failed', shopifyResult);
+                }
+                
+                deploymentResult = {
+                    success: false,
+                    deploymentId: shopifyResult.id,
+                    status: 'failed',
+                    error: shopifyResult.error,
+                    message: 'Deployment failed - automatic rollback performed',
+                    rollbackStatus: shopifyResult.rollbackStatus,
+                    logs: shopifyResult.logs
+                };
+            }
+            
+        } else if (platform === 'wordpress' && wordpressEngine) {
+            if (deploymentTracker) {
+                deploymentTracker.updateStatus(deploymentId, 'validating', 'Validating WordPress connection...');
+                deploymentTracker.updateStep(deploymentId, 'validation', 'in_progress', 'Checking WordPress API access');
+            }
+            
+            // WordPress deployment using the specialized WordPress engine
+            console.log(`🔧 Deploying WordPress fix ${violationId} to ${connectedPlatform.website_url}`);
+            
+            // Generate patch package for the violation
+            const patchPackage = {
+                scanId: `scan_${Date.now()}`,
+                url: connectedPlatform.website_url,
+                platform: 'wordpress',
+                violations: [{
+                    id: violationId.replace('violation_', ''),
+                    impact: 'serious',
+                    description: `Accessibility violation: ${violationId}`
+                }],
+                cssContent: generateFixCode({ id: violationId.replace('violation_', '') }, { type: 'wordpress' }).css,
+                jsContent: generateAccessibilityJS(violationId)
+            };
+            
+            // Update tracking for deployment phase
+            if (deploymentTracker) {
+                deploymentTracker.updateStep(deploymentId, 'validation', 'completed', 'WordPress connection validated');
+                deploymentTracker.updateStatus(deploymentId, 'deploying', 'Deploying fixes to WordPress site...');
+                deploymentTracker.updateStep(deploymentId, 'deployment', 'in_progress', 'Uploading files and creating posts');
+            }
+            
+            // Deploy to WordPress using the specialized engine
+            const wordpressResult = await wordpressEngine.deployToWordPress(patchPackage, connectedPlatform);
+            
+            // Update tracking with deployment results
+            if (deploymentTracker) {
+                wordpressResult.deployedAssets?.forEach(asset => {
+                    deploymentTracker.addDeployedAsset(deploymentId, asset);
+                });
+                wordpressResult.failedAssets?.forEach(asset => {
+                    deploymentTracker.addFailedAsset(deploymentId, asset);
+                });
+                wordpressResult.backups?.forEach(backup => {
+                    deploymentTracker.addBackup(deploymentId, backup);
+                });
+            }
+            
+            if (wordpressResult.status === 'completed') {
+                if (deploymentTracker) {
+                    deploymentTracker.updateStep(deploymentId, 'deployment', 'completed', 'Fixes deployed successfully');
+                    deploymentTracker.updateStep(deploymentId, 'verification', 'completed', 'Deployment verified');
+                    deploymentTracker.updateStep(deploymentId, 'completion', 'completed', 'Deployment completed');
+                    await deploymentTracker.completeDeployment(deploymentId, 'completed', wordpressResult);
+                }
+                
+                // Log deployment to database
+                if (db) {
+                    try {
+                        await db.query(`
+                            INSERT INTO deployment_history 
+                            (user_id, website_connection_id, scan_id, violation_type, fix_type, 
+                             deployment_status, deployment_method, fix_content, deployed_at)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        `, [
+                            userId,
+                            connectedPlatform.id,
+                            patchPackage.scanId,
+                            violationId,
+                            'css_js_fix',
+                            'completed',
+                            'wordpress_api',
+                            JSON.stringify(patchPackage),
+                            new Date()
+                        ]);
+                    } catch (dbError) {
+                        console.error('Failed to log deployment:', dbError);
+                    }
+                }
+                
+                deploymentResult = {
+                    success: true,
+                    deploymentId: wordpressResult.id,
+                    status: 'completed',
+                    message: 'Fix deployed successfully to your WordPress site',
+                    appliedAt: wordpressResult.endTime,
+                    platform: 'wordpress',
+                    websiteUrl: connectedPlatform.website_url,
+                    websiteName: connectedPlatform.connection_name,
+                    deployedAssets: wordpressResult.deployedAssets,
+                    wpVersion: wordpressResult.wpVersion,
+                    activeTheme: wordpressResult.activeTheme,
+                    isPremiumDeployment: true
+                };
+                
+                console.log(`✅ WordPress deployment completed: ${wordpressResult.deployedAssets.length} assets deployed`);
+                
+            } else {
+                if (deploymentTracker) {
+                    deploymentTracker.updateStep(deploymentId, 'deployment', 'failed', wordpressResult.error || 'Deployment failed');
+                    await deploymentTracker.completeDeployment(deploymentId, 'failed', wordpressResult);
+                }
+                
+                deploymentResult = {
+                    success: false,
+                    deploymentId: wordpressResult.id,
+                    status: 'failed',
+                    error: wordpressResult.error,
+                    message: 'Deployment failed - check logs for details',
+                    rollbackStatus: wordpressResult.rollbackStatus,
+                    logs: wordpressResult.logs,
+                    deployedAssets: wordpressResult.deployedAssets,
+                    failedAssets: wordpressResult.failedAssets
+                };
+            }
+            
+        } else {
+            // Fallback for unsupported platforms or missing engines
+            const fixCode = generateFixCode({ id: violationId.replace('violation_', '') }, { type: platform });
+            
+            deploymentResult = {
+                success: false,
+                deploymentId: `manual_${violationId}_${Date.now()}`,
+                status: 'manual_required',
+                message: `Automatic deployment not available for ${platform}. Manual deployment required.`,
+                platform: platform,
+                websiteUrl: connectedPlatform.website_url,
+                websiteName: connectedPlatform.connection_name,
+                manualInstructions: {
+                    css: fixCode.css,
+                    instructions: `Please add the provided CSS to your ${platform} site's custom CSS section.`,
+                    selectors: fixCode.targetedSelectors
+                },
+                requiresManualDeployment: true
+            };
+        }
+        
+        res.json(deploymentResult);
         
     } catch (error) {
         console.error('Deploy fix error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            deploymentId: `error_${Date.now()}`,
+            status: 'error'
+        });
     }
 });
 
@@ -7293,6 +7563,11 @@ app.get('/api/platforms/capabilities', async (req, res) => {
         });
     }
 });
+
+// Setup deployment status endpoints
+if (deploymentTracker) {
+    setupDeploymentStatusEndpoints(app, deploymentTracker);
+}
 
 // Start server
 app.listen(PORT, () => {
