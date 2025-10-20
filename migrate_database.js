@@ -1,146 +1,171 @@
-// Database Migration Script for SentryPrime Platform Connections
-// Run this script to set up the database tables for storing platform connections
-
 const { Pool } = require('pg');
 const fs = require('fs');
-const path = require('path');
-
-// Database configuration - same as server.js
-function getDatabaseConfig() {
-    if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME) {
-        throw new Error('Missing required database environment variables: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
-    }
-
-    const isCloudRun = process.env.K_SERVICE && process.env.DB_HOST.includes(':');
-    
-    if (isCloudRun) {
-        return {
-            host: `/cloudsql/${process.env.DB_HOST}`,
-            database: process.env.DB_NAME,
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            connectionTimeoutMillis: 10000,
-            idleTimeoutMillis: 30000,
-            max: 10
-        };
-    } else {
-        return {
-            host: process.env.DB_HOST,
-            port: process.env.DB_PORT || 5432,
-            database: process.env.DB_NAME,
-            user: process.env.DB_USER,
-            password: process.env.DB_PASSWORD,
-            ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-            connectionTimeoutMillis: 10000,
-            idleTimeoutMillis: 30000,
-            max: 10
-        };
-    }
-}
 
 async function runMigration() {
-    let db = null;
+    console.log('🔄 Starting database migration...');
+    
+    // Database connection configuration
+    const dbConfig = {
+        host: `/cloudsql/${process.env.DB_HOST}`,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        connectionTimeoutMillis: 10000,
+        idleTimeoutMillis: 30000,
+        max: 10
+    };
+
+    // Validate environment variables
+    const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    
+    if (missingVars.length > 0) {
+        console.error('❌ Missing required database environment variables:', missingVars.join(', '));
+        console.log('Please set the following environment variables:');
+        requiredEnvVars.forEach(varName => {
+            console.log(`  export ${varName}="your_value"`);
+        });
+        process.exit(1);
+    }
+
+    const db = new Pool(dbConfig);
     
     try {
-        console.log('🔄 Starting database migration...');
-        
-        // Connect to database
-        const dbConfig = getDatabaseConfig();
-        db = new Pool(dbConfig);
-        
         // Test connection
-        const testResult = await db.query('SELECT NOW() as current_time');
+        console.log('🔌 Testing database connection...');
+        const testResult = await db.query('SELECT NOW() as current_time, version() as pg_version');
         console.log('✅ Database connected successfully');
         console.log('⏰ Server time:', testResult.rows[0].current_time);
+        console.log('🗄️  PostgreSQL version:', testResult.rows[0].pg_version.split(' ')[0]);
         
-        // Read and execute schema file
-        const schemaPath = path.join(__dirname, 'database_schema.sql');
-        const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-        
-        console.log('📝 Executing database schema...');
-        await db.query(schemaSql);
-        console.log('✅ Database schema created successfully');
-        
-        // Insert sample data for testing
-        console.log('📝 Inserting sample data...');
-        await insertSampleData(db);
-        console.log('✅ Sample data inserted successfully');
-        
-        // Verify tables were created
-        console.log('🔍 Verifying table creation...');
-        const tables = await db.query(`
+        // Check if this is a fresh install or an update
+        console.log('🔍 Checking existing database structure...');
+        const existingTables = await db.query(`
             SELECT table_name 
             FROM information_schema.tables 
             WHERE table_schema = 'public' 
-            AND table_name IN ('users', 'user_tier_info', 'website_connections', 'deployment_history', 'platform_capabilities')
-            ORDER BY table_name
+            AND table_name IN ('user_tier_info', 'website_connections', 'deployment_history', 'platform_capabilities')
         `);
         
-        console.log('📊 Created tables:');
-        tables.rows.forEach(row => {
-            console.log(`  ✓ ${row.table_name}`);
-        });
+        const tableNames = existingTables.rows.map(row => row.table_name);
+        console.log('📋 Existing tables:', tableNames.length > 0 ? tableNames.join(', ') : 'None');
+        
+        // Read and execute schema
+        console.log('📝 Reading database schema file...');
+        if (!fs.existsSync('database_schema.sql')) {
+            console.error('❌ database_schema.sql file not found');
+            console.log('Please ensure database_schema.sql is in the current directory');
+            process.exit(1);
+        }
+        
+        const schemaSql = fs.readFileSync('database_schema.sql', 'utf8');
+        console.log('🚀 Executing database schema...');
+        
+        // Execute schema in a transaction
+        await db.query('BEGIN');
+        
+        try {
+            await db.query(schemaSql);
+            await db.query('COMMIT');
+            console.log('✅ Database schema executed successfully');
+        } catch (schemaError) {
+            await db.query('ROLLBACK');
+            throw schemaError;
+        }
+        
+        // Verify the migration
+        console.log('🔍 Verifying migration results...');
+        
+        // Check table counts
+        const verificationQueries = [
+            { name: 'User Tier Info', query: 'SELECT COUNT(*) as count FROM user_tier_info' },
+            { name: 'Website Connections', query: 'SELECT COUNT(*) as count FROM website_connections' },
+            { name: 'Deployment History', query: 'SELECT COUNT(*) as count FROM deployment_history' },
+            { name: 'Platform Capabilities', query: 'SELECT COUNT(*) as count FROM platform_capabilities' }
+        ];
+        
+        for (const verification of verificationQueries) {
+            try {
+                const result = await db.query(verification.query);
+                console.log(`📊 ${verification.name}: ${result.rows[0].count} records`);
+            } catch (error) {
+                console.log(`⚠️  ${verification.name}: Table not accessible (${error.message})`);
+            }
+        }
+        
+        // Test the getUserPlatforms functionality
+        console.log('🧪 Testing platform connections for user 1...');
+        try {
+            const platformTest = await db.query(`
+                SELECT 
+                    wc.platform_type,
+                    wc.website_url,
+                    wc.connection_name,
+                    wc.connection_status,
+                    wc.deployment_method
+                FROM website_connections wc
+                WHERE wc.user_id = 1 AND wc.connection_status = 'active'
+            `);
+            
+            if (platformTest.rows.length > 0) {
+                console.log('✅ Platform connections found for user 1:');
+                platformTest.rows.forEach(row => {
+                    console.log(`   📱 ${row.platform_type}: ${row.website_url} (${row.connection_status})`);
+                });
+            } else {
+                console.log('⚠️  No active platform connections found for user 1');
+            }
+        } catch (error) {
+            console.log('⚠️  Could not test platform connections:', error.message);
+        }
         
         console.log('🎉 Migration completed successfully!');
+        console.log('');
+        console.log('Next steps:');
+        console.log('1. Deploy your updated server.js with the database integration');
+        console.log('2. Test the platform connection functionality');
+        console.log('3. Users can now connect platforms during onboarding');
         
     } catch (error) {
         console.error('❌ Migration failed:', error.message);
         console.error('🔍 Error details:', error);
+        
+        // Provide helpful error messages for common issues
+        if (error.message.includes('ENOTFOUND')) {
+            console.log('');
+            console.log('💡 Connection troubleshooting:');
+            console.log('- Ensure you are running this from Google Cloud Shell or a machine with access to your Cloud SQL instance');
+            console.log('- Verify your DB_HOST format: "project:region:instance-name"');
+            console.log('- Check that your Cloud SQL instance is running');
+        }
+        
+        if (error.message.includes('authentication failed')) {
+            console.log('');
+            console.log('💡 Authentication troubleshooting:');
+            console.log('- Verify DB_USER and DB_PASSWORD are correct');
+            console.log('- Ensure the database user has CREATE and INSERT permissions');
+        }
+        
         process.exit(1);
     } finally {
-        if (db) {
-            await db.end();
-        }
+        await db.end();
+        console.log('🔌 Database connection closed');
     }
 }
 
-async function insertSampleData(db) {
-    // Insert sample users
-    await db.query(`
-        INSERT INTO users (id, email, name, tier_name, subscription_status) VALUES
-        (1, 'john@company.com', 'John Doe', 'premium', 'active'),
-        (2, 'jane@startup.com', 'Jane Smith', 'basic', 'inactive')
-        ON CONFLICT (id) DO UPDATE SET
-        email = EXCLUDED.email,
-        name = EXCLUDED.name,
-        tier_name = EXCLUDED.tier_name,
-        subscription_status = EXCLUDED.subscription_status
-    `);
-    
-    // Insert user tier info
-    await db.query(`
-        INSERT INTO user_tier_info (user_id, tier_name, tier_features, subscription_status, is_active, connected_platforms) VALUES
-        (1, 'premium', '{"auto_deployment": true, "unlimited_scans": true, "priority_support": true}', 'active', true, 1),
-        (2, 'basic', '{"auto_deployment": false, "unlimited_scans": false, "priority_support": false}', 'inactive', true, 0)
-        ON CONFLICT (user_id) DO UPDATE SET
-        tier_name = EXCLUDED.tier_name,
-        tier_features = EXCLUDED.tier_features,
-        subscription_status = EXCLUDED.subscription_status,
-        is_active = EXCLUDED.is_active,
-        connected_platforms = EXCLUDED.connected_platforms
-    `);
-    
-    // Insert sample website connections
-    await db.query(`
-        INSERT INTO website_connections (user_id, platform_type, website_url, connection_name, connection_status, connection_config, last_connected_at) VALUES
-        (1, 'shopify', 'https://essolar.com', 'ESSolar Shopify Store', 'active', '{"method": "shopify_api", "authenticated": true, "store_domain": "essolar.myshopify.com"}', CURRENT_TIMESTAMP)
-        ON CONFLICT (user_id, website_url) DO UPDATE SET
-        platform_type = EXCLUDED.platform_type,
-        connection_name = EXCLUDED.connection_name,
-        connection_status = EXCLUDED.connection_status,
-        connection_config = EXCLUDED.connection_config,
-        last_connected_at = EXCLUDED.last_connected_at
-    `);
-    
-    console.log('  ✓ Sample users created');
-    console.log('  ✓ User tier info created');
-    console.log('  ✓ Platform connections created');
-    console.log('  ✓ User 1 (john@company.com) has premium tier with Shopify connection to essolar.com');
-}
+// Handle process termination gracefully
+process.on('SIGINT', () => {
+    console.log('\n🛑 Migration interrupted by user');
+    process.exit(1);
+});
 
-// Run migration if this file is executed directly
-if (require.main === module) {
-    runMigration();
-}
+process.on('SIGTERM', () => {
+    console.log('\n🛑 Migration terminated');
+    process.exit(1);
+});
 
-module.exports = { runMigration, getDatabaseConfig };
+// Run the migration
+runMigration().catch(error => {
+    console.error('💥 Unexpected error:', error);
+    process.exit(1);
+});
