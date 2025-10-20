@@ -183,35 +183,42 @@ async function getUserTierInfo(userId = 1) {
 }
 
 async function getUserPlatforms(userId = 1) {
-    // In production, this would query your database
+    // Query database for user's connected platforms
     if (db) {
         try {
-            const result = await db.query(
-                'SELECT * FROM website_connections WHERE user_id = $1 AND connection_status = $2',
-                [userId, 'active']
-            );
+            const result = await db.query(`
+                SELECT 
+                    id,
+                    platform_type,
+                    website_url,
+                    connection_name,
+                    connection_status,
+                    connection_config,
+                    last_connected_at,
+                    last_deployment_at,
+                    created_at
+                FROM website_connections 
+                WHERE user_id = $1 AND connection_status = $2
+                ORDER BY last_connected_at DESC
+            `, [userId, 'active']);
+            
             if (result.rows.length > 0) {
+                console.log(`📊 Found ${result.rows.length} platform connection(s) for user ${userId}`);
                 return result.rows;
+            } else {
+                console.log(`ℹ️ No active platform connections found for user ${userId}`);
+                return [];
             }
         } catch (error) {
-            console.log('Database query failed, using mock data:', error.message);
+            console.error('❌ Database query failed in getUserPlatforms:', error.message);
+            console.log('⚠️ Falling back to empty array - user needs to connect platforms during onboarding');
+            return [];
         }
     }
     
-    // FIXED: Mock data - user ID 1 has a connected Shopify site for essolar.com
-    // This fixes the platform detection bug for Phase 2 Step C1 testing
-    if (userId === 1) {
-        return [
-            {
-                platform_type: 'shopify',
-                website_url: 'https://essolar.com',
-                connection_name: 'ESSolar Shopify Store',
-                connection_status: 'active',
-                last_connected_at: new Date().toISOString(),
-                connection_config: { method: 'shopify_api', authenticated: true }
-            }
-        ];
-    }
+    // No database connection - return empty array
+    // Users will need to connect their platforms through the onboarding flow
+    console.log('⚠️ No database connection available - platform connections require database setup');
     return [];
 }
 
@@ -6888,6 +6895,402 @@ app.post('/api/deploy-fix', async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============================================================================
+// PLATFORM CONNECTION APIs FOR ONBOARDING
+// ============================================================================
+
+// API ENDPOINT: Add a new platform connection during onboarding
+app.post('/api/platforms/connect', async (req, res) => {
+    try {
+        const { 
+            userId, 
+            platformType, 
+            websiteUrl, 
+            connectionName, 
+            connectionConfig = {},
+            apiCredentials = {} 
+        } = req.body;
+
+        // Validate required fields
+        if (!userId || !platformType || !websiteUrl || !connectionName) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: userId, platformType, websiteUrl, connectionName'
+            });
+        }
+
+        // Validate platform type
+        const validPlatforms = ['shopify', 'wordpress', 'wix', 'squarespace', 'custom'];
+        if (!validPlatforms.includes(platformType)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid platform type. Must be one of: ${validPlatforms.join(', ')}`
+            });
+        }
+
+        // Validate URL format
+        try {
+            new URL(websiteUrl);
+        } catch (error) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid website URL format'
+            });
+        }
+
+        if (!db) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection not available'
+            });
+        }
+
+        // Check if user exists and get their tier info
+        const userTier = await getUserTierInfo(userId);
+        if (!userTier.is_active) {
+            return res.status(403).json({
+                success: false,
+                error: 'User account is not active'
+            });
+        }
+
+        // Check if connection already exists
+        const existingConnection = await db.query(
+            'SELECT id FROM website_connections WHERE user_id = $1 AND website_url = $2',
+            [userId, websiteUrl]
+        );
+
+        if (existingConnection.rows.length > 0) {
+            return res.status(409).json({
+                success: false,
+                error: 'Platform connection already exists for this website',
+                existingConnectionId: existingConnection.rows[0].id
+            });
+        }
+
+        // Insert new platform connection
+        const result = await db.query(`
+            INSERT INTO website_connections (
+                user_id, 
+                platform_type, 
+                website_url, 
+                connection_name, 
+                connection_status, 
+                connection_config, 
+                api_credentials,
+                last_connected_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+            RETURNING id, platform_type, website_url, connection_name, connection_status, last_connected_at
+        `, [
+            userId,
+            platformType,
+            websiteUrl,
+            connectionName,
+            'active',
+            JSON.stringify(connectionConfig),
+            JSON.stringify(apiCredentials) // In production, encrypt this
+        ]);
+
+        // Update user's connected platforms count
+        await db.query(`
+            UPDATE user_tier_info 
+            SET connected_platforms = (
+                SELECT COUNT(*) FROM website_connections 
+                WHERE user_id = $1 AND connection_status = 'active'
+            )
+            WHERE user_id = $1
+        `, [userId]);
+
+        const newConnection = result.rows[0];
+
+        console.log(`✅ Platform connection created: ${platformType} for ${websiteUrl} (User: ${userId})`);
+
+        res.json({
+            success: true,
+            message: 'Platform connected successfully',
+            connection: {
+                id: newConnection.id,
+                platformType: newConnection.platform_type,
+                websiteUrl: newConnection.website_url,
+                connectionName: newConnection.connection_name,
+                status: newConnection.connection_status,
+                connectedAt: newConnection.last_connected_at
+            }
+        });
+
+    } catch (error) {
+        console.error('Platform connection error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to connect platform',
+            details: error.message 
+        });
+    }
+});
+
+// API ENDPOINT: Get all platform connections for a user
+app.get('/api/platforms/connections', async (req, res) => {
+    try {
+        const userId = req.query.user_id || req.query.userId;
+        
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing user_id parameter'
+            });
+        }
+
+        const userPlatforms = await getUserPlatforms(userId);
+        
+        res.json({
+            success: true,
+            connections: userPlatforms,
+            totalConnections: userPlatforms.length,
+            userId: parseInt(userId)
+        });
+
+    } catch (error) {
+        console.error('Get platform connections error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to get platform connections',
+            details: error.message 
+        });
+    }
+});
+
+// API ENDPOINT: Update a platform connection
+app.put('/api/platforms/connections/:connectionId', async (req, res) => {
+    try {
+        const { connectionId } = req.params;
+        const { 
+            connectionName, 
+            connectionConfig = {}, 
+            apiCredentials = {},
+            connectionStatus = 'active'
+        } = req.body;
+
+        if (!db) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection not available'
+            });
+        }
+
+        // Validate connection status
+        const validStatuses = ['active', 'inactive', 'error', 'pending'];
+        if (!validStatuses.includes(connectionStatus)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid connection status. Must be one of: ${validStatuses.join(', ')}`
+            });
+        }
+
+        // Update the connection
+        const result = await db.query(`
+            UPDATE website_connections 
+            SET 
+                connection_name = COALESCE($1, connection_name),
+                connection_config = COALESCE($2, connection_config),
+                api_credentials = COALESCE($3, api_credentials),
+                connection_status = $4,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $5
+            RETURNING id, platform_type, website_url, connection_name, connection_status, last_connected_at
+        `, [
+            connectionName,
+            connectionConfig ? JSON.stringify(connectionConfig) : null,
+            apiCredentials ? JSON.stringify(apiCredentials) : null,
+            connectionStatus,
+            connectionId
+        ]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Platform connection not found'
+            });
+        }
+
+        const updatedConnection = result.rows[0];
+
+        console.log(`✅ Platform connection updated: ${connectionId}`);
+
+        res.json({
+            success: true,
+            message: 'Platform connection updated successfully',
+            connection: {
+                id: updatedConnection.id,
+                platformType: updatedConnection.platform_type,
+                websiteUrl: updatedConnection.website_url,
+                connectionName: updatedConnection.connection_name,
+                status: updatedConnection.connection_status,
+                lastConnected: updatedConnection.last_connected_at
+            }
+        });
+
+    } catch (error) {
+        console.error('Update platform connection error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to update platform connection',
+            details: error.message 
+        });
+    }
+});
+
+// API ENDPOINT: Delete a platform connection
+app.delete('/api/platforms/connections/:connectionId', async (req, res) => {
+    try {
+        const { connectionId } = req.params;
+        const userId = req.query.user_id || req.query.userId;
+
+        if (!db) {
+            return res.status(500).json({
+                success: false,
+                error: 'Database connection not available'
+            });
+        }
+
+        // Delete the connection
+        const result = await db.query(`
+            DELETE FROM website_connections 
+            WHERE id = $1
+            RETURNING platform_type, website_url, connection_name
+        `, [connectionId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Platform connection not found'
+            });
+        }
+
+        const deletedConnection = result.rows[0];
+
+        // Update user's connected platforms count if userId provided
+        if (userId) {
+            await db.query(`
+                UPDATE user_tier_info 
+                SET connected_platforms = (
+                    SELECT COUNT(*) FROM website_connections 
+                    WHERE user_id = $1 AND connection_status = 'active'
+                )
+                WHERE user_id = $1
+            `, [userId]);
+        }
+
+        console.log(`✅ Platform connection deleted: ${connectionId} (${deletedConnection.platform_type})`);
+
+        res.json({
+            success: true,
+            message: 'Platform connection deleted successfully',
+            deletedConnection: {
+                platformType: deletedConnection.platform_type,
+                websiteUrl: deletedConnection.website_url,
+                connectionName: deletedConnection.connection_name
+            }
+        });
+
+    } catch (error) {
+        console.error('Delete platform connection error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to delete platform connection',
+            details: error.message 
+        });
+    }
+});
+
+// API ENDPOINT: Get available platform types and their capabilities
+app.get('/api/platforms/capabilities', async (req, res) => {
+    try {
+        if (!db) {
+            // Return static capabilities if no database
+            return res.json({
+                success: true,
+                platforms: {
+                    shopify: {
+                        name: 'Shopify',
+                        supportsAutoDeployment: true,
+                        supportedFixTypes: ['color-contrast', 'image-alt', 'link-name', 'button-name'],
+                        deploymentMethods: ['shopify_api', 'theme_files'],
+                        requiredCredentials: ['api_key', 'store_url']
+                    },
+                    wordpress: {
+                        name: 'WordPress',
+                        supportsAutoDeployment: true,
+                        supportedFixTypes: ['color-contrast', 'image-alt', 'link-name', 'button-name', 'heading-order'],
+                        deploymentMethods: ['rest_api', 'ftp_upload', 'plugin_api'],
+                        requiredCredentials: ['username', 'password', 'api_key']
+                    },
+                    wix: {
+                        name: 'Wix',
+                        supportsAutoDeployment: false,
+                        supportedFixTypes: [],
+                        deploymentMethods: ['manual_instructions'],
+                        requiredCredentials: []
+                    },
+                    squarespace: {
+                        name: 'Squarespace',
+                        supportsAutoDeployment: false,
+                        supportedFixTypes: [],
+                        deploymentMethods: ['manual_instructions'],
+                        requiredCredentials: []
+                    },
+                    custom: {
+                        name: 'Custom/Other',
+                        supportsAutoDeployment: true,
+                        supportedFixTypes: ['color-contrast', 'image-alt', 'link-name'],
+                        deploymentMethods: ['ftp_upload', 'sftp_upload'],
+                        requiredCredentials: ['host', 'username', 'password']
+                    }
+                }
+            });
+        }
+
+        // Get capabilities from database
+        const result = await db.query(`
+            SELECT 
+                platform_type,
+                supports_auto_deployment,
+                supported_fix_types,
+                deployment_methods,
+                required_credentials,
+                documentation_url,
+                is_active
+            FROM platform_capabilities 
+            WHERE is_active = true
+            ORDER BY platform_type
+        `);
+
+        const platforms = {};
+        result.rows.forEach(row => {
+            platforms[row.platform_type] = {
+                name: row.platform_type.charAt(0).toUpperCase() + row.platform_type.slice(1),
+                supportsAutoDeployment: row.supports_auto_deployment,
+                supportedFixTypes: row.supported_fix_types,
+                deploymentMethods: row.deployment_methods,
+                requiredCredentials: row.required_credentials,
+                documentationUrl: row.documentation_url
+            };
+        });
+
+        res.json({
+            success: true,
+            platforms
+        });
+
+    } catch (error) {
+        console.error('Get platform capabilities error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to get platform capabilities',
+            details: error.message 
+        });
     }
 });
 
