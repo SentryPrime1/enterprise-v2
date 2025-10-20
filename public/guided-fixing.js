@@ -64,6 +64,9 @@ window.GuidedFixing = (function() {
         // Add modal to body
         document.body.insertAdjacentHTML('beforeend', modalHTML);
         
+        // Set modal as open
+        isModalOpen = true;
+        
         // Add click outside to close
         const modal = document.getElementById('gf-modal');
         modal.addEventListener('click', function(e) {
@@ -72,12 +75,15 @@ window.GuidedFixing = (function() {
             }
         });
         
-        // Add escape key to close
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && isModalOpen) {
-                GuidedFixing.closeModal();
-            }
-        });
+        // Add escape key to close (remove existing listener first)
+        document.removeEventListener('keydown', handleEscapeKey);
+        document.addEventListener('keydown', handleEscapeKey);
+    }
+    
+    function handleEscapeKey(e) {
+        if (e.key === 'Escape' && isModalOpen) {
+            GuidedFixing.closeModal();
+        }
     }
     
     function sortViolationsByPriority(violations) {
@@ -188,9 +194,14 @@ window.GuidedFixing = (function() {
                             }).join('') +
                         '</ol>' +
                     '</div>' +
-                    '<button id="gf-save-btn" class="gf-save-to-report-btn" onclick="GuidedFixing.saveFixToReport()">' +
-                        '💾 Save to Report' +
-                    '</button>' +
+                    '<div class="gf-action-buttons">' +
+                        '<button id="gf-save-btn" class="gf-save-to-report-btn" onclick="GuidedFixing.saveFixToReport()">' +
+                            '💾 Save to Report' +
+                        '</button>' +
+                        '<button id="gf-deploy-btn" class="gf-deploy-fix-btn" onclick="GuidedFixing.deployFix()">' +
+                            '🚀 Deploy Fix' +
+                        '</button>' +
+                    '</div>' +
                 '</div>' +
             '</div>';
         
@@ -275,7 +286,7 @@ window.GuidedFixing = (function() {
         closeModal: function() {
             const modal = document.getElementById('gf-modal');
             if (modal) {
-                modal.style.display = 'none';
+                modal.remove();
                 isModalOpen = false;
             }
         },
@@ -331,23 +342,110 @@ window.GuidedFixing = (function() {
             });
         },
         
-        // Save current fix to report
+             // Save current fix to report
         saveFixToReport: function() {
             const violation = currentViolations[currentViolationIndex];
-            if (violation.aiSuggestion) {
+            
+            if (violation && violation.aiSuggestion) {
                 fixedViolations.push({
                     violation: violation,
-                    suggestion: violation.aiSuggestion,
-                    timestamp: new Date().toISOString()
+                    suggestion: violation.aiSuggestion
                 });
                 
                 // Update button to show saved state
-                const saveButton = document.getElementById('gf-save-btn');
-                if (saveButton) {
-                    saveButton.textContent = '✅ Saved to Report';
-                    saveButton.disabled = true;
-                    saveButton.className = 'gf-save-to-report-btn gf-saved';
+                const saveBtn = document.getElementById('gf-save-btn');
+                if (saveBtn) {
+                    saveBtn.textContent = '✅ Saved to Report';
+                    saveBtn.disabled = true;
                 }
+                
+                console.log('Fix saved to report:', violation.id);
+            }
+        },
+        
+        // Deploy current fix to live website
+        deployFix: function() {
+            const violation = currentViolations[currentViolationIndex];
+            
+            if (!violation || !violation.aiSuggestion) {
+                alert('Please generate an AI fix suggestion first.');
+                return;
+            }
+            
+            // Check if user has premium access (this would be determined by the backend)
+            const deployBtn = document.getElementById('gf-deploy-btn');
+            if (deployBtn) {
+                deployBtn.textContent = '🔄 Deploying...';
+                deployBtn.disabled = true;
+            }
+            
+            // Create violation ID for deployment
+            const violationId = 'violation_' + (violation.id || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
+            
+            // Call the deployment API
+            fetch('/api/deploy-fix', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    violationId: violationId,
+                    platform: 'auto', // Let the backend determine the platform
+                    userId: 1 // This would come from authentication
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Show deployment status
+                    if (window.DeploymentStatus) {
+                        DeploymentStatus.trackDeployment(data.deploymentId);
+                        DeploymentStatus.showNotification(
+                            data.deploymentId,
+                            'Deployment started successfully!',
+                            'success'
+                        );
+                    }
+                    
+                    // Update button
+                    if (deployBtn) {
+                        deployBtn.textContent = '✅ Deployed';
+                        deployBtn.style.background = '#28a745';
+                        deployBtn.style.color = 'white';
+                    }
+                    
+                    console.log('Deployment started:', data.deploymentId);
+                    
+                } else {
+                    // Handle deployment failure
+                    let errorMessage = data.message || 'Deployment failed';
+                    
+                    if (data.upgradeRequired) {
+                        errorMessage = 'Premium subscription required for automatic deployment.';
+                    } else if (data.requiresConnection) {
+                        errorMessage = 'Please connect your website platform first.';
+                    }
+                    
+                    alert(errorMessage);
+                    
+                    // Reset button
+                    if (deployBtn) {
+                        deployBtn.textContent = '🚀 Deploy Fix';
+                        deployBtn.disabled = false;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Deployment error:', error);
+                alert('Deployment failed: ' + error.message);
+                
+                // Reset button
+                if (deployBtn) {
+                    deployBtn.textContent = '🚀 Deploy Fix';
+                    deployBtn.disabled = false;
+                }
+            });
+        },     }
             }
         },
         
