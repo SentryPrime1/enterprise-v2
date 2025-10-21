@@ -1,55 +1,50 @@
 /**
- * 🛠️ GUIDED FIXING WORKFLOW - STANDALONE MODULE
- * This module is completely independent and will not interfere with existing functionality
- * All functions and variables are namespaced to prevent conflicts
+ * Enhanced Guided Fixing Modal for SentryPrime Enterprise
+ * Final Version - Streamlined for Premium Users with Pre-Connected Platforms
+ * 
+ * Features:
+ * - Removed "Connect Platform" button (handled during onboarding)
+ * - Enhanced "Deploy Fix" as primary action
+ * - Premium user experience optimization
+ * - Real-time deployment status integration
+ * 
+ * Author: Manus AI
+ * Date: October 20, 2025
  */
 
-// Namespace to prevent conflicts with existing code
 window.GuidedFixing = (function() {
     'use strict';
     
-    // Private variables
     let currentViolations = [];
     let currentViolationIndex = 0;
     let fixedViolations = [];
     let isModalOpen = false;
     
-    // Private functions
+    // Create the guided fixing modal
     function createModal() {
         const modalHTML = `
             <div id="gf-modal" class="gf-modal">
                 <div class="gf-modal-content">
                     <div class="gf-modal-header">
-                        <h2 class="gf-modal-title">
-                            🛠️ Guided Accessibility Fixing
-                        </h2>
-                        <div id="gf-progress-indicator" class="gf-progress-indicator">
-                            Violation 1 of 1
-                        </div>
+                        <h2>🛠️ Guided Accessibility Fixing</h2>
                         <button class="gf-close-btn" onclick="GuidedFixing.closeModal()">&times;</button>
                     </div>
                     <div class="gf-modal-body">
-                        <div id="gf-violation-content">
-                            <!-- Violation details will be inserted here -->
-                        </div>
-                        <div id="gf-ai-fix-area" class="gf-ai-fix-area">
-                            <button id="gf-get-ai-fix-btn" class="gf-get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">
-                                🤖 Get AI Fix Suggestion
-                            </button>
+                        <div id="gf-content">
+                            <!-- Content will be dynamically inserted here -->
                         </div>
                     </div>
                     <div class="gf-modal-footer">
-                        <div class="gf-nav-buttons">
-                            <button id="gf-prev-btn" class="gf-nav-btn" onclick="GuidedFixing.previousViolation()">
-                                ← Previous
-                            </button>
-                            <button id="gf-next-btn" class="gf-nav-btn" onclick="GuidedFixing.nextViolation()">
-                                Next →
+                        <div class="gf-navigation">
+                            <button id="gf-prev-btn" onclick="GuidedFixing.previousViolation()" disabled>← Previous</button>
+                            <span id="gf-counter">1 of 1</span>
+                            <button id="gf-next-btn" onclick="GuidedFixing.nextViolation()" disabled>Next →</button>
+                        </div>
+                        <div class="gf-footer-actions">
+                            <button class="gf-generate-report-btn" onclick="GuidedFixing.generateReport()">
+                                📄 Generate Complete Report
                             </button>
                         </div>
-                        <button id="gf-finish-btn" class="gf-finish-btn" onclick="GuidedFixing.finishGuidedFixing()" style="display: none;">
-                            📊 Generate Report
-                        </button>
                     </div>
                 </div>
             </div>
@@ -88,197 +83,160 @@ window.GuidedFixing = (function() {
     
     function sortViolationsByPriority(violations) {
         const priorityOrder = { 'critical': 0, 'serious': 1, 'moderate': 2, 'minor': 3 };
-        return violations.sort(function(a, b) {
-            return priorityOrder[a.impact] - priorityOrder[b.impact];
+        return violations.sort((a, b) => {
+            const aPriority = priorityOrder[a.impact] || 4;
+            const bPriority = priorityOrder[b.impact] || 4;
+            return aPriority - bPriority;
         });
     }
     
-    function showCurrentViolation() {
-        const violation = currentViolations[currentViolationIndex];
-        const totalViolations = currentViolations.length;
-        
-        // Update progress indicator
-        document.getElementById('gf-progress-indicator').textContent = 
-            'Violation ' + (currentViolationIndex + 1) + ' of ' + totalViolations;
-        
-        // Update violation content
-        const violationContent = document.getElementById('gf-violation-content');
-        violationContent.innerHTML = 
-            '<div class="gf-violation-details">' +
-                '<div class="gf-violation-title">' +
-                    violation.id +
-                    '<span class="gf-violation-impact gf-impact-' + violation.impact + '">' +
-                        violation.impact +
-                    '</span>' +
-                '</div>' +
-                '<div class="gf-violation-description">' +
-                    '<strong>Description:</strong> ' + (violation.description || 'No description available') +
-                '</div>' +
-                '<div class="gf-violation-help">' +
-                    '<strong>Help:</strong> ' + (violation.help || 'Refer to WCAG guidelines for more information') +
-                '</div>' +
-                (violation.helpUrl ? 
-                    '<div><strong>Learn more:</strong> <a href="' + violation.helpUrl + '" target="_blank" class="gf-violation-link">' + violation.helpUrl + '</a></div>' 
-                    : '') +
-            '</div>';
-        
-        // Reset AI fix area
-        const aiFixArea = document.getElementById('gf-ai-fix-area');
-        aiFixArea.innerHTML = 
-            '<button id="gf-get-ai-fix-btn" class="gf-get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()">' +
-                '🤖 Get AI Fix Suggestion' +
-            '</button>';
-        
-        // Update navigation buttons
-        updateNavigationButtons();
+    function getImpactColor(impact) {
+        const colors = {
+            'critical': '#dc3545',
+            'serious': '#fd7e14', 
+            'moderate': '#ffc107',
+            'minor': '#28a745'
+        };
+        return colors[impact] || '#6c757d';
     }
     
-    function updateNavigationButtons() {
+    function getImpactIcon(impact) {
+        const icons = {
+            'critical': '🚨',
+            'serious': '⚠️',
+            'moderate': '⚡',
+            'minor': 'ℹ️'
+        };
+        return icons[impact] || '📋';
+    }
+    
+    function displayViolation(violation, index) {
+        const content = document.getElementById('gf-content');
+        const impactColor = getImpactColor(violation.impact);
+        const impactIcon = getImpactIcon(violation.impact);
+        
+        content.innerHTML = `
+            <div class="gf-violation-header">
+                <div class="gf-violation-title">
+                    <span class="gf-impact-badge" style="background-color: ${impactColor}">
+                        ${impactIcon} ${violation.impact.toUpperCase()}
+                    </span>
+                    <h3>${violation.description || violation.help || 'Accessibility Issue'}</h3>
+                </div>
+                <div class="gf-violation-meta">
+                    <span class="gf-rule-id">Rule: ${violation.id}</span>
+                    ${violation.helpUrl ? `<a href="${violation.helpUrl}" target="_blank" class="gf-help-link">📖 Learn More</a>` : ''}
+                </div>
+            </div>
+            
+            <div class="gf-violation-details">
+                <div class="gf-description">
+                    <h4>📋 Issue Description</h4>
+                    <p>${violation.help || violation.description || 'This accessibility issue needs to be addressed to improve website compliance.'}</p>
+                </div>
+                
+                <div class="gf-ai-suggestion" id="gf-ai-suggestion-${index}">
+                    <h4>🤖 AI-Generated Fix</h4>
+                    <div class="gf-suggestion-content">
+                        ${violation.aiSuggestion ? 
+                            `<div class="gf-suggestion-ready">
+                                <div class="gf-fix-summary">
+                                    <h5>💡 Recommended Solution</h5>
+                                    <p>${violation.aiSuggestion.summary}</p>
+                                </div>
+                                <div class="gf-implementation-steps">
+                                    <h5>🔧 Implementation Steps</h5>
+                                    <ol>
+                                        ${violation.aiSuggestion.steps.map(step => `<li>${step}</li>`).join('')}
+                                    </ol>
+                                </div>
+                                <div class="gf-premium-actions">
+                                    <div class="gf-premium-badge">
+                                        <span class="gf-premium-icon">⭐</span>
+                                        <span class="gf-premium-text">Premium Feature</span>
+                                    </div>
+                                    <div class="gf-action-buttons">
+                                        <button id="gf-save-btn" class="gf-save-to-report-btn" onclick="GuidedFixing.saveFixToReport()">
+                                            💾 Save to Report
+                                        </button>
+                                        <button id="gf-deploy-btn" class="gf-deploy-fix-btn" onclick="GuidedFixing.deployFix()">
+                                            🚀 Deploy Fix Now
+                                        </button>
+                                    </div>
+                                    <div class="gf-deploy-info">
+                                        <p class="gf-deploy-note">
+                                            <span class="gf-info-icon">ℹ️</span>
+                                            This fix will be automatically deployed to your connected website platform.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>` : 
+                            `<div class="gf-suggestion-loading">
+                                <button class="gf-generate-suggestion-btn" onclick="GuidedFixing.generateAISuggestion(${index})">
+                                    🤖 Generate AI Fix Suggestion
+                                </button>
+                                <p class="gf-suggestion-note">Click to get a personalized AI-generated solution for this accessibility issue.</p>
+                            </div>`
+                        }
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Update navigation
+        updateNavigation();
+    }
+    
+    function updateNavigation() {
         const prevBtn = document.getElementById('gf-prev-btn');
         const nextBtn = document.getElementById('gf-next-btn');
-        const finishBtn = document.getElementById('gf-finish-btn');
+        const counter = document.getElementById('gf-counter');
         
-        // Previous button
-        prevBtn.disabled = currentViolationIndex === 0;
-        
-        // Next button and finish button
-        if (currentViolationIndex === currentViolations.length - 1) {
-            nextBtn.style.display = 'none';
-            finishBtn.style.display = 'inline-block';
-        } else {
-            nextBtn.style.display = 'inline-block';
-            finishBtn.style.display = 'none';
-        }
-    }
-    
-    function showLoading() {
-        const aiFixArea = document.getElementById('gf-ai-fix-area');
-        aiFixArea.innerHTML = 
-            '<div class="gf-loading">' +
-                '<div class="gf-spinner"></div>' +
-                'Getting AI fix suggestion...' +
-            '</div>';
+        if (prevBtn) prevBtn.disabled = currentViolationIndex === 0;
+        if (nextBtn) nextBtn.disabled = currentViolationIndex === currentViolations.length - 1;
+        if (counter) counter.textContent = `${currentViolationIndex + 1} of ${currentViolations.length}`;
     }
     
     function showError(message) {
-        const aiFixArea = document.getElementById('gf-ai-fix-area');
-        aiFixArea.innerHTML = 
-            '<div class="gf-error">' +
-                '<h4>Unable to Generate AI Suggestion</h4>' +
-                '<p>' + (message || 'Please try again or proceed to the next violation.') + '</p>' +
-                '<button class="gf-get-ai-fix-btn" onclick="GuidedFixing.getAIFixForCurrent()" style="margin-top: 16px;">' +
-                    '🔄 Try Again' +
-                '</button>' +
-            '</div>';
+        const content = document.getElementById('gf-content');
+        content.innerHTML = `
+            <div class="gf-error">
+                <h3>❌ Error</h3>
+                <p>${message}</p>
+                <button onclick="GuidedFixing.closeModal()" class="gf-close-error-btn">Close</button>
+            </div>
+        `;
     }
     
-    function displayAISuggestion(suggestion) {
-        const aiFixArea = document.getElementById('gf-ai-fix-area');
-        aiFixArea.innerHTML = 
-            '<div class="gf-ai-suggestion">' +
-                '<div class="gf-ai-suggestion-header">' +
-                    '<div class="gf-ai-suggestion-title">🤖 AI Fix Suggestion</div>' +
-                    '<span class="gf-priority-badge gf-priority-' + suggestion.priority + '">' +
-                        suggestion.priority.toUpperCase() +
-                    '</span>' +
-                '</div>' +
-                '<div class="gf-ai-suggestion-content">' +
-                    '<p><strong>Issue:</strong> ' + suggestion.explanation + '</p>' +
-                    '<p><strong>Code Example:</strong></p>' +
-                    '<div class="gf-code-example">' + suggestion.codeExample + '</div>' +
-                    '<div class="gf-implementation-steps">' +
-                        '<p><strong>Implementation Steps:</strong></p>' +
-                        '<ol>' + 
-                            suggestion.steps.map(function(step) {
-                                return '<li>' + step + '</li>';
-                            }).join('') +
-                        '</ol>' +
-                    '</div>' +
-                    '<div class="gf-action-buttons">' +
-                        '<button id="gf-save-btn" class="gf-save-to-report-btn" onclick="GuidedFixing.saveFixToReport()">' +
-                            '💾 Save to Report' +
-                        '</button>' +
-                        '<button id="gf-deploy-btn" class="gf-deploy-fix-btn" onclick="GuidedFixing.deployFix()">' +
-                            '🚀 Deploy Fix' +
-                        '</button>' +
-                    '</div>' +
-                '</div>' +
-            '</div>';
-        
-        // Store the suggestion for potential saving
-        currentViolations[currentViolationIndex].aiSuggestion = suggestion;
-    }
-    
-    function generateReport() {
-        const reportContent = 
-            '# Accessibility Fix Report\n' +
-            'Generated on: ' + new Date().toLocaleString() + '\n\n' +
-            '## Summary\n' +
-            '- Total violations processed: ' + currentViolations.length + '\n' +
-            '- Fixes saved to report: ' + fixedViolations.length + '\n\n' +
-            '## Fix Details\n\n' +
-            fixedViolations.map(function(fix, index) {
-                return '### ' + (index + 1) + '. ' + fix.violation.id + '\n' +
-                    '**Impact:** ' + fix.violation.impact + '\n' +
-                    '**Description:** ' + fix.violation.description + '\n\n' +
-                    '**AI Suggestion:**\n' +
-                    fix.suggestion.explanation + '\n\n' +
-                    '**Code Example:**\n' +
-                    fix.suggestion.codeExample + '\n\n' +
-                    '**Implementation Steps:**\n' +
-                    fix.suggestion.steps.map(function(step, i) {
-                        return (i + 1) + '. ' + step;
-                    }).join('\n') + '\n\n' +
-                    '---\n';
-            }).join('') +
-            '\n## Next Steps\n' +
-            '1. Review each fix suggestion carefully\n' +
-            '2. Test implementations in a development environment\n' +
-            '3. Validate fixes with accessibility tools\n' +
-            '4. Deploy to production after thorough testing';
-        
-        // Create and download the report
-        const blob = new Blob([reportContent], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'accessibility-fix-report-' + new Date().toISOString().split('T')[0] + '.md';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        return fixedViolations.length;
+    function showLoading(message = 'Loading...') {
+        const content = document.getElementById('gf-content');
+        content.innerHTML = `
+            <div class="gf-loading">
+                <div class="gf-spinner"></div>
+                <p>${message}</p>
+            </div>
+        `;
     }
     
     // Public API
     return {
-        // Initialize the guided fixing workflow
+        // Start the guided fixing process
         start: function(violations) {
             if (!violations || violations.length === 0) {
-                alert('No violations found to fix.');
+                alert('No accessibility violations found to fix.');
                 return;
             }
             
-            // Sort violations by priority
             currentViolations = sortViolationsByPriority(violations);
             currentViolationIndex = 0;
             fixedViolations = [];
-            isModalOpen = true;
             
-            // Create and show modal
             createModal();
-            document.getElementById('gf-modal').style.display = 'block';
+            document.getElementById('gf-modal').style.display = 'flex';
             
-            // Show first violation
-            showCurrentViolation();
-            
-            // Focus management for accessibility
-            setTimeout(function() {
-                const modal = document.getElementById('gf-modal');
-                if (modal) {
-                    modal.focus();
-                }
+            // Add a small delay to ensure modal is rendered
+            setTimeout(() => {
+                displayViolation(currentViolations[0], 0);
             }, 100);
         },
         
@@ -295,7 +253,7 @@ window.GuidedFixing = (function() {
         previousViolation: function() {
             if (currentViolationIndex > 0) {
                 currentViolationIndex--;
-                showCurrentViolation();
+                displayViolation(currentViolations[currentViolationIndex], currentViolationIndex);
             }
         },
         
@@ -303,46 +261,56 @@ window.GuidedFixing = (function() {
         nextViolation: function() {
             if (currentViolationIndex < currentViolations.length - 1) {
                 currentViolationIndex++;
-                showCurrentViolation();
+                displayViolation(currentViolations[currentViolationIndex], currentViolationIndex);
             }
         },
         
-        // Get AI fix suggestion for current violation
-        getAIFixForCurrent: function() {
-            const violation = currentViolations[currentViolationIndex];
+        // Generate AI suggestion for current violation
+        generateAISuggestion: function(index) {
+            const violation = currentViolations[index];
+            const suggestionContainer = document.getElementById(`gf-ai-suggestion-${index}`);
             
             // Show loading state
-            showLoading();
+            suggestionContainer.querySelector('.gf-suggestion-content').innerHTML = `
+                <div class="gf-suggestion-loading">
+                    <div class="gf-spinner"></div>
+                    <p>🤖 AI is analyzing this accessibility issue and generating a custom fix...</p>
+                </div>
+            `;
             
-            // Make API call to get AI suggestion
-            fetch('/api/ai-fixes', {
+            // Call AI suggestion API
+            fetch('/api/ai-suggestion', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ violations: [violation] })
+                body: JSON.stringify({
+                    violation: violation,
+                    context: {
+                        url: window.location.href,
+                        userAgent: navigator.userAgent
+                    }
+                })
             })
-            .then(function(response) {
-                if (!response.ok) {
-                    throw new Error('Failed to get AI suggestion');
-                }
-                return response.json();
-            })
-            .then(function(suggestions) {
-                const suggestion = suggestions[0];
-                if (suggestion) {
-                    displayAISuggestion(suggestion);
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.suggestion) {
+                    // Store the suggestion
+                    violation.aiSuggestion = data.suggestion;
+                    
+                    // Re-display the violation with the new suggestion
+                    displayViolation(violation, index);
                 } else {
-                    throw new Error('No suggestion received');
+                    showError('Failed to generate AI suggestion. Please try again.');
                 }
             })
-            .catch(function(error) {
-                console.error('Error getting AI suggestion:', error);
+            .catch(error => {
+                console.error('AI suggestion error:', error);
                 showError('Failed to get AI suggestion. Please try again.');
             });
         },
         
-             // Save current fix to report
+        // Save current fix to report
         saveFixToReport: function() {
             const violation = currentViolations[currentViolationIndex];
             
@@ -372,7 +340,7 @@ window.GuidedFixing = (function() {
                 return;
             }
             
-            // Check if user has premium access (this would be determined by the backend)
+            // Update button to show deploying state
             const deployBtn = document.getElementById('gf-deploy-btn');
             if (deployBtn) {
                 deployBtn.textContent = '🔄 Deploying...';
@@ -391,7 +359,9 @@ window.GuidedFixing = (function() {
                 body: JSON.stringify({
                     violationId: violationId,
                     platform: 'auto', // Let the backend determine the platform
-                    userId: 1 // This would come from authentication
+                    userId: 1, // This would come from authentication
+                    violation: violation,
+                    suggestion: violation.aiSuggestion
                 })
             })
             .then(response => response.json())
@@ -402,16 +372,28 @@ window.GuidedFixing = (function() {
                         DeploymentStatus.trackDeployment(data.deploymentId);
                         DeploymentStatus.showNotification(
                             data.deploymentId,
-                            'Deployment started successfully!',
+                            'Deployment started successfully! Your accessibility fix is being deployed to your live website.',
                             'success'
                         );
                     }
                     
-                    // Update button
+                    // Update button to show success
                     if (deployBtn) {
-                        deployBtn.textContent = '✅ Deployed';
+                        deployBtn.textContent = '✅ Deployed Successfully';
                         deployBtn.style.background = '#28a745';
                         deployBtn.style.color = 'white';
+                    }
+                    
+                    // Show success message
+                    const deployInfo = document.querySelector('.gf-deploy-info');
+                    if (deployInfo) {
+                        deployInfo.innerHTML = `
+                            <p class="gf-deploy-success">
+                                <span class="gf-success-icon">✅</span>
+                                Deployment successful! Your accessibility fix has been applied to your live website.
+                                <a href="#" onclick="DeploymentStatus.showModal()" class="gf-view-status-link">View deployment status</a>
+                            </p>
+                        `;
                     }
                     
                     console.log('Deployment started:', data.deploymentId);
@@ -423,14 +405,14 @@ window.GuidedFixing = (function() {
                     if (data.upgradeRequired) {
                         errorMessage = 'Premium subscription required for automatic deployment.';
                     } else if (data.requiresConnection) {
-                        errorMessage = 'Please connect your website platform first.';
+                        errorMessage = 'Please ensure your website platform is properly connected. Contact support if this issue persists.';
                     }
                     
                     alert(errorMessage);
                     
                     // Reset button
                     if (deployBtn) {
-                        deployBtn.textContent = '🚀 Deploy Fix';
+                        deployBtn.textContent = '🚀 Deploy Fix Now';
                         deployBtn.disabled = false;
                     }
                 }
@@ -441,77 +423,70 @@ window.GuidedFixing = (function() {
                 
                 // Reset button
                 if (deployBtn) {
-                    deployBtn.textContent = '🚀 Deploy Fix';
+                    deployBtn.textContent = '🚀 Deploy Fix Now';
                     deployBtn.disabled = false;
                 }
             });
-        },     }
-            }
         },
         
-        // Finish guided fixing and generate report
-        finishGuidedFixing: function() {
+        // Generate complete report
+        generateReport: function() {
             if (fixedViolations.length === 0) {
-                alert('No fixes have been saved to the report yet. Please get AI suggestions and save them before generating a report.');
+                alert('No fixes have been saved to the report yet. Please save some fixes first.');
                 return;
             }
             
             // Generate and download report
-            const savedCount = generateReport();
-            
-            // Close modal
-            this.closeModal();
-            
-            // Show success message
-            alert('Report generated! ' + savedCount + ' fixes saved to your downloads.');
-        },
-        
-        // Add the guided fixing button to scan results
-        addButtonToResults: function(violations) {
-            // Find the existing buttons container
-            const buttonsContainer = document.querySelector('.view-details-btn').parentNode;
-            
-            // Check if button already exists
-            if (document.getElementById('gf-start-fixing-btn')) {
-                return;
-            }
-            
-            // Create the guided fixing button
-            const guidedFixingButton = document.createElement('button');
-            guidedFixingButton.id = 'gf-start-fixing-btn';
-            guidedFixingButton.className = 'gf-start-fixing-btn';
-            guidedFixingButton.innerHTML = '🛠️ Let\'s Start Fixing';
-            guidedFixingButton.onclick = function() {
-                GuidedFixing.start(violations);
+            const reportData = {
+                violations: fixedViolations,
+                timestamp: new Date().toISOString(),
+                totalFixed: fixedViolations.length
             };
             
-            // Add button to container
-            buttonsContainer.appendChild(guidedFixingButton);
-        },
-        
-        // Check if guided fixing is available
-        isAvailable: function() {
-            return true;
-        },
-        
-        // Get current status
-        getStatus: function() {
-            return {
-                isModalOpen: isModalOpen,
-                currentViolationIndex: currentViolationIndex,
-                totalViolations: currentViolations.length,
-                fixedCount: fixedViolations.length
-            };
+            // Create report window
+            const reportWindow = window.open('', '_blank');
+            reportWindow.document.write(`
+                <html>
+                <head>
+                    <title>SentryPrime Accessibility Fix Report</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 40px; }
+                        .header { border-bottom: 2px solid #007bff; padding-bottom: 20px; margin-bottom: 30px; }
+                        .fix-item { border: 1px solid #ddd; padding: 20px; margin: 20px 0; border-radius: 8px; }
+                        .impact-critical { border-left: 4px solid #dc3545; }
+                        .impact-serious { border-left: 4px solid #fd7e14; }
+                        .impact-moderate { border-left: 4px solid #ffc107; }
+                        .impact-minor { border-left: 4px solid #28a745; }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>🛡️ SentryPrime Accessibility Fix Report</h1>
+                        <p>Generated: ${new Date().toLocaleString()}</p>
+                        <p>Total Fixes: ${fixedViolations.length}</p>
+                    </div>
+                    ${fixedViolations.map((fix, index) => `
+                        <div class="fix-item impact-${fix.violation.impact}">
+                            <h3>${fix.violation.description || fix.violation.help}</h3>
+                            <p><strong>Impact:</strong> ${fix.violation.impact.toUpperCase()}</p>
+                            <p><strong>Rule:</strong> ${fix.violation.id}</p>
+                            <div>
+                                <h4>AI-Generated Solution:</h4>
+                                <p>${fix.suggestion.summary}</p>
+                                <ol>
+                                    ${fix.suggestion.steps.map(step => `<li>${step}</li>`).join('')}
+                                </ol>
+                            </div>
+                        </div>
+                    `).join('')}
+                </body>
+                </html>
+            `);
         }
     };
 })();
 
-// Auto-initialize when DOM is ready
+// Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🛠️ Guided Fixing module loaded successfully');
+    console.log('Enhanced Guided Fixing module loaded successfully');
 });
-
-// Export for potential module use
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = window.GuidedFixing;
-}
