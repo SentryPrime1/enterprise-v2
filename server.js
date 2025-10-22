@@ -6,7 +6,7 @@ const OpenAI = require('openai');
 const { generateAccessibilityJS } = require('./accessibility-js-generator');
 const DeploymentStatusTracker = require('./deployment-status-tracker');
 const { setupDeploymentStatusEndpoints } = require('./deployment-status-endpoints');
-const { initializeDatabase } = require('./migrate_database_enterprise');
+const { initializeDatabase } = require('./migrate_database');
 
 // ENHANCEMENT: Import deployment engines (optional - with feature flag)
 const ENABLE_DEPLOYMENT_FEATURES = process.env.ENABLE_DEPLOYMENT_FEATURES || 'true';
