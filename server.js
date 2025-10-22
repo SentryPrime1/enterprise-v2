@@ -6,6 +6,7 @@ const OpenAI = require('openai');
 const { generateAccessibilityJS } = require('./accessibility-js-generator');
 const DeploymentStatusTracker = require('./deployment-status-tracker');
 const { setupDeploymentStatusEndpoints } = require('./deployment-status-endpoints');
+const { initializeDatabase } = require('./migrate_database');
 
 // ENHANCEMENT: Import deployment engines (optional - with feature flag)
 const ENABLE_DEPLOYMENT_FEATURES = process.env.ENABLE_DEPLOYMENT_FEATURES || 'true';
@@ -150,10 +151,19 @@ if (process.env.DB_HOST && process.env.DB_USER && process.env.DB_PASSWORD && pro
     
     // Test database connection with detailed logging
     db.query('SELECT NOW() as current_time, version() as pg_version')
-        .then((result) => {
+        .then(async (result) => {
             console.log('✅ Database connected successfully!');
             console.log('⏰ Server time:', result.rows[0].current_time);
             console.log('🐘 PostgreSQL version:', result.rows[0].pg_version.split(' ')[0]);
+
+            // Initialize database migration for user authentication
+            try {
+                await initializeDatabase();
+                console.log('✅ Database migration completed successfully');
+            } catch (migrationError) {
+                console.log('⚠️ Database migration failed:', migrationError.message);
+                console.log('📝 Application will continue without user authentication tables');
+            }
         })
         .catch(err => {
             console.log('❌ Database connection failed, running in standalone mode');
