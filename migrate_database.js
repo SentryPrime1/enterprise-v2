@@ -1,9 +1,8 @@
 const { Pool } = require('pg');
-const bcrypt = require('bcrypt'); // ADD THIS LINE
 
 // Enhanced Database Migration Script
-// Version: 2.1 - User Authentication Addition
-// Preserves all existing functionality and adds user authentication safely
+// Version: 2.2 - Fixed to use existing DB environment variables
+// Compatible with Cloud Run environment variables: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
 
 let db;
 
@@ -11,20 +10,58 @@ async function initializeDatabase() {
     console.log('🔄 Starting enhanced database migration...');
     
     try {
-        // Use existing database connection or create new one
-        if (process.env.DATABASE_URL) {
-            db = new Pool({
-                connectionString: process.env.DATABASE_URL,
-                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-            });
-        } else {
-            console.log('⚠️  No DATABASE_URL found, skipping database migration');
+        // Use the same database connection logic as the main server
+        if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME) {
+            console.log('⚠️ Database environment variables not found, skipping database migration');
+            console.log('📝 Required: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
             return false;
         }
 
+        console.log('🔍 Database configuration found:');
+        console.log('📍 DB_HOST:', process.env.DB_HOST);
+        console.log('👤 DB_USER:', process.env.DB_USER);
+        console.log('🗄️ DB_NAME:', process.env.DB_NAME);
+
+        // Detect if we're running in Cloud Run with Cloud SQL connection
+        const isCloudRun = process.env.K_SERVICE && process.env.DB_HOST.includes(':');
+        
+        let dbConfig;
+        
+        if (isCloudRun) {
+            // Cloud Run with Cloud SQL connection - use Unix socket with correct path
+            console.log('☁️ Detected Cloud Run environment, using Unix socket connection');
+            dbConfig = {
+                host: `/cloudsql/${process.env.DB_HOST}`,
+                database: process.env.DB_NAME,
+                user: process.env.DB_USER,
+                password: process.env.DB_PASSWORD,
+                connectionTimeoutMillis: 10000,
+                idleTimeoutMillis: 30000,
+                max: 10
+            };
+            console.log('🔌 Unix socket path:', `/cloudsql/${process.env.DB_HOST}`);
+        } else {
+            // Local or other environment - use TCP connection
+            console.log('🌐 Using TCP connection');
+            dbConfig = {
+                host: process.env.DB_HOST,
+                port: process.env.DB_PORT || 5432,
+                database: process.env.DB_NAME,
+                user: process.env.DB_USER,
+                password: process.env.DB_PASSWORD,
+                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+                connectionTimeoutMillis: 10000,
+                idleTimeoutMillis: 30000,
+                max: 10
+            };
+        }
+
+        // Create database connection
+        db = new Pool(dbConfig);
+
         // Test database connection
         const client = await db.connect();
-        console.log('✅ Database connection established');
+        console.log('✅ Database connection established for migration');
         client.release();
 
         // Run all migrations in sequence
@@ -36,6 +73,7 @@ async function initializeDatabase() {
         
     } catch (error) {
         console.error('❌ Database migration failed:', error.message);
+        console.error('🔍 Error details:', error);
         return false;
     }
 }
