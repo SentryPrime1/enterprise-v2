@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const bcrypt = require('bcrypt'); // ADD THIS LINE
 
 // Enhanced Database Migration Script
 // Version: 2.1 - User Authentication Addition
